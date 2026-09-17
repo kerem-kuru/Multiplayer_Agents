@@ -101,6 +101,14 @@ function runTurn(messageId: string, text: string): Promise<void> {
 
     let ok = false;
     let sawAnything = false;
+    /**
+     * `result` satırı geldi mi. Geldiyse turn BİR bitiş event'i üretti ve
+     * ikincisini yazmak yasak: "her messageId için tam olarak bir bitiş
+     * event'i" kuralı (validate-events bunu denetliyor).
+     */
+    let sawTerminal = false;
+    /** Gemini asistan metnini `delta:true` parçalarıyla yolluyor; birleştir. */
+    let textParts: string[] = [];
 
     child = spawn(geminiBin, args, {
       cwd: process.cwd(),
@@ -108,8 +116,22 @@ function runTurn(messageId: string, text: string): Promise<void> {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
+    /** Biriken metin parçalarını TEK `agent.text` olarak yaz. */
+    const flushText = (): void => {
+      if (textParts.length === 0) return;
+      const text = textParts.join("");
+      textParts = [];
+      if (text.trim().length === 0) return;
+      for (const e of mapStreamLine({ type: "message", role: "assistant", content: text }, ctx)
+        .events) {
+        emit(e);
+      }
+    };
+
     const finish = (): void => {
-      if (!ok) {
+      flushText();
+      // Bitiş event'i zaten yazıldıysa ikincisini YAZMA.
+      if (!ok && !sawTerminal) {
         emit({
           ...envelope,
           actor: agentActor,
@@ -140,10 +162,23 @@ function runTurn(messageId: string, text: string): Promise<void> {
         return;
       }
       sawAnything = true;
+
+      // Asistan metni parça parça geliyor: biriktir, başka bir satır
+      // gelince tek event olarak yaz. Yoksa akışta cümleler ortadan bölünür.
+      const rec = parsed as { type?: string; role?: string; content?: unknown };
+      if (rec.type === "message" && rec.role === "assistant") {
+        textParts.push(typeof rec.content === "string" ? rec.content : "");
+        return;
+      }
+      flushText();
+
       const mapped = mapStreamLine(parsed, ctx);
       if (mapped.sdkSessionId) geminiSessionId = mapped.sdkSessionId;
       for (const event of mapped.events) emit(event);
-      if (mapped.finished) ok = mapped.finished.ok;
+      if (mapped.finished) {
+        ok = mapped.finished.ok;
+        sawTerminal = true;
+      }
     });
 
     // Gemini'nin stderr'i KENDİ stderr'imize akar, protokol kanalına DEĞİL.

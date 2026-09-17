@@ -99,6 +99,16 @@ describe("Gemini stream-json → event", () => {
     expect(bad.type === "tool.result" && bad.payload.isError).toBe(true);
   });
 
+  it("çıktı UYDURULMAZ: Gemini metni vermiyorsa output boş kalır", () => {
+    // Bir zamanlar status ("success") output diye yazılıyordu ve terminalde
+    // programın çıktısıymış gibi görünüyordu. Bilmediğimizi söylemek doğrusu.
+    const e = mapStreamLine(
+      { type: "tool_result", tool_id: "t1", status: "success" },
+      ctx(),
+    ).events[0]!;
+    expect(e.type === "tool.result" && e.payload.output).toBe("");
+  });
+
   it("result → turn.completed, maliyet bilinmiyor", () => {
     const r = mapStreamLine(
       {

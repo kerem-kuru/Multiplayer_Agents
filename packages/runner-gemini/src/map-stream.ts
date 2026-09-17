@@ -175,8 +175,10 @@ export function mapStreamLine(line: unknown, ctx: MapContext): MapResult {
           toolUseId: str(line.tool_id),
           isError: str(line.status) !== "success",
           // Gemini tool çıktısının METNİNİ vermiyor, sadece status.
-          // Claude'a göre denetim kaybı; docs/runtime-gemini.md'de yazılı.
-          output: str(line.status),
+          // Status'u output diye yazmak UYDURMA ÇIKTI üretir: terminalde
+          // programın çıktısıymış gibi "success" görünüyordu. Boş bırakmak
+          // dürüst olanı — "bilmiyoruz" demek.
+          output: "",
           truncated: false,
         },
       } as NewRoomEvent);

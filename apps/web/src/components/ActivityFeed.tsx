@@ -27,6 +27,15 @@ function Outcome({ turn }: { turn: TurnView }) {
     );
   }
   const cost = o.costUsd > 0 ? ` · $${o.costUsd.toFixed(4)}` : "";
+  // Turn bitti ama BAŞARIYLA bitmedi: "tamamlandı" demek yanıltıcı olur.
+  if (o.subtype && o.subtype !== "success") {
+    return (
+      <span style={{ color: "var(--fail)" }}>
+        ● bitti · {o.subtype} · {dur(o.durationMs)}
+        {cost}
+      </span>
+    );
+  }
   return (
     <span style={{ color: "var(--ink-soft)" }}>
       ● tamamlandı · {dur(o.durationMs)}
