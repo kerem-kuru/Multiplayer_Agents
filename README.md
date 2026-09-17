@@ -6,7 +6,9 @@ Agent'lar birbirine mesaj atmaz. Ortak bir **oda defterine** yazar ve oradan oku
 
 > **Tez:** Gerçek birim agent değil, her agent'ın okuyup yazdığı tek paylaşılan bağlam deposudur.
 
-Durum: **Hafta 1 tamam · Hafta 2 kodu tamam, kapısı koşulmadı** — agent artık container içinde Claude Agent SDK ile headless koşuyor ve attığı her adım yapılandırılmış event olarak DB'ye düşüyor. `npm run gate` (Hafta 1) 10/10 geçiyor; `npm run gate:w2` gerçek API çağrısı yapar ve `ANTHROPIC_API_KEY` ister.
+Durum: **Hafta 1-2 tamam · Hafta 3 akış kapısı geçti** — tarayıcıda canlı izleme çalışıyor. Ayrıntı aşağıda.
+
+Eski durum notu: **Hafta 2 kodu tamam, kapısı koşulmadı** — agent artık container içinde Claude Agent SDK ile headless koşuyor ve attığı her adım yapılandırılmış event olarak DB'ye düşüyor. `npm run gate` (Hafta 1) 10/10 geçiyor; `npm run gate:w2` gerçek API çağrısı yapar ve `ANTHROPIC_API_KEY` ister.
 
 ## Hızlı başlangıç
 
@@ -20,7 +22,19 @@ npm test             # 27 test — docker ve DB gerekmez
 
 npm run verify       # tek komut: docker bekle → db → migrate → smoke → imaj → kapı
 npm run gate:w2      # Hafta 2 kapısı — 14 kontrol, GERÇEK API çağrısı yapar
+npm run gate:w3      # Hafta 3 akış kapısı — 11 kontrol, anahtar GEREKTİRMEZ
 ```
+
+## Tarayıcıda izle
+
+```bash
+npm run dev:all      # api (8787) + arayüz (5173)
+```
+
+Sonra `http://localhost:5173` — oda aç, agent'ı başlat, görev yaz, canlı izle.
+
+Sekmeyi kapatıp açtığında tek bir event kaybolmaz: geçmiş REST'ten sayfalanır,
+sonra SSE `since` ile kaldığı yerden devam eder.
 
 `verify` her şeyi sırayla yapar. Ayrı ayrı koşturmak istersen kapıdan **önce** veritabanı gerekir:
 
@@ -199,4 +213,6 @@ Hafta 1 görev tanımından bilinçli olarak ayrılan noktalar ve gerekçeleri.
 | Canlılık ölçümü heartbeat'e değil **herhangi bir satıra** bağlandı | Tek mesaj tipine bağlamak kırılgan: iş üretip heartbeat'i kaçıran bir runner boşuna öldürülürdü. |
 | Exec katmanı gelen satırları tamponluyor | Akış `startRunnerExec` dönmeden akmaya başlıyor; çağıran `onLine`'ı ancak sonra kaydedebiliyor. Arada kaybolan bir `ready` satırı agent'ı 30 sn "starting"de bırakıyordu — canlı testte bir kez gözlendi, tamponlama sonrası tekrarlanmadı. |
 | Sağlayıcı dikişi Hafta 2'de açıldı | Yol haritası "Agent runtime: Claude Agent SDK" diyor ve bu korundu. Ama `runtime` alanı ve sağlayıcı env geçişi şimdi eklendi: en iyi model her yıl değişiyor, dikişi sonradan açmak mevcut kodu yeniden yazmak demekti. İkinci koşum ortamı **eklenecek**, hiçbir şey değişmeyecek. |
+| Hafta 3 kapısı agent'a bağlanmadı | Bu haftanın konusu agent değil AKIŞ. Event üretmek için dev ucu kullanılıyor: gerçek event, gerçek DB, gerçek SSE — ama deterministik ve ücretsiz. Canlı agent'a bağlamak testi yavaşlatıp kararsızlaştırırdı, ölçtüğü şeye hiçbir şey katmadan. Agent gerektiren 2 kontrol ayrı: `gate:w3:agent`. |
+| SSE geri baskısı `res.write()` dönüşüyle değil, bekleyen tampon boyutuyla ölçülüyor | Hono'nun `writeSSE`'si await edilebiliyor; yazım beklerken bus'tan gelenler tamponda birikiyor. Ölçülmesi gereken zaten o tampon: yavaş istemci sunucunun belleğini şişirmemeli. 5 MB'ı aşınca `overflow` + kapat. |
 | Tek sunucu örneği varsayımı | `AgentManager` bellekte. İkinci bir sunucu örneği açılış mutabakatında birincinin runner'larını öldürür. Çok sunuculu dağıtım Redis ile sonraki fazlarda — o zamana kadar tek örnek koş. |

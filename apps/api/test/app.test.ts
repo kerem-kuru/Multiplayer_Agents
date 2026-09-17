@@ -9,6 +9,13 @@ import { resolveConfigPath, type ApiConfig } from "../src/config.js";
  * `scripts/smoke-api.mjs` içinde, docker + postgres ile koşuyor.
  */
 
+/**
+ * Bu dosya DB'SİZ koşar. Ortamda DATABASE_URL varsa (kapı script'i onu
+ * export ediyor) /health 200 dönerdi ve test ortama göre değişirdi —
+ * testler ortamdan bağımsız olmalı.
+ */
+delete process.env.DATABASE_URL;
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
 const cfg: ApiConfig = {

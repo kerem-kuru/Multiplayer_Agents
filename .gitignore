@@ -7,3 +7,4 @@ dist/
 /rooms-data/
 .week1-gate.tmp.yaml
 .week2-gate.tmp.yaml
+.gate-tmp/

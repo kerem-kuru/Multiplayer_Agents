@@ -13,6 +13,7 @@ import {
   getPool,
   getRoom,
   getRoomConfig,
+  getEventBus,
   getSession,
   latestSession,
   listRooms,
@@ -94,13 +95,20 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
         503,
       );
     }
+    const mem = process.memoryUsage();
     return c.json({
       ok: true,
       db: true,
       protocolVersion: PROTOCOL_VERSION,
-      week: 1,
+      week: 3,
       roomImage: cfg.roomImage,
       spawnContainer: cfg.spawnContainer,
+      /**
+       * Sızıntı denetimi: bağlan-kopar döngüsünden sonra `sseSubscribers`
+       * 0'a dönmeli ve `heapUsedMb` şişmemeli. Kapı testi bu iki değeri okur.
+       */
+      sseSubscribers: getEventBus().subscriberCount(),
+      heapUsedMb: Number((mem.heapUsed / 1024 / 1024).toFixed(1)),
     });
   });
 

@@ -20,6 +20,8 @@
     "smoke:gemini": "node scripts/smoke-gemini.mjs",
     "gate": "bash scripts/week1-gate.sh",
     "gate:w2": "bash scripts/week2-gate.sh",
+    "gate:w3": "bash scripts/week3-gate.sh",
+    "gate:w3:agent": "npm run test:e2e -w @agent-rooms/web",
     "api": "node apps/api/dist/index.js",
     "api:dev": "node --watch apps/api/dist/index.js",
     "dev:web": "npm run dev -w @agent-rooms/web",
