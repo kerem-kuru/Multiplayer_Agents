@@ -17,6 +17,7 @@
     "test": "vitest run",
     "smoke": "node scripts/smoke.mjs",
     "smoke:api": "node scripts/smoke-api.mjs",
+    "smoke:gemini": "node scripts/smoke-gemini.mjs",
     "gate": "bash scripts/week1-gate.sh",
     "gate:w2": "bash scripts/week2-gate.sh",
     "api": "node apps/api/dist/index.js",
