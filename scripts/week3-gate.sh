@@ -24,8 +24,6 @@ export DATABASE_URL="${DATABASE_URL:-postgres://rooms:Kk2007..@localhost:5433/ag
 PASS=0; FAIL=0
 SERVER_PID=""
 ROOM=""; SID=""
-# mktemp -d Git Bash'te /tmp/... veriyor; Node bunu Windows'ta C:	mp
-# diye çözüyor ve dosya yazamıyor. Repo içinde kalsın.
 # Yol GÖRELİ olmalı: Git Bash'in mutlak yollarını (/tmp/..., /c/Users/...)
 # Node Windows tarafında C:\tmp ve C:\c\Users diye çözüyor ve yazamıyor.
 # Script yukarıda `cd "$ROOT"` yaptığı için göreli yol iki tarafta da doğru.
