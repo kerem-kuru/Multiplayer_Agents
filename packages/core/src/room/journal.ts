@@ -16,7 +16,7 @@ import type { RoomConfig } from "@agent-rooms/protocol";
 
 export interface JournalEntry {
   file: string;
-  /** Dosya adından çıkarılan agent — `backend.md` → `backend`. Eşleşmezse null. */
+  /** Dosya adından çıkarılan agent adı. Eşleşmezse null. */
   agent: string | null;
   bytes: number;
   updatedAt: string;
@@ -24,8 +24,8 @@ export interface JournalEntry {
 
 export interface JournalView {
   entries: JournalEntry[];
-  /** Hafta 8'e kadar defter boş kalacak; istemci bunu bilsin. */
-  backend: "filesystem-stub";
+  /** Defterin nereden okunduğu. Hafta 8'de "postgres" olacak; istemci bunu bilsin. */
+  source: "filesystem-stub";
 }
 
 export async function readJournal(roomRoot: string, config: RoomConfig): Promise<JournalView> {
@@ -36,7 +36,7 @@ export async function readJournal(roomRoot: string, config: RoomConfig): Promise
   try {
     files = await readdir(dir);
   } catch {
-    return { entries: [], backend: "filesystem-stub" };
+    return { entries: [], source: "filesystem-stub" };
   }
 
   const entries: JournalEntry[] = [];
@@ -54,5 +54,5 @@ export async function readJournal(roomRoot: string, config: RoomConfig): Promise
   }
 
   entries.sort((a, b) => a.file.localeCompare(b.file));
-  return { entries, backend: "filesystem-stub" };
+  return { entries, source: "filesystem-stub" };
 }

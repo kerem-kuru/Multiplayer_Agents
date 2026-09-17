@@ -10,17 +10,25 @@ Durum: **Hafta 1 / 12 tamam** — iskelet, event log ve `POST /rooms`. `npm run 
 
 ## Hızlı başlangıç
 
+Gereksinimler: Node 20+, Docker.
+
 ```bash
 cp .env.example .env
 npm install
 npm run build
+npm test             # 27 test — docker ve DB gerekmez
 
-npm test             # şema ve konfigürasyon testleri (DB gerekmez)
-npm run gate         # Hafta 1 kapısı — 10 kontrol (docker + postgres ister)
-npm run verify       # docker bekle → db kaldır → migrate → smoke → imaj → kapı
+npm run verify       # tek komut: docker bekle → db → migrate → smoke → imaj → kapı
 ```
 
-`verify` yerine adım adım: `npm run db:up`, `npm run db:migrate`, `npm run smoke`, `npm run room:build`, `npm run smoke:api`.
+`verify` her şeyi sırayla yapar. Ayrı ayrı koşturmak istersen kapıdan **önce** veritabanı gerekir:
+
+```bash
+npm run db:up        # postgres + redis
+npm run db:migrate   # şema
+npm run room:build   # oda imajı
+npm run gate         # Hafta 1 kapısı — 10 kontrol
+```
 
 ## Oda aç
 

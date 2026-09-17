@@ -55,7 +55,7 @@ Uçlar:
 | `GET /rooms` | Oda listesi |
 | `GET /rooms/{id}` | Oda + son oturum + container durumu |
 | `GET /rooms/{id}/events?since=N` | Event okuma. `nextSince` imleci döner; Hafta 3'te aynı sözleşmeyle SSE'ye geçilecek |
-| `GET /rooms/{id}/journal` | Defter iskeleti — `backend: "filesystem-stub"`, Hafta 8'de tabloya döner |
+| `GET /rooms/{id}/journal` | Defter iskeleti — `source: "filesystem-stub"`, Hafta 8'de tabloya döner |
 | `POST /sessions/{sid}/events` | Sadece geliştirme — elle event yaz |
 | `POST /rooms/{id}/stop` | `session.ended` + container silme. Oda kaydı DURUR |
 

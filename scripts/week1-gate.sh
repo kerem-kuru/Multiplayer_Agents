@@ -85,6 +85,18 @@ wait_health() {
 
 echo "Hafta 1 kapısı — $BASE"
 
+# --- ön koşullar ----------------------------------------------------------
+# Temiz makinede en sık düşülen yer burası: kapı postgres ve uygulanmış şema
+# ister. Anlaşılmaz bir hata yerine ne yapılacağını söyle.
+if ! docker compose exec -T postgres pg_isready -U rooms -d agent_rooms >/dev/null 2>&1; then
+  echo "  ✗ postgres ayakta değil — önce: npm run db:up"
+  exit 1
+fi
+if [ -z "$(psql_q "SELECT to_regclass('public.session_events')")" ]; then
+  echo "  ✗ şema uygulanmamış — önce: npm run db:migrate"
+  exit 1
+fi
+
 # --- hazırlık -------------------------------------------------------------
 npm run build >/dev/null 2>&1 || { echo "build başarısız"; exit 1; }
 

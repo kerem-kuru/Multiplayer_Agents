@@ -81,8 +81,8 @@ try {
   // 5 — defter iskeleti
   const journal = await api("GET", `/rooms/${roomId}/journal`);
   assert.equal(journal.status, 200);
-  assert.equal(journal.json.backend, "filesystem-stub");
-  console.log(`defter    ${journal.json.entries.length} kayıt (${journal.json.backend})`);
+  assert.equal(journal.json.source, "filesystem-stub");
+  console.log(`defter    ${journal.json.entries.length} kayıt (${journal.json.source})`);
 
   // 6 — elle event yaz, since=N ile geri oku (Hafta 1 kapısının tam cümlesi)
   const note = await api("POST", `/sessions/${created.json.session.id}/events`, {
