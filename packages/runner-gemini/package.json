@@ -1,0 +1,11 @@
+{
+  "name": "@agent-rooms/runner-gemini",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": { "clean": "rm -rf dist" },
+  "dependencies": {
+    "@agent-rooms/protocol": "*",
+    "@google/gemini-cli": "0.60.0"
+  }
+}

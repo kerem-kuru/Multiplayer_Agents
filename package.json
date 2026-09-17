@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "typecheck": "tsc -b packages/protocol packages/core apps/api && tsc -p packages/runner",
+    "typecheck": "tsc -b packages/protocol packages/core apps/api && tsc -p packages/runner && tsc -p packages/runner-gemini",
     "test": "vitest run",
     "smoke": "node scripts/smoke.mjs",
     "smoke:api": "node scripts/smoke-api.mjs",

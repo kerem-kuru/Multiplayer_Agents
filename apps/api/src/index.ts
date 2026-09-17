@@ -25,9 +25,14 @@ const provider = hasProviderBackend(process.env);
  * event okuma çalışmaya devam eder, agent uçları 503 döner. Sessizce yarım
  * çalışan bir sunucudan iyidir.
  */
-const manager = cfg.agent.apiKey || provider
+// Koşum ortamlarından HERHANGİ biri kullanılabilirse yönetici kurulur.
+// Claude anahtarı yokken Gemini agent'ları çalışmaya devam eder.
+const anyRuntime = Boolean(cfg.agent.apiKey) || provider || Boolean(cfg.agent.geminiApiKey);
+
+const manager = anyRuntime
   ? new AgentManager({
       apiKey: cfg.agent.apiKey,
+      geminiApiKey: cfg.agent.geminiApiKey,
       modelOverride: cfg.agent.modelOverride || undefined,
       providerEnv,
       maxTurns: cfg.agent.maxTurns,
@@ -60,8 +65,12 @@ const server = serve({ fetch: app.fetch, port: cfg.port }, (info) => {
         .map((k) => k.replace("CLAUDE_CODE_USE_", "").toLowerCase())
         .join(",") || "özel base URL"
     : "anthropic";
+  const runtimes = [
+    cfg.agent.apiKey || provider ? `claude(${backend})` : null,
+    cfg.agent.geminiApiKey ? "gemini" : null,
+  ].filter(Boolean);
   console.log(
-    `  agent          ${manager ? `açık (${backend}, model: ${cfg.agent.modelOverride || "YAML"})` : "KAPALI — anahtar veya sağlayıcı yok"}`,
+    `  koşum ortamı   ${runtimes.length > 0 ? runtimes.join(" + ") : "YOK — hiçbir anahtar tanımlı değil"}`,
   );
 });
 

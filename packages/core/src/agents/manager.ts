@@ -37,6 +37,8 @@ export interface AgentManagerOptions {
   apiKey: string;
   /** YAML'daki model'i ezen global ayar — kapı testleri haiku'ya düşürmek için kullanır. */
   modelOverride?: string;
+  /** Gemini koşum ortamı için anahtar. Claude'unkinden bağımsız. */
+  geminiApiKey?: string;
   /**
    * Sağlayıcı ortamı (Bedrock/Vertex/gateway). Host ortamından toplanır ve
    * container'a olduğu gibi geçer; oda konfigürasyonuna yazılmaz.
@@ -82,8 +84,12 @@ export class AgentManager {
   private readonly handles = new Map<string, AgentHandle>();
   private readonly pool: pg.Pool;
   private readonly opts: Required<
-    Omit<AgentManagerOptions, "pool" | "modelOverride" | "providerEnv">
-  > & { modelOverride?: string; providerEnv: Record<string, string> };
+    Omit<AgentManagerOptions, "pool" | "modelOverride" | "providerEnv" | "geminiApiKey">
+  > & {
+    modelOverride?: string;
+    providerEnv: Record<string, string>;
+    geminiApiKey: string;
+  };
   private healthTimer: NodeJS.Timeout | null = null;
 
   constructor(options: AgentManagerOptions) {
@@ -92,6 +98,7 @@ export class AgentManager {
       apiKey: options.apiKey,
       modelOverride: options.modelOverride,
       providerEnv: options.providerEnv ?? collectProviderEnv(process.env),
+      geminiApiKey: options.geminiApiKey ?? "",
       maxTurns: options.maxTurns ?? 30,
       maxBudgetUsd: options.maxBudgetUsd ?? 1,
       heartbeatTimeoutMs: options.heartbeatTimeoutMs ?? 20_000,
@@ -194,8 +201,13 @@ export class AgentManager {
       AGENT_MAX_TURNS: String(this.opts.maxTurns),
       AGENT_MAX_BUDGET_USD: String(this.opts.maxBudgetUsd),
     };
-    // Bedrock/Vertex'te anahtar yoktur; boş değişken geçirmek SDK'yı şaşırtır.
-    if (this.opts.apiKey) env.ANTHROPIC_API_KEY = this.opts.apiKey;
+    // Her koşum ortamı KENDİ anahtarını alır; diğerininkini görmez.
+    if (agent.runtime === "gemini") {
+      if (this.opts.geminiApiKey) env.GEMINI_API_KEY = this.opts.geminiApiKey;
+    } else {
+      // Bedrock/Vertex'te anahtar yoktur; boş değişken geçirmek SDK'yı şaşırtır.
+      if (this.opts.apiKey) env.ANTHROPIC_API_KEY = this.opts.apiKey;
+    }
     if (resumeSessionId) env.RESUME_SESSION_ID = resumeSessionId;
 
     const exec = await startRunnerExec({
@@ -203,6 +215,7 @@ export class AgentManager {
       workdir: `/room/${agent.workspace}`,
       env,
       user: "agent",
+      runnerPath: `/opt/runner/${agent.runtime}/dist/runner.js`,
     });
 
     const handle: AgentHandle = {

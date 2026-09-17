@@ -25,8 +25,10 @@ export interface ApiConfig {
 }
 
 export interface AgentSettings {
-  /** Boşsa agent uçları 503 döner — anahtar imaja veya compose'a gömülmez. */
+  /** Claude koşum ortamı için. Anahtar imaja veya compose'a gömülmez. */
   apiKey: string;
+  /** Gemini koşum ortamı için. Claude'unkinden bağımsız. */
+  geminiApiKey: string;
   /** YAML'daki model'i ezer. Kapı testleri maliyeti düşürmek için haiku verir. */
   modelOverride: string;
   maxTurns: number;
@@ -46,6 +48,7 @@ export function loadApiConfig(): ApiConfig {
     spawnContainer: process.env.SPAWN_CONTAINER !== "0",
     agent: {
       apiKey: process.env.ANTHROPIC_API_KEY ?? "",
+      geminiApiKey: process.env.GEMINI_API_KEY ?? "",
       modelOverride: process.env.AGENT_MODEL ?? "",
       maxTurns: Number(process.env.AGENT_MAX_TURNS ?? 30),
       maxBudgetUsd: Number(process.env.AGENT_MAX_BUDGET_USD ?? 1),

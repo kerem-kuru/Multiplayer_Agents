@@ -138,7 +138,20 @@ Sağlayıcı seçiliyse `ANTHROPIC_API_KEY` gerekmez. `AWS_*` / `GOOGLE_*` deği
 
 Katalog zaten sağlayıcı-bağımsız: `tool.call`, `tool.result`, `turn.completed` hiçbir yerde "Claude" demiyor.
 
-**Gemini CLI incelendi ve dört maddeyi de karşılıyor** — ölçüm sonuçları ve eksikleri `docs/runtime-gemini.md` içinde.
+**İki koşum ortamı yan yana çalışıyor.** Rol YAML'ında `runtime: claude` veya `runtime: gemini`:
+
+| | Claude (Agent SDK) | Gemini (CLI) |
+| --- | --- | --- |
+| Yapılandırılmış akış | ✅ stream-json | ✅ stream-json |
+| Tool kapısı | ✅ `PreToolUse` hook'u **engeller** | ⚠️ `--allowed-tools` kısıtlar; ihlal **saptanır**, engellenmez |
+| Oturum sürekliliği | ✅ `resume` | ✅ `--session-id` / `--resume` |
+| Tool çıktısının metni | ✅ | ❌ sadece `status` |
+| USD maliyet | ✅ | ❌ sadece token sayısı |
+| SDK tool listesi | ✅ `turn.started.tools` | ❌ boş |
+
+Ölçüm ayrıntıları ve entegrasyonda çıkan hatalar: `docs/runtime-gemini.md`.
+
+Anahtarlar bağımsız: `ANTHROPIC_API_KEY` yokken Gemini agent'ları çalışır, tersi de geçerli. Her koşum ortamı yalnızca kendi anahtarını görür.
 
 ## Event log
 

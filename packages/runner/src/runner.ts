@@ -7,6 +7,7 @@ import {
   RunnerCommand,
   RunnerOutput,
   resolveSdkTools,
+  roomRelativePath,
 } from "@agent-rooms/protocol";
 import { mapMessage } from "./map-messages.js";
 
@@ -116,7 +117,7 @@ async function runTurn(messageId: string, text: string, ac: AbortController): Pr
                       ...envelope,
                       actor: agentActor,
                       type: "file.changed",
-                      payload: { ...turn, path, tool: i.tool_name ?? "" },
+                      payload: { ...turn, path: roomRelativePath(path), tool: i.tool_name ?? "" },
                     } as NewRoomEvent);
                   }
                   return {};

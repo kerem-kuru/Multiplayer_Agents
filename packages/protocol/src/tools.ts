@@ -73,3 +73,20 @@ export function truncateJson(value: unknown, limit = MAX_PAYLOAD_BYTES): Truncat
   }
   return truncate(text, limit);
 }
+
+/** Container içi oda kökü — runner'lar burada koşar. */
+export const ROOM_ROOT = "/room";
+
+/**
+ * Dosya yollarını oda köküne göre normalleştirir.
+ *
+ * Koşum ortamları mutlak yol veriyor (`/room/worktrees/backend/hello.js`).
+ * Event log'da oda-göreli tutmak iki şeyi sağlar: koşum ortamları aynı biçimi
+ * verir, ve UI ile defter host yolundan bağımsız kalır.
+ */
+export function roomRelativePath(p: string): string {
+  const normalized = p.replace(/\\/g, "/");
+  if (normalized === ROOM_ROOT) return "";
+  const prefix = `${ROOM_ROOT}/`;
+  return normalized.startsWith(prefix) ? normalized.slice(prefix.length) : normalized;
+}

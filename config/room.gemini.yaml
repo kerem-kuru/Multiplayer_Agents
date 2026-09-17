@@ -1,0 +1,10 @@
+version: 1
+name: "Gemini odasi"
+agents:
+  - name: backend
+    systemPrompt: "Sen bu odanin backend gelistiricisisin. Kisa cevap ver."
+    workspace: worktrees/backend
+    runtime: gemini
+    model: auto
+    toolsAllow: [read, edit, bash]
+    writable: [worktrees/backend, contracts]

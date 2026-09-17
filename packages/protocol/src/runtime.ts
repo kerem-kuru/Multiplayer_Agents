@@ -35,7 +35,7 @@ import { z } from "zod";
  *    yerde "Claude" demiyor.
  */
 
-export const RuntimeKind = z.enum(["claude"]);
+export const RuntimeKind = z.enum(["claude", "gemini"]);
 export type RuntimeKind = z.infer<typeof RuntimeKind>;
 
 /**

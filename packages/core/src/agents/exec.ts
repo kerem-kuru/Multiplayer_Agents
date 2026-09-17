@@ -19,6 +19,8 @@ export interface RunnerExecOptions {
   workdir: string;
   env: Record<string, string>;
   user?: string;
+  /** Container içi runner yolu — koşum ortamına göre değişir. */
+  runnerPath: string;
 }
 
 export interface RunnerExec {
@@ -39,7 +41,7 @@ export async function startRunnerExec(opts: RunnerExecOptions): Promise<RunnerEx
   const container = docker.getContainer(opts.container);
 
   const exec = await container.exec({
-    Cmd: ["node", "/opt/runner/dist/runner.js"],
+    Cmd: ["node", opts.runnerPath],
     AttachStdin: true,
     AttachStdout: true,
     AttachStderr: true,
@@ -150,7 +152,7 @@ export async function startRunnerExec(opts: RunnerExecOptions): Promise<RunnerEx
 export async function killStrayRunners(container: string): Promise<void> {
   const docker = getDocker();
   const exec = await docker.getContainer(container).exec({
-    Cmd: ["pkill", "-f", "/opt/runner/dist/runner.js"],
+    Cmd: ["pkill", "-f", "/opt/runner/"],
     AttachStdout: false,
     AttachStderr: false,
     User: "root",

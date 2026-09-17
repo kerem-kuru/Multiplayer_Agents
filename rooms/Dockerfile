@@ -20,12 +20,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # dosya izni ikincisi.
 RUN useradd --create-home --shell /bin/bash agent
 
-# Runner ve SDK. Sadece dist/package.json kopyalanır: katman önbelleği
-# runner kodu değişince SDK'yı yeniden kurmasın.
-WORKDIR /opt/runner
+# Koşum ortamları YAN YANA kurulur. Rol YAML'ındaki `runtime` alanı hangisinin
+# çalışacağını seçer; biri diğerini etkilemez.
+#
+# Sadece dist/package.json kopyalanır: katman önbelleği runner kodu değişince
+# alttaki CLI/SDK'yı yeniden kurmasın.
+
+# Claude Agent SDK
+WORKDIR /opt/runner/claude
 COPY packages/runner/dist/package.json ./package.json
 RUN npm install --omit=dev && npm cache clean --force
 COPY packages/runner/dist/runner.js ./dist/runner.js
+
+# Gemini CLI
+WORKDIR /opt/runner/gemini
+COPY packages/runner-gemini/dist/package.json ./package.json
+RUN npm install --omit=dev && npm cache clean --force
+COPY packages/runner-gemini/dist/runner.js ./dist/runner.js
+
 RUN chown -R agent:agent /opt/runner
 
 WORKDIR /room

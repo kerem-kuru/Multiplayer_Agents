@@ -64,6 +64,50 @@ Bunlar engel değil ama **bilerek kabul edilmesi** gereken kayıplar:
 - **Gecikme:** basit bir dosya yazma görevi ücretsiz katmanda 14–90 sn sürdü (bir koşumda 503 alıp geri çekildi). Kapı testlerinde zaman aşımları buna göre ayarlanmalı.
 - `ripgrep` container'da kurulu olmalı, yoksa "Falling back to GrepTool" diyor — bizim oda imajında zaten var.
 
+## Uygulama sırasında çıkan üç hata
+
+Ölçüm doğruydu ama entegrasyon üç yerde tökezledi. Üçü de gerçek, üçü de düzeltildi:
+
+**1 — `--allowed-tools` prompt'u yutuyor.** Dizi seçeneği olduğu için
+`--allowed-tools a b c -p "metin"` yazınca yargs dizinin sonunu bulamıyor ve
+prompt'u pozisyonel argümana çeviriyor:
+
+```
+Cannot use both a positional prompt and the --prompt (-p) flag together
+```
+
+Çözüm: bayrağı her tool için TEKRARLA (`--allowed-tools a --allowed-tools b`).
+
+**2 — stderr seli heartbeat'i aç bıraktı.** İlk hâlde Gemini'nin her stderr
+satırını bir `log` protokol mesajına çevirip stdout'a yazıyorduk. Gemini bir
+503 aldığında onlarca satır stack trace döküyor; heartbeat'ler o selin arkasına
+sıraya giriyor, 20 sn'yi aşıyor ve host runner'ı ölmüş sanıp `SIGKILL` ediyordu
+(`exitCode 137`, ardından yeniden başlatma döngüsü).
+
+Ders: **dış dünyanın sınırsız çıktısı protokol kanalına sokulmaz.** Çocuk
+sürecin stderr'i doğrudan runner'ın stderr'ine akıtılıyor; exec katmanı onu
+zaten sunucu loguna taşıyor.
+
+**3 — `update_topic` yanlış pozitif.** Gemini'nin kendi iç bakım tool'ları
+(oturum başlığı, yapılacaklar listesi) YAML yetkisinin konusu değil ama
+allow listesinde olmadıkları için `tool.denied` üretiyorlardı. `save_memory`
+bu muafiyete DAHİL DEĞİL — kalıcı veri yazıyor.
+
+Ayrıca `file.changed` yolu mutlak geliyordu (`/room/worktrees/...`); iki koşum
+ortamı aynı biçimi versin diye `roomRelativePath()` ile oda-göreli yapıldı.
+
+## Uçtan uca doğrulama
+
+Gerçek görev, gerçek anahtar, container içinde:
+
+```
+5:message.received → 6:turn.started → 8:tool.call → 11:file.changed
+→ 12:tool.result → 16-18:agent.text → 19:turn.completed
+durum: idle · restart: 0
+```
+
+`hello.js` gerçekten oluştu ve `merhaba oda` bastı. Turn 11.7 sn sürdü.
+
 ## Yapılmadı
 
 - `-o json` (stream olmayan) kipinin tool çıktısını içerip içermediği
