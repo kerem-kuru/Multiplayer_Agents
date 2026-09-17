@@ -5,7 +5,19 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    // Hafta 3'te SSE bu proxy üzerinden gelecek.
-    proxy: { "/rooms": "http://localhost:8787", "/health": "http://localhost:8787" },
+    proxy: {
+      // /api → sunucu. SSE'nin tamponlanmamasi icin compress kapali.
+      "/api": {
+        target: process.env.API_URL ?? "http://localhost:8787",
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/api/, ""),
+        configure: (proxy) => {
+          proxy.on("proxyRes", (proxyRes) => {
+            // Ters vekil akisi tamponlamasin.
+            proxyRes.headers["x-accel-buffering"] = "no";
+          });
+        },
+      },
+    },
   },
 });

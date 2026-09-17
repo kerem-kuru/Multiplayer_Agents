@@ -1,0 +1,167 @@
+import { useEffect, useRef, useState } from "react";
+import type { StoredEvent } from "@agent-rooms/protocol";
+import { project, type RoomView } from "../model/project.js";
+import { fetchEvents, sseUrl } from "./api.js";
+
+/**
+ * Oda akışı: geçmişi sayfalayarak çek → SSE'ye bağlan → boşluk gördüysen doldur.
+ *
+ * Sunucu boşluğu zaten dolduruyor; buradaki kontrol İSTEMCİ TARAFI GÜVENCE.
+ * "seq boşluğu hiçbir zaman sessizce geçilmez" kuralı iki yerde de duruyor.
+ *
+ * State güncellemesi `requestAnimationFrame` ile toplanır: event başına bir
+ * `setState` çağrısı 500 event'lik bir turn'de UI'ı dondurur.
+ */
+
+export type Connection = "loading" | "live" | "reconnecting" | "offline";
+
+export interface StreamState {
+  view: RoomView;
+  connection: Connection;
+  lastSeq: number;
+  reconnect: () => void;
+}
+
+const EMPTY: RoomView = { lastSeq: 0, agents: {} };
+
+export function useEventStream(roomId: string | null): StreamState {
+  const [view, setView] = useState<RoomView>(EMPTY);
+  const [connection, setConnection] = useState<Connection>("loading");
+  const [lastSeq, setLastSeq] = useState(0);
+  const [nonce, setNonce] = useState(0);
+
+  /** Tüm event'ler seq -> event. Projeksiyon her zaman bunun üzerinden. */
+  const store = useRef(new Map<number, StoredEvent>());
+  const frame = useRef<number | null>(null);
+  const failures = useRef(0);
+
+  useEffect(() => {
+    if (!roomId) return;
+
+    let cancelled = false;
+    let source: EventSource | null = null;
+    store.current = new Map();
+    setView(EMPTY);
+    setLastSeq(0);
+    setConnection("loading");
+
+    const flush = (): void => {
+      if (frame.current !== null) return;
+      frame.current = requestAnimationFrame(() => {
+        frame.current = null;
+        if (cancelled) return;
+        const all = [...store.current.values()];
+        setView(project(all));
+        setLastSeq(all.reduce((m, e) => Math.max(m, e.seq), 0));
+      });
+    };
+
+    const absorb = (events: StoredEvent[]): void => {
+      let added = false;
+      for (const e of events) {
+        // İdempotanlık: zaten gördüğümüz seq'i yut.
+        if (store.current.has(e.seq)) continue;
+        store.current.set(e.seq, e);
+        added = true;
+      }
+      if (added) flush();
+    };
+
+    const currentSeq = (): number => {
+      let max = 0;
+      for (const seq of store.current.keys()) if (seq > max) max = seq;
+      return max;
+    };
+
+    /** Boşluk doldurma: eksik aralığı REST'ten çek. */
+    const fillGap = async (upTo: number): Promise<void> => {
+      const from = currentSeq();
+      if (upTo <= from + 1) return;
+      try {
+        const page = await fetchEvents(roomId, from, upTo - from);
+        if (!cancelled) absorb(page.events);
+      } catch {
+        // Sunucu zaten dolduruyor; bu sadece güvence katmanı.
+      }
+    };
+
+    const connect = (): void => {
+      if (cancelled) return;
+      source = new EventSource(sseUrl(roomId, currentSeq()));
+
+      source.addEventListener("events", (ev) => {
+        if (cancelled) return;
+        let batch: StoredEvent[];
+        try {
+          batch = JSON.parse((ev as MessageEvent<string>).data) as StoredEvent[];
+        } catch {
+          return;
+        }
+        failures.current = 0;
+        setConnection("live");
+        const firstSeq = batch.length > 0 ? Math.min(...batch.map((e) => e.seq)) : 0;
+        if (firstSeq > currentSeq() + 1) {
+          void fillGap(firstSeq).then(() => absorb(batch));
+          return;
+        }
+        absorb(batch);
+      });
+
+      source.addEventListener("overflow", () => {
+        // Sunucu bizi yavaş buldu ve kapattı; baştan bağlan.
+        source?.close();
+        if (!cancelled) connect();
+      });
+
+      source.addEventListener("open", () => {
+        failures.current = 0;
+        setConnection("live");
+      });
+
+      source.onerror = () => {
+        if (cancelled) return;
+        failures.current += 1;
+        // EventSource kendi yeniden bağlanmasını yapar; 3 başarısızlıktan
+        // sonra kullanıcıya manuel düğme gösterilir.
+        setConnection(failures.current >= 3 ? "offline" : "reconnecting");
+        if (failures.current >= 3) source?.close();
+      };
+    };
+
+    /** Önce geçmiş: hasMore bitene kadar sayfala, sonra SSE. */
+    void (async () => {
+      let since = 0;
+      for (;;) {
+        try {
+          const page = await fetchEvents(roomId, since);
+          if (cancelled) return;
+          absorb(page.events);
+          since = page.lastSeq;
+          if (!page.hasMore) break;
+        } catch {
+          if (cancelled) return;
+          setConnection("offline");
+          return;
+        }
+      }
+      if (!cancelled) connect();
+    })();
+
+    return () => {
+      cancelled = true;
+      source?.close();
+      if (frame.current !== null) cancelAnimationFrame(frame.current);
+      frame.current = null;
+    };
+  }, [roomId, nonce]);
+
+  return {
+    view,
+    connection,
+    lastSeq,
+    reconnect: () => {
+      failures.current = 0;
+      setNonce((n) => n + 1);
+    },
+  };
+}

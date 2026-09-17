@@ -22,6 +22,8 @@
     "gate:w2": "bash scripts/week2-gate.sh",
     "api": "node apps/api/dist/index.js",
     "api:dev": "node --watch apps/api/dist/index.js",
+    "dev:web": "npm run dev -w @agent-rooms/web",
+    "dev:all": "npm run build && concurrently -n api,web -c cyan,magenta \"npm run api\" \"npm run dev:web\"",
     "room:build": "node scripts/build-runner.mjs && docker compose --profile build-only build room",
     "verify": "npm run build && node scripts/verify.mjs",
     "test:watch": "vitest",
@@ -33,6 +35,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "concurrently": "^10.0.5",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }

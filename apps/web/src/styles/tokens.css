@@ -1,0 +1,88 @@
+/*
+ * İki farklı malzeme.
+ *
+ * Küratörlü etkinlik akışı KAĞIT üzerinde (açık zemin, hairline ayraçlar),
+ * ham terminal EKRAN üzerinde (koyu panel, ANSI renkleri bozulmadan).
+ * Bu ayrım dekorasyon değil: kullanıcıya "burası yorumlanmış, şurası ham"
+ * bilgisini malzeme üzerinden veriyor.
+ *
+ * Bu bir izleme aracı: saatlerce açık kalacak. Süslemeye bütçe yok,
+ * hiyerarşiye var.
+ */
+:root {
+  --canvas: #f1f0ec;
+  --paper: #f7f6f3;
+  --ink: #1b1d1a;
+  --ink-soft: #5e635c;
+  --rule: #d8d7d1;
+  --screen: #14171a;
+  --screen-ink: #d7dbd9;
+  --run: #2f6f6a;
+  --wait: #b06a00;
+  --fail: #a32e2e;
+  --idle: #8c918a;
+
+  --sans: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--ink-soft);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Klavye odağı her zaman görünür. */
+:focus-visible {
+  outline: 2px solid var(--run);
+  outline-offset: 1px;
+}
+
+code,
+.mono {
+  font-family: var(--mono);
+}
+
+/* Sadece kullanıcının açtığı bölüm ve yeni event vurgusu hareket eder. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
