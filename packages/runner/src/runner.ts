@@ -1,7 +1,13 @@
 import readline from "node:readline";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { NewRoomEvent } from "@agent-rooms/protocol";
-import { AgentConfig, RunnerCommand, RunnerOutput, resolveSdkTools } from "@agent-rooms/protocol";
+import {
+  AgentConfig,
+  PROTOCOL_VERSION,
+  RunnerCommand,
+  RunnerOutput,
+  resolveSdkTools,
+} from "@agent-rooms/protocol";
 import { mapMessage } from "./map-messages.js";
 
 /**
@@ -147,7 +153,7 @@ async function runTurn(messageId: string, text: string, ac: AbortController): Pr
   }
 }
 
-out({ kind: "ready", pid: process.pid });
+out({ kind: "ready", pid: process.pid, protocolVersion: PROTOCOL_VERSION });
 setInterval(() => out({ kind: "heartbeat", busy }), 5_000);
 
 const shutdown = (): void => {

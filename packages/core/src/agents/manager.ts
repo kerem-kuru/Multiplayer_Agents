@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import type { Actor, AgentConfig, NewRoomEvent, RoomConfig } from "@agent-rooms/protocol";
-import { RunnerOutput, collectProviderEnv } from "@agent-rooms/protocol";
+import { PROTOCOL_VERSION, RunnerOutput, collectProviderEnv } from "@agent-rooms/protocol";
 import { appendEvent } from "../db/eventStore.js";
 import { getPool } from "../db/pool.js";
 import { containerStatus, roomContainerName } from "../docker/container.js";
@@ -289,6 +289,21 @@ export class AgentManager {
     switch (output.kind) {
       case "ready": {
         handle.pid = output.pid;
+        // Bayat imaj kontrolü: şema değişip imaj yeniden kurulmazsa runner
+        // bilinmeyen alanlara takılıp döngüye girer. Anlaşılmaz çökme yerine
+        // ne yapılacağını söyle ve yeniden başlatmayı DENEME.
+        if (output.protocolVersion !== PROTOCOL_VERSION) {
+          const found = output.protocolVersion ?? "yok (eski imaj)";
+          const msg =
+            `runner protokol sürümü uyuşmuyor — imaj: ${found}, host: ${PROTOCOL_VERSION}. ` +
+            `Oda imajını yeniden derle: npm run room:build`;
+          this.opts.log("error", msg);
+          handle.stopping = true;
+          await forceStopped(handle.roomId, handle.agent.name, msg, this.pool);
+          handle.readyReject?.(new Error(msg));
+          if (handle.pid) await handle.exec.hardKill(handle.pid).catch(() => undefined);
+          return;
+        }
         handle.lastHeartbeat = Date.now();
         await transition(handle.roomId, handle.agent.name, "idle", {}, this.pool);
         await this.write(

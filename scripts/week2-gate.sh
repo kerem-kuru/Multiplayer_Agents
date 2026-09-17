@@ -120,7 +120,9 @@ if [ -z "$(psql_q "SELECT to_regclass('public.agent_runtime')")" ]; then
 fi
 
 npm run build >/dev/null 2>&1 || { echo "build başarısız"; exit 1; }
-node scripts/build-runner.mjs >/dev/null 2>&1 || { echo "runner build başarısız"; exit 1; }
+# İmaj da yeniden kurulmalı: protokol şeması değiştiyse bayat imajdaki runner
+# bilinmeyen alanlara takılıp çökme döngüsüne girer.
+npm run room:build >/dev/null 2>&1 || { echo "oda imajı build başarısız"; exit 1; }
 
 PORT="$PORT" AGENT_MODEL="$GATE_MODEL" node apps/api/dist/index.js >/tmp/week2-server.log 2>&1 &
 SERVER_PID=$!

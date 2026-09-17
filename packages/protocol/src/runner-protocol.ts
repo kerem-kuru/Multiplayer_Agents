@@ -35,7 +35,16 @@ export type RunnerCommand = z.infer<typeof RunnerCommand>;
  * Şema çalışma zamanı doğrulaması için doğru, tip için değil.
  */
 export const RunnerOutput = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("ready"), pid: z.number().int() }),
+  z.object({
+    kind: z.literal("ready"),
+    pid: z.number().int(),
+    /**
+     * Imajdaki runner'ın protokol sürümü. Host'unkiyle uyuşmazsa imaj bayattır
+     * ve şema değişiklikleri anlaşılmaz çökme döngüsüne yol açar — bu yüzden
+     * el sıkışmada kontrol edilir. Eski imajlarda alan YOKTUR (optional).
+     */
+    protocolVersion: z.number().int().optional(),
+  }),
   /** Sadece bellekte tutulur — event log'a YAZILMAZ, gürültü yapmasın. */
   z.object({ kind: z.literal("heartbeat"), busy: z.boolean() }),
   z.object({ kind: z.literal("event"), event: NewRoomEvent }),
@@ -52,7 +61,7 @@ export const RunnerOutput = z.discriminatedUnion("kind", [
   }),
 ]);
 export type RunnerOutput =
-  | { kind: "ready"; pid: number }
+  | { kind: "ready"; pid: number; protocolVersion?: number }
   | { kind: "heartbeat"; busy: boolean }
   | { kind: "event"; event: NewRoomEvent }
   | { kind: "turn_end"; messageId: string; sdkSessionId: string | null; ok: boolean }
