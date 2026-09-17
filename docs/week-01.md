@@ -41,7 +41,7 @@ cd ~/Desktop/agent-rooms
 npm run verify
 ```
 
-Sırayla: docker daemon'u bekler (3 dk'ya kadar) → postgres + redis kaldırır → healthy bekler → migration uygular → smoke koşar. Çıktının sonunda `Hafta 1 kapısı geçildi.` görmen gerekiyor. Görmezsen hangi adımda durduğu yazıyor.
+Sırayla: docker daemon'u bekler (3 dk'ya kadar) → postgres + redis kaldırır → healthy bekler → migration uygular → smoke koşar → oda imajını build eder → Hafta 1 kapısını (10 kontrol) koşar. Çıktının sonunda `HAFTA 1 KAPISI GEÇİLDİ.` görmen gerekiyor. Görmezsen hangi adımda durduğu yazıyor.
 
 ## Gün 2–3'te yapılanlar
 
@@ -51,56 +51,71 @@ Uçlar:
 
 | Uç | İş |
 | --- | --- |
-| `POST /rooms` | YAML → oda → oturum → klasör düzeni → container → provision → event'ler |
+| `POST /rooms` | YAML → oda → oturum → klasör düzeni → container → event'ler |
 | `GET /rooms` | Oda listesi |
 | `GET /rooms/{id}` | Oda + son oturum + container durumu |
 | `GET /rooms/{id}/events?since=N` | Event okuma. `nextSince` imleci döner; Hafta 3'te aynı sözleşmeyle SSE'ye geçilecek |
 | `GET /rooms/{id}/journal` | Defter iskeleti — `backend: "filesystem-stub"`, Hafta 8'de tabloya döner |
-| `GET /rooms/{id}/isolation` | Cuma dogfood kapısı, endpoint hâli |
+| `POST /sessions/{sid}/events` | Sadece geliştirme — elle event yaz |
 | `POST /rooms/{id}/stop` | `session.ended` + container silme. Oda kaydı DURUR |
 
-**Orkestrasyon `core/room/openRoom.ts` içinde, API'de değil.** HTTP olmadan da test edilebilsin ve Hafta 12'deki CLI aynı fonksiyonu çağırsın diye. Sıra: oda+oturum → klasörler → `room.created` → container+provision → `session.started`. Container adımı patlarsa `session.started` hiç yazılmaz, yerine `session.ended{reason:"crashed"}` düşer — log'da "başladı" görünüp aslında başlamamış oturum kalmaz.
+**Orkestrasyon `core/room/openRoom.ts` içinde, API'de değil.** HTTP olmadan da test edilebilsin ve Hafta 12'deki CLI aynı fonksiyonu çağırsın diye. Sıra: oda+oturum → klasörler → `room.created` → container → `session.started`. Container adımı patlarsa `session.started` hiç yazılmaz, yerine `session.ended{reason:"crashed"}` düşer — log'da "başladı" görünüp aslında başlamamış oturum kalmaz.
 
 **`agent.spawned` event'i YAZILMIYOR.** Gün 1'in smoke'u bunu elle yazıyordu, o bir simülasyondu. Gerçek API'de bu hafta hiçbir agent koşmuyor, o yüzden event de yok. Hafta 2'de Agent SDK ile gelecek.
 
-### Agent izolasyonu: mount ile değil, POSIX ile
+### Kapı script'i — `npm run gate`
 
-Bir oda = bir container = **tek dosya sistemi**. Agent başına rw/ro mount vermek oda başına N container demekti, bu da mimarinin temel kararını bozardı. Bunun yerine her agent kendi OS kullanıcısı (`agent-frontend`) altında koşuyor, klasör sahipliği kısıtı uyguluyor:
+Haftanın kabul kriteri artık tek komut. 10 kontrol, her biri ✓/✗ basıyor, biri düşerse `exit 1`:
 
-| Durum | Sahiplik | Mod |
+| # | Kontrol | Ne kanıtlıyor |
 | --- | --- | --- |
-| Tek yazıcı (`worktrees/frontend`) | `agent-frontend:room` | `2750` |
-| Çok yazıcı (`contracts`) | `root:room` | `2770` |
-| Yazıcı yok (`journal`) | `root:room` | `2750` |
+| 1 | `POST /rooms` → 201 | Oda, oturum ve agent listesi döndü |
+| 2 | `docker ps --filter label=agent-rooms.room=<id>` | Container gerçekten çalışıyor |
+| 3 | Klasör düzeni | YAML'daki her agent için worktree + contracts + journal |
+| 4 | `events?since=0` | `1:room.created 2:session.started` |
+| 5 | Elle event + `since=2` | Haftanın "biten iş" cümlesinin tam karşılığı |
+| 6 | **50 istek, 20 paralel** | `count = count(DISTINCT seq) = max(seq)` |
+| 7 | `{"type":"uydurma"}` | 400 döner ve DB'ye satır yazılmaz |
+| 8 | `UPDATE session_events` | Trigger reddeder |
+| 9 | 3. agent, ayrı port + `ROOM_CONFIG` | **Kod değişmeden** çalışır |
+| 10 | Temizlik | Script'in açtığı container'lar silinir |
 
-setgid biti (`2xxx`) şart: içeride yaratılan yeni dosyalar `room` grubunu miras alsın ki diğer agent'lar okuyabilsin. `ownershipPlan()` bu tabloyu konfigürasyondan üretiyor ve `mountPlan()` ile aynı gerçeği söylediği test ediliyor.
+**6. kontrol bu haftanın en değerli testi.** Kilitli sayaç Gün 1'de yazılmıştı ama paralel yük altında hiç sınanmamıştı. Sonuç: `count=53 distinct=53 max=53` — tek bir çakışma veya boşluk yok. `MAX(seq)+1` yaklaşımı bu testte kesin düşerdi.
 
-### Dogfood kapısında çıkan iki bulgu
+**9. kontrol** "agent sayısı hiçbir yerde sabit değil" kuralını ölçüyor: script geçici bir YAML yazıp ikinci bir sunucuyu farklı portta `ROOM_CONFIG` ile açıyor, `worktrees/security` klasörünün açıldığını doğruluyor. Tek satır kod değişmiyor.
 
-**1 — Windows bind mount POSIX sahipliğini taşıyor.** Beklenti aksiydi. Docker Desktop'ın WSL2 backend'i `C:\` sürücüsünü `metadata` seçeneğiyle bağlıyor:
+jq yerine `node` kullanılıyor — node zaten projenin çalışma zamanı, jq her makinede yok.
 
-```
-C:\ on /room type 9p (...;metadata;...)
-```
+### Docker erişimi: CLI → dockerode
 
-`metadata` sayesinde sahiplik ve mod NTFS genişletilmiş özniteliklerinde saklanıyor, `chown`/`chmod` gerçekten uygulanıyor. Yani izolasyon Windows host'ta da sahici — named volume'a geçmeye gerek kalmadı. Bu seçenek kapalı bir makinede kapı düşer; `GET /rooms/{id}/isolation` bunu söyler.
+İlk uygulama `docker` CLI'ını `child_process` ile çağırıyordu. Kütüphaneye geçildi çünkü:
 
-**2 — Ara dizinler açık kalmıştı.** İlk uygulamada `worktrees/` `0777` kalıyordu. Bir dizin girdisini **silme ve yeniden adlandırma yetkisi o girdinin kendi izinlerinden değil, üst dizininin yazma yetkisinden gelir** — yani `agent-frontend`, `worktrees/backend` klasörünün *içine* yazamasa da onu `mv` ile taşıyabilirdi. İlk izolasyon testi bunu kaçırmıştı, çünkü sadece kardeş klasörün içine yazmayı deniyordu.
+- **Hafta 2-3** agent çıktısını uzun ömürlü bir exec stream'i olarak okuyacak. dockerode gerçek stream nesnesi veriyor; CLI'da süreç başına bir `docker exec` sarmalayıcısı yönetmek gerekirdi.
+- **Hafta 11** container istatistiği isteyecek (`container.stats()`); CLI'da bu metin ayrıştırması olurdu — ki "hiçbir yerde metin kazıma yok" kuralı tam da bunun için var.
+- Hata nesneleri durum kodu taşıyor (404 = yok), `docker` binary'sinin PATH'te olması gerekmiyor.
 
-Düzeltme: ara dizinler (`/room`, `worktrees`) `root:room 2755`. `chown` bunlarda **`-R` olmadan** koşuyor — oda kökünde recursive olsaydı alttaki agent sahipliklerini silerdi. `verifyIsolation()` artık her agent için ara dizinlere girdi açmayı da deniyor.
+Yan fayda: Git Bash'in yol dönüştürmesi (`/room` → `C:/Program Files/Git/room`) CLI çağrılarını bozuyordu, kütüphanede o sorun yok.
+
+### İzolasyon geri alındı
+
+Gün 3'te POSIX tabanlı agent izolasyonu yazılmıştı: agent başına OS kullanıcısı, `ownershipPlan()`, container içinde yazma denemesiyle doğrulama. Çalışıyordu — Windows bind mount'un `metadata` seçeneği sayesinde sahiplik gerçekten uygulanıyordu, ve ara dizin (`worktrees/`) açığı da bulunup kapatılmıştı.
+
+**Ama kapsam dışıydı.** Hem yol haritası (Hafta 7: *"Container içi mount izinleri: kendi worktree'si rw, diğerleri ro"*) hem görev tanımı (*"Gerçek git worktree yönetimi ve read-only mount'lar — Hafta 7"*) bunu aynı haftaya koyuyor. Kod kaldırıldı; Hafta 7'de worktree yönetimiyle birlikte yeniden yazılacak. Bulgular `docs/week-07-notlar.md`'ye taşınmadı, git geçmişinde `8fbbded` commit'inde duruyor.
+
+### Diğer eklemeler
+
+- **`POST /sessions/:sid/events`** — sadece geliştirme (`NODE_ENV=production` iken uç hiç tanımlanmaz). Haftanın "elle event yaz" maddesi bunu kullanıyor. `debug.note` event tipi eklendi.
+- **`GET /health` artık DB'ye dokunuyor** — `SELECT 1`. Ayakta olmak "yazabiliyorum" demek; DB yoksa 503.
+- **`.env` Node'un kendi yükleyicisiyle okunuyor** (`process.loadEnvFile`), dotenv bağımlılığı yok. Ortamda tanımlı değişkenler ezilmiyor.
+- **`apps/web`** artık gerçek bir React + Vite iskeleti; `/rooms` ve `/health` için proxy ayarlı, Hafta 3'te doldurulacak.
 
 ### Doğrulama
 
-`npm run verify` zinciri uzadı:
-
 ```
-docker bekle → db kaldır → migrate → smoke (çekirdek)
-  → oda imajını build et → smoke (api)
+npm test          27 test (saf — docker/DB gerekmez)
+npm run gate      10/10
+npm run verify    docker → db → migrate → smoke → oda imajı → kapı
 ```
-
-API smoke'un kanıtladıkları: `POST /rooms` 201 dönüyor, container `running`, event'ler `1:room.created 2:session.started`, `since=1` tek event + `nextSince=2`, defter iskeleti cevap veriyor, izolasyon iki agent için de tutuyor, `POST /stop` `session.ended` yazıp container'ı siliyor.
-
-31 test geçiyor (Gün 1: 15). Yeni testlerin hepsi saf — docker veya DB gerektirmiyor.
 
 ## Sıradaki iş — Hafta 2
 

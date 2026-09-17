@@ -256,6 +256,16 @@ export const DriverChanged = ev(
   }),
 );
 
+// --- Geliştirme ------------------------------------------------------------
+
+export const DebugNote = ev(
+  "debug.note",
+  z.object({
+    /** Elle yazılan not. Hafta 1'de "event yazıp since=N ile geri oku" kapısı bunu kullanır. */
+    text: z.string().min(1).max(4000),
+  }),
+);
+
 // --- Sunum düzlemi (kontrol buradan OKUMAZ) --------------------------------
 
 export const OutputChunk = ev(
@@ -292,6 +302,7 @@ const EVENT_SCHEMAS = [
   CommentOnLine,
   PresenceUpdated,
   DriverChanged,
+  DebugNote,
   OutputChunk,
 ] as const;
 

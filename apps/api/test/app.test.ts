@@ -22,10 +22,21 @@ const cfg: ApiConfig = {
 const app = createApp(cfg);
 
 describe("api", () => {
-  it("/health protokol sürümünü söyler", async () => {
+  it("/health DB'ye dokunur — DB yoksa ok:false ve 503", async () => {
+    // Bu testte DATABASE_URL yok; sağlık ucu bunu yutmamalı.
     const res = await app.request("/health");
-    expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({ ok: true, protocolVersion: 1 });
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toMatchObject({ ok: false, db: false });
+  });
+
+  it("üretimde elle event yazma ucu tanımlı değil", async () => {
+    // Bu süreçte NODE_ENV=test, yani uç kayıtlı; UUID olmayan id 400 vermeli.
+    const res = await app.request("/sessions/abc/events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "debug.note", payload: { text: "x" } }),
+    });
+    expect(res.status).toBe(400);
   });
 
   it("bilinmeyen uç 404", async () => {

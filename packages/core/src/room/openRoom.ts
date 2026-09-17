@@ -9,7 +9,6 @@ import {
   startRoomContainer,
   stopRoomContainer,
 } from "../docker/container.js";
-import { provisionAgentUsers, type ProvisionStep } from "../docker/isolation.js";
 import { scaffoldRoomLayout } from "./layout.js";
 import {
   attachContainer,
@@ -29,7 +28,7 @@ import {
  *   1. oda + oturum kaydı  — event yazabilmek için önce oturum gerekir
  *   2. klasör düzeni       — container mount'u buna bağlanacak
  *   3. room.created        — container açılmasa bile bu event yazılmış olmalı
- *   4. container + provision
+ *   4. container
  *   5. session.started     — containerId'yi taşır, o yüzden en sonda
  *
  * 4. adım patlarsa 5 hiç yazılmaz; yerine `session.ended{reason:"crashed"}`
@@ -55,7 +54,6 @@ export interface OpenRoomResult {
   dirs: string[];
   containerId: string | null;
   containerName: string | null;
-  provision: ProvisionStep[];
   events: RoomEvent[];
 }
 
@@ -97,7 +95,6 @@ export async function openRoom(input: OpenRoomInput): Promise<OpenRoomResult> {
       dirs,
       containerId: null,
       containerName: null,
-      provision: [],
       events,
     };
   }
@@ -111,7 +108,6 @@ export async function openRoom(input: OpenRoomInput): Promise<OpenRoomResult> {
   let containerId: string | null = null;
   try {
     containerId = await startRoomContainer({ roomId: room.id, roomRoot, image });
-    const provision = await provisionAgentUsers(containerId, config);
     await attachContainer(session.id, containerId, pool);
 
     events.push(
@@ -132,7 +128,6 @@ export async function openRoom(input: OpenRoomInput): Promise<OpenRoomResult> {
       dirs,
       containerId,
       containerName: roomContainerName(room.id),
-      provision,
       events,
     };
   } catch (err) {

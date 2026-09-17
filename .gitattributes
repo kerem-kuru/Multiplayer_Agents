@@ -1,0 +1,2 @@
+# Kabuk script'leri her platformda LF olmalı — CRLF ile bash "bad interpreter" verir.
+*.sh text eol=lf

@@ -6,7 +6,7 @@ Agent'lar birbirine mesaj atmaz. Ortak bir **oda defterine** yazar ve oradan oku
 
 > **Tez:** Gerçek birim agent değil, her agent'ın okuyup yazdığı tek paylaşılan bağlam deposudur.
 
-Durum: **Hafta 1 / 12 tamam** — iskelet, event log ve `POST /rooms`. Oda container'ı kalkıyor, agent'lar birbirinin worktree'sine yazamıyor. Henüz hiçbir agent koşmuyor; sadece kemikler.
+Durum: **Hafta 1 / 12 tamam** — iskelet, event log ve `POST /rooms`. `npm run gate` 10 kontrolden geçiyor. Henüz hiçbir agent koşmuyor; sadece kemikler.
 
 ## Hızlı başlangıç
 
@@ -16,7 +16,8 @@ npm install
 npm run build
 
 npm test             # şema ve konfigürasyon testleri (DB gerekmez)
-npm run verify       # docker bekle → db kaldır → migrate → uçtan uca smoke
+npm run gate         # Hafta 1 kapısı — 10 kontrol (docker + postgres ister)
+npm run verify       # docker bekle → db kaldır → migrate → smoke → imaj → kapı
 ```
 
 `verify` yerine adım adım: `npm run db:up`, `npm run db:migrate`, `npm run smoke`, `npm run room:build`, `npm run smoke:api`.
@@ -30,7 +31,7 @@ curl -X POST http://localhost:8787/rooms \
   -H 'content-type: application/json' -H 'x-user-id: kerem' -d '{}'
 
 curl 'http://localhost:8787/rooms/<id>/events?since=0'
-curl  http://localhost:8787/rooms/<id>/isolation
+curl  http://localhost:8787/rooms/<id>/journal
 curl -X POST http://localhost:8787/rooms/<id>/stop
 ```
 
@@ -40,16 +41,16 @@ Docker'sız çalışmak için `SPAWN_CONTAINER=0` — oda kaydı ve klasörler k
 
 ```
 apps/
-  api/            Hono. POST /rooms, GET events?since=N, isolation, stop
-  web/            Hafta 3: SSE istemcisi, xterm.js, event → görsel eşleme
+  api/            Hono. POST /rooms, GET events?since=N, stop
+  web/            React + Vite iskeleti. Hafta 3: SSE istemcisi, xterm.js
   desktop/        Tauri 2 kabuğu, apps/web ile aynı bileşenler
 packages/
   protocol/       Zod event şemaları — istemci ve sunucu aynı tipleri kullanır
-  core/           YAML rol yükleyici, event store, oda düzeni, container + izolasyon
+  core/           YAML rol yükleyici, event store, oda düzeni, container
 db/migrations/    Append-only şema
 rooms/Dockerfile  Oda container imajı
 config/           Örnek rol konfigürasyonu
-scripts/          migrate, smoke, smoke-api, verify
+scripts/          migrate, smoke, smoke-api, week1-gate, verify
 docs/             Haftalık kapılar
 ```
 
@@ -60,18 +61,16 @@ docs/             Haftalık kapılar
 **2 — Sınırlanmış dünyada sınırsız yetki.** Kısıtlar sistem prompt'una yazılmaz; container sınırı, dosya izni ve hook olarak uygulanır. Her agent kendi worktree'sinde tam yetkilidir:
 
 ```
-/room                 root:room 2755
-├── worktrees/        root:room 2755
-│   ├── frontend/     agent-frontend:room 2750   branch: room-42/frontend
-│   ├── backend/      agent-backend:room  2750   branch: room-42/backend
-│   └── security/     agent-security:room 2750
-├── contracts/        root:room 2770   herkese yazılabilir — API sözleşmeleri
-└── journal/          root:room 2750   oda defteri
+/room
+├── worktrees/
+│   ├── frontend/     branch: room-42/frontend   (tam yetki)
+│   ├── backend/      branch: room-42/backend    (tam yetki)
+│   └── security/     read-only
+├── contracts/        herkese yazılabilir — API sözleşmeleri
+└── journal/          oda defteri
 ```
 
-Bir oda = bir container = tek dosya sistemi, o yüzden agent başına rw/ro **mount** verilemez. Her agent kendi OS kullanıcısı altında koşar; kısıtı POSIX sahipliği uygular. Frontend, backend'in kodunu okuyabilir ama **yazamaz** — ve `worktrees/` kilitli olduğu için taşıyamaz da (bir girdiyi silme/yeniden adlandırma yetkisi üst dizinden gelir).
-
-Koordinasyonun `contracts/` ve defter üzerinden yapılmak *zorunda* kalması mimarinin amacıdır. `ownershipPlan()` bu tabloyu rol YAML'ından üretir, `mountPlan()` aynı gerçeğin mount tarafındaki gösterimidir, `GET /rooms/{id}/isolation` de gerçekten tuttuğunu container içinde sınar.
+Frontend agent, backend'in yazmakta olduğu koda **yazamaz**. Bu bir kısıt değil, mimarinin amacı: koordinasyon `contracts/` ve defter üzerinden yapılmak *zorunda* kalır. `mountPlan()` bu planı rol YAML'ından üretir ve test ediliyor — **uygulaması Hafta 7'de** (worktree yönetimi ve izinler). Bu hafta klasörler kuruluyor, izin zorlaması henüz yok.
 
 ## Event log
 
@@ -90,3 +89,19 @@ Roller `config/room.example.yaml` içinde bir dizidir. Kod her yerde bu diziyi d
 ## Ölçülecek tek metrik
 
 **Aynı oturuma iki farklı insanın yazdığı oturum sayısı, haftalık.** Kurulum sayısı değil, star sayısı değil.
+
+## Karar notları
+
+Hafta 1 görev tanımından bilinçli olarak ayrılan noktalar ve gerekçeleri.
+
+| Karar | Gerekçe |
+| --- | --- |
+| npm workspaces (pnpm değil) | Mimariye etkisi yok; pnpm makinede kurulu değildi. Değiştirmek kod değil araç değişikliği olurdu. |
+| `tsc -b` build adımı (`tsx` değil) | Hafta 12'nin "npx ile ayağa kalkan CLI" maddesi derlenmiş çıktı istiyor. tsx şimdi kolaylık sağlar, o hafta yine build eklemek gerekirdi. |
+| `pg` (porsager `postgres` değil) | Ergonomi farkı, mimari fark değil. Pub/sub yol haritasında Redis'e verilmiş, yani `LISTEN/NOTIFY` bağımlılığı yok. |
+| `dockerode` (docker CLI değil) | **Görev tanımına dönüldü.** Hafta 2-3 agent çıktısını uzun ömürlü exec stream'i olarak okuyacak, Hafta 11 container istatistiği isteyecek. İkisi de kütüphane üzerinden nesne/stream veriyor; CLI tarafında metin ayrıştırması olurdu — "metin kazıma yok" kuralı tam da bunun için var. |
+| Postgres 5433, db `agent_rooms` | Makinede lokal Postgres varsa 5432 çakışır. |
+| `apps/api` (`apps/server` değil), `@agent-rooms/*` | Sadece isimlendirme; proje kendi içinde tutarlı. |
+| Event kataloğu 22 tip | Yol haritasının ileri haftaları (diff, yorum, defter, onay, presence) bu tipleri gerektiriyor. Katalog planın veri modeli hâli; boş tipler bugün kod gerektirmiyor. |
+| `actor` düz metin değil, ayrık birleşim | Hafta 5'teki `[Ali]: ...` etiketi ve sürücü devri için insan/agent/sistem ayrımı tipte lazım. |
+| POSIX agent izolasyonu **geri alındı** | Yazılmış ve çalışıyordu, ama hem yol haritası hem görev tanımı bunu **Hafta 7'ye** koyuyor. Kapsam dışıydı; Hafta 7'de yeniden yazılacak. |

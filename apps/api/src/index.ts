@@ -1,7 +1,16 @@
+import path from "node:path";
 import { serve } from "@hono/node-server";
 import { closePool } from "@agent-rooms/core";
 import { createApp } from "./app.js";
-import { loadApiConfig } from "./config.js";
+import { REPO_ROOT, loadApiConfig } from "./config.js";
+
+// .env'i Node'un kendi yükleyicisiyle oku — dotenv bağımlılığı yok.
+// Ortamda zaten tanımlı değişkenler ezilmez.
+try {
+  process.loadEnvFile(path.join(REPO_ROOT, ".env"));
+} catch {
+  // .env yoksa sorun değil: her ayarın varsayılanı var.
+}
 
 const cfg = loadApiConfig();
 const app = createApp(cfg);

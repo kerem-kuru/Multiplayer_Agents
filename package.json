@@ -17,6 +17,7 @@
     "test": "vitest run",
     "smoke": "node scripts/smoke.mjs",
     "smoke:api": "node scripts/smoke-api.mjs",
+    "gate": "bash scripts/week1-gate.sh",
     "api": "node apps/api/dist/index.js",
     "api:dev": "node --watch apps/api/dist/index.js",
     "room:build": "docker compose --profile build-only build room",

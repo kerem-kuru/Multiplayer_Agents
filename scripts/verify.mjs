@@ -82,8 +82,12 @@ const steps = [
     );
   },
   async () => {
-    console.log("\n--- smoke (api: POST /rooms → container → izolasyon) ---");
+    console.log("\n--- smoke (api) ---");
     return (await run("node", ["scripts/smoke-api.mjs"])) === 0;
+  },
+  async () => {
+    console.log("\n--- Hafta 1 kapısı (10 kontrol) ---");
+    return (await run("bash", ["scripts/week1-gate.sh"])) === 0;
   },
 ];
 

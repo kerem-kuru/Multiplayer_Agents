@@ -1,62 +1,34 @@
-import { spawn } from "node:child_process";
+import Docker from "dockerode";
 
 /**
  * Oda container'ı yaşam döngüsü.
  *
  * Bir oda = bu imajdan bir container, içinde N agent süreci. Container PID 1
- * hiçbir iş yapmaz (`sleep infinity`); agent süreçleri Hafta 2'de `docker exec`
- * ile, her biri kendi kullanıcısı altında başlatılacak.
+ * hiçbir iş yapmaz (`sleep infinity`); agent süreçleri Hafta 2'de exec ile
+ * başlatılacak.
  *
- * Argüman üretimi (`buildRunArgs`) saf tutuldu: docker kurulu olmadan test edilir.
+ * Neden dockerode, CLI değil: Hafta 2-3'te agent çıktısı uzun ömürlü exec
+ * stream'i olarak akacak, Hafta 11'de container istatistikleri okunacak.
+ * İkisi de kütüphane üzerinden gerçek stream/nesne veriyor; CLI tarafında
+ * süreç yönetimi ve metin ayrıştırması olurdu — ki "metin kazıma yok" kuralı
+ * tam olarak bunun için var.
+ *
+ * Create seçenekleri (`buildCreateOptions`) saf tutuldu: docker olmadan test edilir.
  */
 
-export interface DockerResult {
-  code: number;
-  stdout: string;
-  stderr: string;
+let client: Docker | null = null;
+
+/** Docker istemcisi. Windows'ta named pipe, Linux/macOS'ta unix socket — varsayılan. */
+export function getDocker(): Docker {
+  if (!client) client = new Docker();
+  return client;
 }
 
-/** docker CLI'ı çağırır. Kabuk kullanılmaz — argümanlar kaçışsız geçer. */
-export function docker(args: string[], { timeoutMs = 120_000 } = {}): Promise<DockerResult> {
-  return new Promise((resolve) => {
-    const child = spawn("docker", args, { windowsHide: true });
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
-
-    child.stdout.on("data", (b) => (stdout += b.toString()));
-    child.stderr.on("data", (b) => (stderr += b.toString()));
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      resolve({ code: 127, stdout, stderr: String(err) });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code: code ?? 1, stdout: stdout.trim(), stderr: stderr.trim() });
-    });
-  });
-}
-
-export class DockerError extends Error {
-  constructor(
-    message: string,
-    readonly result: DockerResult,
-  ) {
-    super(`${message}: ${result.stderr || result.stdout || `çıkış kodu ${result.code}`}`);
-    this.name = "DockerError";
-  }
-}
-
-async function dockerOrThrow(args: string[], what: string, opts?: { timeoutMs?: number }) {
-  const res = await docker(args, opts);
-  if (res.code !== 0) throw new DockerError(what, res);
-  return res;
-}
+export const ROOM_MOUNT = "/room";
 
 /**
- * Windows yollarını docker'ın kabul ettiği biçime çevirir:
- * `C:\Users\x\room` → `C:/Users/x/room`. Ters bölü docker CLI'da mount
- * ayrıştırmasını bozuyor; ileri bölü her iki platformda da çalışıyor.
+ * Windows yollarını bind mount'un kabul ettiği biçime çevirir:
+ * `C:\Users\x\room` → `C:/Users/x/room`.
  */
 export function toDockerPath(hostPath: string): string {
   return hostPath.replace(/\\/g, "/");
@@ -71,110 +43,86 @@ export function roomContainerName(roomId: string): string {
   return `agent-rooms-room-${shortRoomId(roomId)}`;
 }
 
+/** Odaya ait container'ları bulmak için — temizlik ve kapı script'i bunu kullanır. */
+export const ROOM_LABEL = "agent-rooms.room";
+export const MANAGED_LABEL = "agent-rooms.managed";
+
 export interface RoomContainerSpec {
   roomId: string;
   /** Host tarafındaki oda kökü — container içinde /room olarak görünür. */
   roomRoot: string;
   image: string;
-  /** Bütçe hard stop'u Faz 2'de token tarafında; bunlar container tarafı. */
   memoryMb?: number;
   cpus?: number;
-  /** Hafta 2'de agent'lar dışarı çıkacak; şimdilik varsayılan köprü. */
-  network?: string;
 }
 
-export const ROOM_MOUNT = "/room";
-
-/**
- * `docker run` argümanları. Tek mount var: oda kökü rw olarak /room'a bağlanır.
- *
- * Agent başına rw/ro ayrımı mount ile YAPILAMAZ — tek container, tek dosya
- * sistemi. O ayrım container içinde POSIX sahipliğiyle uygulanır; bkz.
- * `docker/isolation.ts`. Mount seviyesinde ayırmak oda başına N container
- * demekti, bu da "bir oda = bir container" kararını bozardı.
- */
-export function buildRunArgs(spec: RoomContainerSpec): string[] {
-  const { roomId, roomRoot, image, memoryMb = 2048, cpus = 2, network } = spec;
-  const args = [
-    "run",
-    "-d",
-    "--name",
-    roomContainerName(roomId),
-    "--label",
-    "agent-rooms.managed=true",
-    "--label",
-    `agent-rooms.room=${roomId}`,
-    "-v",
-    `${toDockerPath(roomRoot)}:${ROOM_MOUNT}`,
-    "-w",
-    ROOM_MOUNT,
-    "--memory",
-    `${memoryMb}m`,
-    "--cpus",
-    String(cpus),
-    // Döngüye giren bir agent'ın fork bombasına dönmesini engeller.
-    "--pids-limit",
-    "512",
-  ];
-  if (network) args.push("--network", network);
-  args.push(image);
-  return args;
+export function buildCreateOptions(spec: RoomContainerSpec): Docker.ContainerCreateOptions {
+  const { roomId, roomRoot, image, memoryMb = 2048, cpus = 2 } = spec;
+  return {
+    Image: image,
+    name: roomContainerName(roomId),
+    Labels: { [MANAGED_LABEL]: "true", [ROOM_LABEL]: roomId },
+    WorkingDir: ROOM_MOUNT,
+    HostConfig: {
+      Binds: [`${toDockerPath(roomRoot)}:${ROOM_MOUNT}`],
+      Memory: memoryMb * 1024 * 1024,
+      NanoCpus: cpus * 1_000_000_000,
+      // Döngüye giren bir agent'ın fork bombasına dönmesini engeller.
+      PidsLimit: 512,
+    },
+  };
 }
 
 export async function dockerAvailable(): Promise<boolean> {
-  return (await docker(["info"], { timeoutMs: 15_000 })).code === 0;
+  try {
+    await getDocker().ping();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function imageExists(image: string): Promise<boolean> {
-  const res = await docker(["image", "inspect", image], { timeoutMs: 20_000 });
-  return res.code === 0;
+  try {
+    await getDocker().getImage(image).inspect();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-/** Container'ı ayağa kaldırır, tam kimliğini döner. */
+/** Container'ı ayağa kaldırır, kimliğini döner. Aynı odadan artık kalmışsa temizler. */
 export async function startRoomContainer(spec: RoomContainerSpec): Promise<string> {
-  const name = roomContainerName(spec.roomId);
-  // Aynı odadan artık kalmışsa temizle — yeniden açılabilir olsun.
-  await docker(["rm", "-f", name], { timeoutMs: 30_000 });
-  const res = await dockerOrThrow(buildRunArgs(spec), `container başlatılamadı (${name})`);
-  return res.stdout.split("\n").pop()!.trim();
+  const docker = getDocker();
+  await stopRoomContainer(roomContainerName(spec.roomId));
+
+  const container = await docker.createContainer(buildCreateOptions(spec));
+  await container.start();
+  return container.id;
 }
 
+/** Container'ı durdurup siler. Yoksa sessizce geçer. */
 export async function stopRoomContainer(container: string): Promise<void> {
-  await docker(["rm", "-f", container], { timeoutMs: 60_000 });
-}
-
-export interface ExecOptions {
-  /** Container içi kullanıcı. Verilmezse imajın varsayılanı (root). */
-  user?: string;
-  workdir?: string;
-  timeoutMs?: number;
-}
-
-/** Container içinde komut koşturur. Kabuk yok — argv olduğu gibi geçer. */
-export async function execInRoom(
-  container: string,
-  argv: string[],
-  { user, workdir, timeoutMs = 60_000 }: ExecOptions = {},
-): Promise<DockerResult> {
-  const args = ["exec"];
-  if (user) args.push("-u", user);
-  if (workdir) args.push("-w", workdir);
-  args.push(container, ...argv);
-  return docker(args, { timeoutMs });
-}
-
-/** Container içinde `sh -lc` ile kabuk satırı koşturur (izin testleri için). */
-export function execShell(
-  container: string,
-  script: string,
-  opts: ExecOptions = {},
-): Promise<DockerResult> {
-  return execInRoom(container, ["sh", "-c", script], opts);
+  try {
+    await getDocker().getContainer(container).remove({ force: true });
+  } catch (err) {
+    // 404 = zaten yok. Başka bir hataysa çağıran görsün.
+    if ((err as { statusCode?: number }).statusCode !== 404) throw err;
+  }
 }
 
 export async function containerStatus(container: string): Promise<string | null> {
-  const res = await docker(["inspect", "-f", "{{.State.Status}}", container], {
-    timeoutMs: 20_000,
-  });
-  return res.code === 0 ? res.stdout.trim() : null;
+  try {
+    const info = await getDocker().getContainer(container).inspect();
+    return info.State.Status;
+  } catch {
+    return null;
+  }
+}
+
+/** Bu araç tarafından yönetilen container'lar — kapı script'inin temizliği için. */
+export async function listRoomContainers(roomId?: string): Promise<Docker.ContainerInfo[]> {
+  const filters: Record<string, string[]> = { label: [`${MANAGED_LABEL}=true`] };
+  if (roomId) filters.label!.push(`${ROOM_LABEL}=${roomId}`);
+  return getDocker().listContainers({ all: true, filters: JSON.stringify(filters) });
 }

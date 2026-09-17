@@ -2,20 +2,21 @@ import path from "node:path";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Actor } from "@agent-rooms/protocol";
-import { PROTOCOL_VERSION } from "@agent-rooms/protocol";
+import { NewRoomEvent, PROTOCOL_VERSION } from "@agent-rooms/protocol";
 import {
+  appendEvent,
   closeRoom,
   containerStatus,
+  getPool,
   getRoom,
   getRoomConfig,
-  isolationHolds,
+  getSession,
   latestSession,
   listRooms,
   loadRoomConfig,
   openRoom,
   readEvents,
   readJournal,
-  verifyIsolation,
 } from "@agent-rooms/core";
 import { loadApiConfig, resolveConfigPath, type ApiConfig } from "./config.js";
 
@@ -67,15 +68,25 @@ function actorFrom(header: string | undefined, name: string | undefined): Actor 
 export function createApp(cfg: ApiConfig = loadApiConfig()) {
   const app = new Hono();
 
-  app.get("/health", (c) =>
-    c.json({
+  // DB'ye gerçekten dokunur: "ayakta" demek "yazabiliyorum" demektir.
+  app.get("/health", async (c) => {
+    try {
+      await getPool().query("SELECT 1");
+    } catch (err) {
+      return c.json(
+        { ok: false, db: false, error: err instanceof Error ? err.message : String(err) },
+        503,
+      );
+    }
+    return c.json({
       ok: true,
+      db: true,
       protocolVersion: PROTOCOL_VERSION,
       week: 1,
       roomImage: cfg.roomImage,
       spawnContainer: cfg.spawnContainer,
-    }),
-  );
+    });
+  });
 
   app.get("/rooms", async (c) => c.json({ rooms: await listRooms() }));
 
@@ -154,19 +165,6 @@ export function createApp(cfg: ApiConfig = loadApiConfig()) {
     return c.json(await readJournal(roomRoot, config));
   });
 
-  /**
-   * Cuma dogfood kapısı, endpoint hâli: izolasyon container içinde gerçekten
-   * tutuyor mu? Her agent kullanıcısı adına yazma denemesi yapar.
-   */
-  app.get("/rooms/:id/isolation", async (c) => {
-    const { room, config } = await mustFindRoom(c.req.param("id"));
-    const session = await latestSession(room.id);
-    if (!session?.containerId) throw new HttpError(409, "odanın ayakta container'ı yok");
-
-    const checks = await verifyIsolation(session.containerId, config);
-    return c.json({ holds: isolationHolds(checks), checks });
-  });
-
   app.post("/rooms/:id/stop", async (c) => {
     const { room } = await mustFindRoom(c.req.param("id"));
     const event = await closeRoom({
@@ -175,6 +173,39 @@ export function createApp(cfg: ApiConfig = loadApiConfig()) {
     });
     return c.json({ stopped: true, event: event ? { seq: event.seq, type: event.type } : null });
   });
+
+  /**
+   * SADECE geliştirme. Hafta 1 kapısının "elle event yazıp since=N ile geri oku"
+   * maddesi bunu kullanır; Hafta 2'den itibaren event'leri agent runtime üretir.
+   * Üretimde uç hiç tanımlanmaz — 404 döner.
+   */
+  if (process.env.NODE_ENV !== "production") {
+    app.post("/sessions/:sid/events", async (c) => {
+      const sid = c.req.param("sid");
+      if (!Uuid.safeParse(sid).success) throw new HttpError(400, "oturum kimliği UUID değil");
+      const session = await getSession(sid);
+      if (!session) throw new HttpError(404, "oturum bulunamadı");
+
+      const raw = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+      // seq ve ts sunucunun; roomId oturumdan gelir. Çağıran sadece type + payload verir.
+      const parsed = NewRoomEvent.safeParse({
+        roomId: session.roomId,
+        sessionId: session.id,
+        actor: raw.actor ?? actorFrom(c.req.header("x-user-id"), c.req.header("x-user-name")),
+        type: raw.type,
+        payload: raw.payload,
+      });
+      if (!parsed.success) {
+        throw new HttpError(
+          400,
+          "event şemaya uymuyor",
+          parsed.error.issues.map((i) => `${i.path.join(".") || "<kök>"}: ${i.message}`),
+        );
+      }
+
+      return c.json(await appendEvent(parsed.data), 201);
+    });
+  }
 
   app.notFound((c) => c.json({ error: "böyle bir uç yok" }, 404));
 

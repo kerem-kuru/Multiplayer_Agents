@@ -84,18 +84,17 @@ try {
   assert.equal(journal.json.backend, "filesystem-stub");
   console.log(`defter    ${journal.json.entries.length} kayıt (${journal.json.backend})`);
 
-  // 6 — Cuma dogfood kapısı: izolasyon container içinde tutuyor mu
-  const iso = await api("GET", `/rooms/${roomId}/isolation`);
-  assert.equal(iso.status, 200);
-  for (const c of iso.json.checks) {
-    console.log(`izolasyon ${c.agent} (${c.user}): ${c.detail.join(" · ")}`);
-  }
-  if (iso.json.holds) {
-    console.log("izolasyon TUTUYOR ✓");
-  } else {
-    console.log("izolasyon TUTMUYOR ✗ — ayrıntı için docs/week-01.md");
-    failed = true;
-  }
+  // 6 — elle event yaz, since=N ile geri oku (Hafta 1 kapısının tam cümlesi)
+  const note = await api("POST", `/sessions/${created.json.session.id}/events`, {
+    type: "debug.note",
+    payload: { text: "elle yazilan event" },
+  });
+  assert.equal(note.status, 201, `elle event yazma → ${note.status}`);
+  assert.equal(note.json.seq, 3, `beklenen seq 3, gelen ${note.json.seq}`);
+  const afterNote = await api("GET", `/rooms/${roomId}/events?since=2`);
+  assert.equal(afterNote.json.events.length, 1);
+  assert.equal(afterNote.json.events[0].type, "debug.note");
+  console.log(`elle      3:debug.note yazildi, since=2 ile geri okundu`);
 
   // 7 — odayı kapat
   const stopped = await api("POST", `/rooms/${roomId}/stop`);

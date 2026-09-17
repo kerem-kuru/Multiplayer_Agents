@@ -5,3 +5,4 @@ dist/
 .env.local
 .DS_Store
 /rooms-data/
+.week1-gate.tmp.yaml

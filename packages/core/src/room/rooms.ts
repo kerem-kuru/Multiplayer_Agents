@@ -172,3 +172,29 @@ export async function getRoomConfig(
   const row = res.rows[0];
   return row ? (row.config as RoomConfig) : null;
 }
+
+/** Oturumu kimliğiyle bul. Elle event yazma ucu roomId'yi buradan alır. */
+export async function getSession(
+  sessionId: string,
+  pool: pg.Pool = getPool(),
+): Promise<SessionRecord | null> {
+  const res = await pool.query<{
+    id: string;
+    room_id: string;
+    container_id: string | null;
+    status: "starting" | "running" | "ended";
+    started_at: Date;
+  }>(
+    `SELECT id, room_id, container_id, status, started_at FROM sessions WHERE id = $1`,
+    [sessionId],
+  );
+  const row = res.rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    containerId: row.container_id,
+    status: row.status,
+    startedAt: row.started_at.toISOString(),
+  };
+}

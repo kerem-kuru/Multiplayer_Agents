@@ -1,4 +1,6 @@
 # apps/web
 
-Hafta 3: SSE istemcisi, xterm.js render, event → gorsel esleme.
-Hafta 7: oda gorunumu (agent kartlari) + agent detayi.
+React + Vite istemcisi. Hafta 3'te doldurulacak: SSE ile `GET /rooms/:id/events?since=N`
+akışı, event → görsel eşleme, xterm.js terminal görünümü.
+
+Bu hafta sadece iskelet — `npm run dev -w @agent-rooms/web` ile açılır.
