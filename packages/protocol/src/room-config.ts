@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AgentName } from "./ids.js";
+import { RuntimeKind } from "./runtime.js";
 import { ToolName } from "./tools.js";
 
 /**
@@ -28,6 +29,8 @@ export const AgentConfig = z
     /** Oda köküne göre çalışma alanı: worktrees/frontend */
     workspace: z.string().min(1),
     model: z.string().min(1).default("claude-sonnet-5"),
+    /** Hangi koşum ortamı container içinde koşacak. Sözleşme: runtime.ts */
+    runtime: RuntimeKind.default("claude"),
     // Serbest string değil sabit küme: YAML'da yanlış yazılmış bir tool adı
     // sessizce yutulmak yerine config yüklenirken hata verir.
     toolsAllow: z.array(ToolName).default(["bash", "edit", "read"]),

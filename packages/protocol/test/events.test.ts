@@ -99,3 +99,52 @@ describe("event kataloğu", () => {
     expect(e.type === "tool.call" && e.payload.truncated).toBe(false);
   });
 });
+
+describe("sağlayıcı bağımsızlığı", () => {
+  it("sağlayıcı değişkenlerini toplar, ilgisizleri almaz", async () => {
+    const { collectProviderEnv } = await import("../src/runtime.js");
+    const env = collectProviderEnv({
+      CLAUDE_CODE_USE_BEDROCK: "1",
+      AWS_ACCESS_KEY_ID: "AKIA...",
+      AWS_REGION: "eu-central-1",
+      ANTHROPIC_VERTEX_PROJECT_ID: "p1",
+      PATH: "/usr/bin",
+      DATABASE_URL: "postgres://x",
+      EMPTY: "",
+    });
+    expect(Object.keys(env).sort()).toEqual([
+      "ANTHROPIC_VERTEX_PROJECT_ID",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_REGION",
+      "CLAUDE_CODE_USE_BEDROCK",
+    ]);
+    // Sır taşımayan ama alakasız değişkenler container'a sızmamalı.
+    expect(env).not.toHaveProperty("DATABASE_URL");
+  });
+
+  it("sağlayıcı seçiliyse API anahtarı zorunlu değil", async () => {
+    const { hasProviderBackend } = await import("../src/runtime.js");
+    expect(hasProviderBackend({ CLAUDE_CODE_USE_BEDROCK: "1" })).toBe(true);
+    expect(hasProviderBackend({ ANTHROPIC_BASE_URL: "https://gw.local" })).toBe(true);
+    expect(hasProviderBackend({ ANTHROPIC_API_KEY: "sk-ant-x" })).toBe(false);
+    expect(hasProviderBackend({})).toBe(false);
+  });
+
+  it("rol YAML'ı koşum ortamını taşır, varsayılanı claude", async () => {
+    const { AgentConfig } = await import("../src/room-config.js");
+    const a = AgentConfig.parse({
+      name: "backend",
+      systemPrompt: "x",
+      workspace: "worktrees/backend",
+    });
+    expect(a.runtime).toBe("claude");
+    expect(() =>
+      AgentConfig.parse({
+        name: "backend",
+        systemPrompt: "x",
+        workspace: "worktrees/backend",
+        runtime: "uydurma",
+      }),
+    ).toThrow();
+  });
+});

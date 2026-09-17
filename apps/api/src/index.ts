@@ -1,6 +1,7 @@
 import path from "node:path";
 import { serve } from "@hono/node-server";
 import { AgentManager, closePool } from "@agent-rooms/core";
+import { collectProviderEnv, hasProviderBackend } from "@agent-rooms/protocol";
 import { createApp } from "./app.js";
 import { REPO_ROOT, loadApiConfig } from "./config.js";
 
@@ -14,15 +15,21 @@ try {
 
 const cfg = loadApiConfig();
 
+// Bedrock/Vertex/gateway seçiliyse API anahtarı GEREKMEZ — kimlik doğrulama
+// dışarıdan gelir (AWS kimlikleri, gcloud ADC).
+const providerEnv = collectProviderEnv(process.env);
+const provider = hasProviderBackend(process.env);
+
 /**
- * Anahtar yoksa agent yöneticisi hiç kurulmaz: oda açma ve event okuma
- * çalışmaya devam eder, agent uçları 503 döner. Sessizce yarım çalışan bir
- * sunucudan iyidir.
+ * Ne anahtar ne sağlayıcı varsa agent yöneticisi hiç kurulmaz: oda açma ve
+ * event okuma çalışmaya devam eder, agent uçları 503 döner. Sessizce yarım
+ * çalışan bir sunucudan iyidir.
  */
-const manager = cfg.agent.apiKey
+const manager = cfg.agent.apiKey || provider
   ? new AgentManager({
       apiKey: cfg.agent.apiKey,
       modelOverride: cfg.agent.modelOverride || undefined,
+      providerEnv,
       maxTurns: cfg.agent.maxTurns,
       maxBudgetUsd: cfg.agent.maxBudgetUsd,
       heartbeatTimeoutMs: cfg.agent.heartbeatTimeoutMs,
@@ -47,8 +54,14 @@ const server = serve({ fetch: app.fetch, port: cfg.port }, (info) => {
   console.log(`  oda imajı      ${cfg.roomImage}`);
   console.log(`  oda klasörleri ${cfg.roomsDataDir}`);
   console.log(`  container      ${cfg.spawnContainer ? "açık" : "kapalı (SPAWN_CONTAINER=0)"}`);
+  const backend = provider
+    ? Object.keys(providerEnv)
+        .filter((k) => k.startsWith("CLAUDE_CODE_USE_"))
+        .map((k) => k.replace("CLAUDE_CODE_USE_", "").toLowerCase())
+        .join(",") || "özel base URL"
+    : "anthropic";
   console.log(
-    `  agent          ${manager ? `açık (model: ${cfg.agent.modelOverride || "YAML"})` : "KAPALI — ANTHROPIC_API_KEY yok"}`,
+    `  agent          ${manager ? `açık (${backend}, model: ${cfg.agent.modelOverride || "YAML"})` : "KAPALI — anahtar veya sağlayıcı yok"}`,
   );
 });
 

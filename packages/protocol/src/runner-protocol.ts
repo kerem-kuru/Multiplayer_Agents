@@ -73,7 +73,12 @@ export const RunnerEnv = z.object({
   /** Agent'ın YAML config'i, JSON olarak. */
   ROOM_AGENT_CONFIG: z.string().min(1),
   RESUME_SESSION_ID: z.string().optional(),
-  ANTHROPIC_API_KEY: z.string().min(1),
+  /**
+   * Doğrudan Anthropic kullanılıyorsa zorunlu. Bedrock/Vertex/gateway
+   * seçiliyse kimlik doğrulama dışarıdan gelir (AWS kimlikleri, gcloud ADC)
+   * ve bu alan boş kalır.
+   */
+  ANTHROPIC_API_KEY: z.string().optional(),
   AGENT_MODEL: z.string().min(1),
   AGENT_MAX_TURNS: z.string().optional(),
   AGENT_MAX_BUDGET_USD: z.string().optional(),

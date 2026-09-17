@@ -113,6 +113,31 @@ Aradaki her satır bizim tanımladığımız bir şemadır ve Zod ile doğrulan�
 
 **Tool yetkisi üç katmanda**, hiçbiri sistem prompt'u değil: SDK `tools` (agent sadece bunları görür), `disallowedTools` (yasaklılar kaldırılır), `PreToolUse` hook'u (her çağrı YAML'a karşı son kez kontrol edilir, reddedilen `tool.denied` olarak log'a düşer).
 
+## Model ve sağlayıcı bağımsızlığı
+
+En iyi model her yıl değişiyor. Odanın değeri modelde değil, agent'ların okuyup yazdığı paylaşılan bağlamda — bu yüzden koşum ortamı değiştirilebilir.
+
+**Model seçimi** rol YAML'ında agent başına (`model`), `AGENT_MODEL` ile global olarak ezilebilir.
+
+**Sağlayıcı seçimi** ortam değişkeniyle; aynı modeller, farklı arka uç:
+
+```bash
+CLAUDE_CODE_USE_BEDROCK=1   # + AWS_REGION, AWS_ACCESS_KEY_ID, ...
+CLAUDE_CODE_USE_VERTEX=1    # + ANTHROPIC_VERTEX_PROJECT_ID, GOOGLE_APPLICATION_CREDENTIALS
+ANTHROPIC_BASE_URL=...      # + ANTHROPIC_AUTH_TOKEN  (kurumsal gateway)
+```
+
+Sağlayıcı seçiliyse `ANTHROPIC_API_KEY` gerekmez. `AWS_*` / `GOOGLE_*` değişkenleri container'a olduğu gibi geçer — SDK'nın bağlanabilmesi için başka yolu yok; Hafta 4'teki redaction bunları stream'e sızdırmamakla yükümlü.
+
+**Farklı bir agent CLI'ı** (Codex, Gemini gibi) rol YAML'ındaki `runtime` alanıyla seçilecek. Bugün tek değer var: `claude`. Bu dikiş mimariyi değiştirmiyor — runner zaten container içinde ayrı bir süreç ve host ile arasındaki tek bağ NDJSON; host hangi binary'nin koştuğunu bilmiyor. Yeni bir koşum ortamının sağlaması gereken sözleşme `packages/protocol/src/runtime.ts` başında yazılı:
+
+1. **Yapılandırılmış akış** — sadece insan için biçimlenmiş metin veren bir CLI kabul edilemez ("metin kazıma yok")
+2. **Tool kapısı** — tool çalışmadan önce araya girilebilmeli ki YAML'daki yetki zorlanabilsin
+3. **Oturum sürekliliği** — çökme sonrası sohbet sürsün
+4. **NDJSON** — kendi akışını bizim event kataloğumuza çevirir
+
+Katalog zaten sağlayıcı-bağımsız: `tool.call`, `tool.result`, `turn.completed` hiçbir yerde "Claude" demiyor.
+
 ## Event log
 
 Her şey append-only; UI bunun projeksiyonudur. `session_events` üzerinde UPDATE ve DELETE veritabanı trigger'ı ile engellidir. `seq`, oturum başına `sessions.next_seq` satır kilidi üzerinden dağıtılır — iki paralel yazıcı asla aynı sırayı alamaz; `(session_id, seq)` unique index son savunma hattıdır.
@@ -158,4 +183,5 @@ Hafta 1 görev tanımından bilinçli olarak ayrılan noktalar ve gerekçeleri.
 | DoD'un `grep "query("` kontrolü uyarlandı | Bizim yığınımızda `pg` var, `pool.query(` ve `c.req.query(` yanlış pozitif veriyor. Niyet "SDK host'ta çağrılmasın"; doğru ölçüm `grep -rn "claude-agent-sdk" apps/api/src packages/core/src` — sonuç boş. |
 | Canlılık ölçümü heartbeat'e değil **herhangi bir satıra** bağlandı | Tek mesaj tipine bağlamak kırılgan: iş üretip heartbeat'i kaçıran bir runner boşuna öldürülürdü. |
 | Exec katmanı gelen satırları tamponluyor | Akış `startRunnerExec` dönmeden akmaya başlıyor; çağıran `onLine`'ı ancak sonra kaydedebiliyor. Arada kaybolan bir `ready` satırı agent'ı 30 sn "starting"de bırakıyordu — canlı testte bir kez gözlendi, tamponlama sonrası tekrarlanmadı. |
+| Sağlayıcı dikişi Hafta 2'de açıldı | Yol haritası "Agent runtime: Claude Agent SDK" diyor ve bu korundu. Ama `runtime` alanı ve sağlayıcı env geçişi şimdi eklendi: en iyi model her yıl değişiyor, dikişi sonradan açmak mevcut kodu yeniden yazmak demekti. İkinci koşum ortamı **eklenecek**, hiçbir şey değişmeyecek. |
 | Tek sunucu örneği varsayımı | `AgentManager` bellekte. İkinci bir sunucu örneği açılış mutabakatında birincinin runner'larını öldürür. Çok sunuculu dağıtım Redis ile sonraki fazlarda — o zamana kadar tek örnek koş. |
