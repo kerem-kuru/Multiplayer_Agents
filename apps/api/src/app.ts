@@ -18,11 +18,13 @@ import {
   listRooms,
   loadRoomConfig,
   openRoom,
+  listRoomsOverview,
   listRuntime,
   readEvents,
   readJournal,
 } from "@agent-rooms/core";
 import { loadApiConfig, resolveConfigPath, type ApiConfig } from "./config.js";
+import { resolveSince, streamSession, wantsSse } from "./routes/events-sse.js";
 
 /**
  * Tek API yüzeyi — insanlar ve (Hafta 8'den itibaren) agent'lar aynı
@@ -102,7 +104,7 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
     });
   });
 
-  app.get("/rooms", async (c) => c.json({ rooms: await listRooms() }));
+  app.get("/rooms", async (c) => c.json({ rooms: await listRoomsOverview() }));
 
   app.post("/rooms", async (c) => {
     const raw = await c.req.json().catch(() => ({}));
@@ -152,10 +154,18 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
     return c.json({ room, session, container: session?.containerId ? { status } : null });
   });
 
+  /**
+   * Tek endpoint, iki kip — yol haritasındaki sözleşme korunuyor:
+   * `Accept: text/event-stream` ise SSE, değilse sayfalanmış JSON.
+   */
   app.get("/rooms/:id/events", async (c) => {
     const { room } = await mustFindRoom(c.req.param("id"));
     const session = await latestSession(room.id);
     if (!session) throw new HttpError(404, "bu odanın oturumu yok");
+
+    if (wantsSse(c)) {
+      return streamSession(c, { sessionId: session.id, since: resolveSince(c) });
+    }
 
     const q = EventsQuery.safeParse({
       since: c.req.query("since") ?? 0,
@@ -167,8 +177,9 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
     return c.json({
       sessionId: session.id,
       since: q.data.since,
-      /** İstemci bir sonraki isteğinde bunu `since` olarak yollar. */
-      nextSince: events.length > 0 ? events[events.length - 1]!.seq : q.data.since,
+      lastSeq: events.length > 0 ? events[events.length - 1]!.seq : q.data.since,
+      // İstemci bu false olana kadar sayfalar, sonra SSE'yi açar.
+      hasMore: events.length === q.data.limit,
       events,
     });
   });

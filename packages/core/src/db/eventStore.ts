@@ -5,6 +5,7 @@ import {
   parseEvent,
   type NewRoomEvent,
 } from "@agent-rooms/protocol";
+import { getEventBus } from "../bus.js";
 import { getPool, withTx } from "./pool.js";
 
 /**
@@ -60,12 +61,19 @@ async function appendOne(
   });
 }
 
-/** Tek event yaz. */
+/**
+ * Tek event yaz.
+ *
+ * Yayın COMMIT'TEN SONRA yapılır: önce yayınlamak, UI'da veritabanında
+ * olmayan bir event göstermek demektir. Rollback olursa kimse duymaz.
+ */
 export async function appendEvent(
   event: NewRoomEvent,
   pool: pg.Pool = getPool(),
 ): Promise<RoomEvent> {
-  return withTx((client) => appendOne(client, event), pool);
+  const stored = await withTx((client) => appendOne(client, event), pool);
+  getEventBus().publish(stored.sessionId, stored);
+  return stored;
 }
 
 /** Birden çok event'i tek transaction'da, verilen sırayla yaz. */
@@ -73,11 +81,15 @@ export async function appendEvents(
   events: NewRoomEvent[],
   pool: pg.Pool = getPool(),
 ): Promise<RoomEvent[]> {
-  return withTx(async (client) => {
+  const stored = await withTx(async (client) => {
     const out: RoomEvent[] = [];
     for (const e of events) out.push(await appendOne(client, e));
     return out;
   }, pool);
+  // Hepsi tek commit'te yazıldı; yayın da commit'ten sonra, sırayla.
+  const bus = getEventBus();
+  for (const e of stored) bus.publish(e.sessionId, e);
+  return stored;
 }
 
 export interface ReadOptions {

@@ -198,3 +198,68 @@ export async function getSession(
     startedAt: row.started_at.toISOString(),
   };
 }
+
+export interface RoomOverview {
+  id: string;
+  name: string;
+  createdAt: string;
+  agents: string[];
+  session: { id: string; status: string; lastSeq: number } | null;
+}
+
+/**
+ * Oda listesi + son oturumun durumu ve `lastSeq`'i — TEK sorguda.
+ *
+ * Oda başına ayrı sorgu atmak (N+1) birkaç odada fark ettirmez ama liste
+ * sayfası her yenilendiğinde büyür. LATERAL join ile son oturum satır başına
+ * bir kez bulunur.
+ */
+export async function listRoomsOverview(
+  limit = 50,
+  pool: pg.Pool = getPool(),
+): Promise<RoomOverview[]> {
+  const res = await pool.query<{
+    id: string;
+    name: string;
+    created_at: Date;
+    config: unknown;
+    session_id: string | null;
+    session_status: string | null;
+    last_seq: string;
+  }>(
+    `SELECT r.id, r.name, r.created_at, r.config,
+            s.id     AS session_id,
+            s.status AS session_status,
+            COALESCE(MAX(e.seq), 0)::text AS last_seq
+       FROM rooms r
+       LEFT JOIN LATERAL (
+            SELECT id, status FROM sessions
+             WHERE room_id = r.id
+             ORDER BY started_at DESC
+             LIMIT 1
+       ) s ON true
+       LEFT JOIN session_events e ON e.session_id = s.id
+      GROUP BY r.id, r.name, r.created_at, r.config, s.id, s.status
+      ORDER BY r.created_at DESC
+      LIMIT $1`,
+    [limit],
+  );
+
+  return res.rows.map((r) => {
+    const cfg = r.config as RoomConfig | null;
+    return {
+      id: r.id,
+      name: r.name,
+      createdAt: r.created_at.toISOString(),
+      // Agent sayısı sabit değil: her zaman config dizisinden.
+      agents: cfg?.agents?.map((a) => a.name) ?? [],
+      session: r.session_id
+        ? {
+            id: r.session_id,
+            status: r.session_status ?? "unknown",
+            lastSeq: Number(r.last_seq),
+          }
+        : null,
+    };
+  });
+}
