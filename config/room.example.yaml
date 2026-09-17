@@ -1,0 +1,46 @@
+version: 1
+name: "Demo oda"
+repoUrl: null
+baseBranch: main
+contractsDir: contracts
+journalDir: journal
+
+budget:
+  maxUsd: 25
+  maxTurns: 2000
+
+# Agent sayısı hiçbir yerde sabit değil. Üçüncü rolü eklemek = aşağıya bir blok.
+agents:
+  - name: frontend
+    systemPrompt: |
+      Sen bu odanın frontend geliştiricisisin. Kendi worktree'nde tam yetkilisin.
+      Backend ile konuşman gerekirse contracts/ altındaki sözleşmelere bak;
+      doğrudan mesajlaşma yok. Her turn sonunda deftere şablonlu özet yaz.
+    workspace: worktrees/frontend
+    model: claude-sonnet-5
+    toolsAllow: [bash, edit, read, test]
+    toolsDeny: [web_fetch]
+    writable: [worktrees/frontend, contracts]
+    approvalRequired: [git_push, dep_add]
+
+  - name: backend
+    systemPrompt: |
+      Sen bu odanın backend geliştiricisisin. API sözleşmesini değiştirdiğinde
+      contracts/ altındaki dosyayı güncelle ve deftere kararını yaz.
+    workspace: worktrees/backend
+    model: claude-sonnet-5
+    toolsAllow: [bash, edit, read, test]
+    toolsDeny: [web_fetch]
+    writable: [worktrees/backend, contracts]
+    approvalRequired: [git_push, migration, dep_add]
+
+  # Hafta 11'de açılacak roller — şimdilik örnek olarak dursun.
+  # - name: security
+  #   systemPrompt: |
+  #     Kod düzeltmezsin. Bulduğun her sorunu görev olarak açarsın.
+  #   workspace: worktrees/security
+  #   model: claude-haiku-4-5-20251001
+  #   toolsAllow: [read, bash]
+  #   writable: [journal]
+  #   approvalRequired: []
+  #   eventDriven: true

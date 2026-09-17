@@ -1,0 +1,12 @@
+{
+  "name": "@agent-rooms/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'Tauri 2 kabugu — apps/web ile ayni bilesenleri kullanacak'"
+  },
+  "dependencies": {
+    "@agent-rooms/protocol": "*"
+  }
+}

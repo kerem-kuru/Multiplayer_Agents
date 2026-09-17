@@ -1,0 +1,31 @@
+{
+  "name": "agent-rooms",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Multiplayer Agent Odalari — bir odada birden cok agent, birden cok gelistirici, tek paylasilan baglam",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "tsc -b packages/protocol packages/core",
+    "test": "vitest run",
+    "smoke": "node scripts/smoke.mjs",
+    "verify": "npm run build && node scripts/verify.mjs",
+    "test:watch": "vitest",
+    "db:up": "docker compose up -d postgres redis",
+    "db:down": "docker compose down",
+    "db:migrate": "node scripts/migrate.mjs",
+    "db:reset": "docker compose down -v && docker compose up -d postgres redis"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

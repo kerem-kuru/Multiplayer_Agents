@@ -1,0 +1,12 @@
+{
+  "name": "@agent-rooms/web",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "echo 'Hafta 3: xterm.js + SSE istemcisi buraya gelecek'"
+  },
+  "dependencies": {
+    "@agent-rooms/protocol": "*"
+  }
+}

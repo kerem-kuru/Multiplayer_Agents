@@ -1,0 +1,43 @@
+name: agent-rooms
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: rooms
+      POSTGRES_PASSWORD: "Kk2007.."
+      POSTGRES_DB: agent_rooms
+    ports:
+      # 5433 — makinede zaten bir Postgres varsa çakışmasın
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rooms -d agent_rooms"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    # Faz 2'de çok sunuculu pub/sub için. Hafta 1'de sadece ayakta duruyor.
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # Oda imajı: uzun süre çalışan bir servis değil, `POST /rooms` bunun
+  # bir kopyasını ayağa kaldırır. Burada sadece build edilsin diye duruyor.
+  room:
+    build:
+      context: ./rooms
+      dockerfile: Dockerfile
+    image: agent-rooms/room:dev
+    profiles: ["build-only"]
+    command: ["sleep", "infinity"]
+
+volumes:
+  pgdata:
