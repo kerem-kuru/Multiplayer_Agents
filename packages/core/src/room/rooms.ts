@@ -102,3 +102,73 @@ export async function getRoom(
     createdAt: row.created_at.toISOString(),
   };
 }
+
+/** Odanın en son oturumu. `since=N` okuması ve kapatma bunun üzerinden gider. */
+export async function latestSession(
+  roomId: string,
+  pool: pg.Pool = getPool(),
+): Promise<SessionRecord | null> {
+  const res = await pool.query<{
+    id: string;
+    room_id: string;
+    container_id: string | null;
+    status: "starting" | "running" | "ended";
+    started_at: Date;
+  }>(
+    `SELECT id, room_id, container_id, status, started_at
+       FROM sessions
+      WHERE room_id = $1
+      ORDER BY started_at DESC
+      LIMIT 1`,
+    [roomId],
+  );
+  const row = res.rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    containerId: row.container_id,
+    status: row.status,
+    startedAt: row.started_at.toISOString(),
+  };
+}
+
+/** Oda listesi — en yeni önce. Oda silinmez, arşivlenir; hepsi burada durur. */
+export async function listRooms(
+  limit = 50,
+  pool: pg.Pool = getPool(),
+): Promise<RoomRecord[]> {
+  const res = await pool.query<{
+    id: string;
+    name: string;
+    repo_url: string | null;
+    config_digest: string;
+    created_at: Date;
+  }>(
+    `SELECT id, name, repo_url, config_digest, created_at
+       FROM rooms
+      ORDER BY created_at DESC
+      LIMIT $1`,
+    [limit],
+  );
+  return res.rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    repoUrl: r.repo_url,
+    configDigest: r.config_digest,
+    createdAt: r.created_at.toISOString(),
+  }));
+}
+
+/** Odanın açıldığı andaki rol konfigürasyonu — YAML sonradan değişse de bu durur. */
+export async function getRoomConfig(
+  roomId: string,
+  pool: pg.Pool = getPool(),
+): Promise<RoomConfig | null> {
+  const res = await pool.query<{ config: unknown }>(
+    `SELECT config FROM rooms WHERE id = $1`,
+    [roomId],
+  );
+  const row = res.rows[0];
+  return row ? (row.config as RoomConfig) : null;
+}

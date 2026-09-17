@@ -13,7 +13,7 @@ Bu hafta hiçbir agent çalışmıyor. Sadece üstüne her şeyin kurulacağı a
 | 3 | Event tipleri `packages/protocol` içinde Zod şeması | 1 | ✅ |
 | 4 | Rol konfigürasyonu YAML yükleyici — agent sayısı sabit değil | 1 | ✅ |
 | 5 | docker-compose: postgres + redis + oda container imajı | 1 | ✅ |
-| 6 | `POST /rooms` → container spawn, worktree klasör yapısı | 2–3 | ⏳ |
+| 6 | `POST /rooms` → container spawn, worktree klasör yapısı | 2–3 | ✅ |
 
 ## Gün 1'de yapılanlar
 
@@ -43,16 +43,76 @@ npm run verify
 
 Sırayla: docker daemon'u bekler (3 dk'ya kadar) → postgres + redis kaldırır → healthy bekler → migration uygular → smoke koşar. Çıktının sonunda `Hafta 1 kapısı geçildi.` görmen gerekiyor. Görmezsen hangi adımda durduğu yazıyor.
 
-## Gün 2–3 için sıradaki iş
+## Gün 2–3'te yapılanlar
 
-1. `apps/api` paketi (Fastify veya Hono) + `POST /rooms`:
-   - YAML yükle → `createRoom` → `createSession`
-   - `scaffoldRoomLayout()` ile klasörleri kur
-   - `docker run` ile oda container'ı ayağa kaldır, `attachContainer()`
-   - `room.created` + `session.started` event'lerini yaz
-2. `GET /rooms/{id}/journal` ve `GET /rooms/{id}/events?since=N` iskeletleri (SSE Hafta 3'te).
-3. Oda imajını build et: `docker compose --profile build-only build room`.
-4. **Cuma dogfood kapısı:** gerçek bir repo ile oda aç, klasör düzeninin ve mount izinlerinin container içinde doğru olduğunu elle doğrula.
+**`apps/api` — Hono.** Fastify yerine Hono seçildi: Hafta 3'te yazılacak SSE için `hono/streaming` hazır geliyor, paket küçük, Zod ile tip çıkarımı doğrudan çalışıyor. Fastify'ın plugin ekosistemine bu projede ihtiyaç yok.
+
+Uçlar:
+
+| Uç | İş |
+| --- | --- |
+| `POST /rooms` | YAML → oda → oturum → klasör düzeni → container → provision → event'ler |
+| `GET /rooms` | Oda listesi |
+| `GET /rooms/{id}` | Oda + son oturum + container durumu |
+| `GET /rooms/{id}/events?since=N` | Event okuma. `nextSince` imleci döner; Hafta 3'te aynı sözleşmeyle SSE'ye geçilecek |
+| `GET /rooms/{id}/journal` | Defter iskeleti — `backend: "filesystem-stub"`, Hafta 8'de tabloya döner |
+| `GET /rooms/{id}/isolation` | Cuma dogfood kapısı, endpoint hâli |
+| `POST /rooms/{id}/stop` | `session.ended` + container silme. Oda kaydı DURUR |
+
+**Orkestrasyon `core/room/openRoom.ts` içinde, API'de değil.** HTTP olmadan da test edilebilsin ve Hafta 12'deki CLI aynı fonksiyonu çağırsın diye. Sıra: oda+oturum → klasörler → `room.created` → container+provision → `session.started`. Container adımı patlarsa `session.started` hiç yazılmaz, yerine `session.ended{reason:"crashed"}` düşer — log'da "başladı" görünüp aslında başlamamış oturum kalmaz.
+
+**`agent.spawned` event'i YAZILMIYOR.** Gün 1'in smoke'u bunu elle yazıyordu, o bir simülasyondu. Gerçek API'de bu hafta hiçbir agent koşmuyor, o yüzden event de yok. Hafta 2'de Agent SDK ile gelecek.
+
+### Agent izolasyonu: mount ile değil, POSIX ile
+
+Bir oda = bir container = **tek dosya sistemi**. Agent başına rw/ro mount vermek oda başına N container demekti, bu da mimarinin temel kararını bozardı. Bunun yerine her agent kendi OS kullanıcısı (`agent-frontend`) altında koşuyor, klasör sahipliği kısıtı uyguluyor:
+
+| Durum | Sahiplik | Mod |
+| --- | --- | --- |
+| Tek yazıcı (`worktrees/frontend`) | `agent-frontend:room` | `2750` |
+| Çok yazıcı (`contracts`) | `root:room` | `2770` |
+| Yazıcı yok (`journal`) | `root:room` | `2750` |
+
+setgid biti (`2xxx`) şart: içeride yaratılan yeni dosyalar `room` grubunu miras alsın ki diğer agent'lar okuyabilsin. `ownershipPlan()` bu tabloyu konfigürasyondan üretiyor ve `mountPlan()` ile aynı gerçeği söylediği test ediliyor.
+
+### Dogfood kapısında çıkan iki bulgu
+
+**1 — Windows bind mount POSIX sahipliğini taşıyor.** Beklenti aksiydi. Docker Desktop'ın WSL2 backend'i `C:\` sürücüsünü `metadata` seçeneğiyle bağlıyor:
+
+```
+C:\ on /room type 9p (...;metadata;...)
+```
+
+`metadata` sayesinde sahiplik ve mod NTFS genişletilmiş özniteliklerinde saklanıyor, `chown`/`chmod` gerçekten uygulanıyor. Yani izolasyon Windows host'ta da sahici — named volume'a geçmeye gerek kalmadı. Bu seçenek kapalı bir makinede kapı düşer; `GET /rooms/{id}/isolation` bunu söyler.
+
+**2 — Ara dizinler açık kalmıştı.** İlk uygulamada `worktrees/` `0777` kalıyordu. Bir dizin girdisini **silme ve yeniden adlandırma yetkisi o girdinin kendi izinlerinden değil, üst dizininin yazma yetkisinden gelir** — yani `agent-frontend`, `worktrees/backend` klasörünün *içine* yazamasa da onu `mv` ile taşıyabilirdi. İlk izolasyon testi bunu kaçırmıştı, çünkü sadece kardeş klasörün içine yazmayı deniyordu.
+
+Düzeltme: ara dizinler (`/room`, `worktrees`) `root:room 2755`. `chown` bunlarda **`-R` olmadan** koşuyor — oda kökünde recursive olsaydı alttaki agent sahipliklerini silerdi. `verifyIsolation()` artık her agent için ara dizinlere girdi açmayı da deniyor.
+
+### Doğrulama
+
+`npm run verify` zinciri uzadı:
+
+```
+docker bekle → db kaldır → migrate → smoke (çekirdek)
+  → oda imajını build et → smoke (api)
+```
+
+API smoke'un kanıtladıkları: `POST /rooms` 201 dönüyor, container `running`, event'ler `1:room.created 2:session.started`, `since=1` tek event + `nextSince=2`, defter iskeleti cevap veriyor, izolasyon iki agent için de tutuyor, `POST /stop` `session.ended` yazıp container'ı siliyor.
+
+31 test geçiyor (Gün 1: 15). Yeni testlerin hepsi saf — docker veya DB gerektirmiyor.
+
+## Sıradaki iş — Hafta 2
+
+1. Claude Agent SDK entegrasyonu, headless / stream-json modu
+2. Agent süreç yöneticisi: spawn, kill, sağlık kontrolü, çökme sonrası durum
+3. SDK'dan gelen her event'i `session_events`'e yaz — tool çağrısı, sonuç, dosya değişikliği
+4. `POST /rooms/{id}/agents/{aid}/message`
+5. Rol YAML'ından `toolsAllow` / `toolsDeny` uygulaması
+
+Agent süreçleri `docker exec -u agent-<rol>` ile başlatılacak — kullanıcılar ve izinler bu hafta hazırlandı.
+
+**Hafta 2 kapısı:** curl ile görev veriyorsun, agent gerçekten kod yazıyor, attığı her adım DB'de yapılandırılmış event olarak duruyor. Hiçbir yerde metin kazıma yok.
 
 ## Not
 

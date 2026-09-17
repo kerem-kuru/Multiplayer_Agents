@@ -72,8 +72,18 @@ const steps = [
     return (await run("node", ["scripts/migrate.mjs"])) === 0;
   },
   async () => {
-    console.log("\n--- smoke ---");
+    console.log("\n--- smoke (çekirdek) ---");
     return (await run("node", ["scripts/smoke.mjs"])) === 0;
+  },
+  async () => {
+    console.log("\n--- oda imajı ---");
+    return (
+      (await run("docker", ["compose", "--profile", "build-only", "build", "room"])) === 0
+    );
+  },
+  async () => {
+    console.log("\n--- smoke (api: POST /rooms → container → izolasyon) ---");
+    return (await run("node", ["scripts/smoke-api.mjs"])) === 0;
   },
 ];
 
