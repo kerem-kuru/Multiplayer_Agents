@@ -26,6 +26,11 @@ export const EventEnvelope = z.object({
 const ev = <T extends string, P extends z.ZodTypeAny>(type: T, payload: P) =>
   EventEnvelope.extend({ type: z.literal(type), payload });
 
+/** Agent'a ait her event'te zorunlu. */
+const AgentRef = { agent: AgentName };
+/** Bir turn'ün içindeki her event'te zorunlu — hangi mesaja ait olduğu belli olsun. */
+const TurnRef = { agent: AgentName, messageId: z.string().uuid() };
+
 // --- Oda ve oturum yaşam döngüsü -------------------------------------------
 
 export const RoomCreated = ev(
@@ -55,37 +60,52 @@ export const SessionEnded = ev(
   }),
 );
 
-// --- Agent süreç yaşam döngüsü ---------------------------------------------
+// --- Agent süreç yaşam döngüsü (actor: system) ------------------------------
+//
+// Bu event'ler agent'ın ne DEDİĞİNİ değil, runner sürecinin ne DURUMDA
+// olduğunu anlatır. Durum makinesi `agent_runtime` tablosunda.
 
-export const AgentSpawned = ev(
-  "agent.spawned",
+export const AgentStarting = ev(
+  "agent.starting",
   z.object({
-    agent: AgentName,
-    workspace: z.string().min(1),
-    model: z.string().min(1),
-    pid: z.number().int().positive().nullable(),
+    ...AgentRef,
+    /** Önceki SDK oturumu varsa sohbet oradan devam eder. */
+    resumeSessionId: z.string().nullable(),
   }),
+);
+
+export const AgentReady = ev(
+  "agent.ready",
+  z.object({ ...AgentRef, runnerPid: z.number().int() }),
 );
 
 export const AgentExited = ev(
   "agent.exited",
   z.object({
-    agent: AgentName,
-    code: z.number().int().nullable(),
-    reason: z.enum(["completed", "killed", "crashed"]),
+    ...AgentRef,
+    exitCode: z.number().int().nullable(),
+    /** Beklenen çıkış. Beklenmeyen çıkış `agent.crashed`. */
+    reason: z.enum(["stopped", "server_restart"]),
+  }),
+);
+
+export const AgentCrashed = ev(
+  "agent.crashed",
+  z.object({
+    ...AgentRef,
+    exitCode: z.number().int().nullable(),
+    error: z.string(),
+    willRestart: z.boolean(),
+    restartCount: z.number().int().nonnegative(),
   }),
 );
 
 // --- Yönerge ve turn -------------------------------------------------------
 
-export const AgentMessage = ev(
-  "agent.message",
-  z.object({
-    agent: AgentName,
-    text: z.string().min(1),
-    /** Kuyruktaki sırası — aynı agent'a iki mesaj asla paralel inference'a girmez. */
-    queuePosition: z.number().int().nonnegative(),
-  }),
+/** actor = isteği yapan insan. Turn'ün başlangıç noktası. */
+export const MessageReceived = ev(
+  "message.received",
+  z.object({ ...TurnRef, text: z.string().min(1) }),
 );
 
 export const AgentInterrupted = ev(
@@ -99,63 +119,77 @@ export const AgentInterrupted = ev(
 
 export const TurnStarted = ev(
   "turn.started",
-  z.object({ agent: AgentName, turn: z.number().int().positive() }),
+  z.object({
+    ...TurnRef,
+    sdkSessionId: z.string(),
+    model: z.string(),
+    /** SDK'nın init mesajından okunan GERÇEK tool listesi — YAML'ın iddiası değil. */
+    tools: z.array(z.string()),
+  }),
 );
 
-export const TurnEnded = ev(
-  "turn.ended",
+/** Agent'ın ürettiği düz metin. Kontrol düzlemi bundan ASLA anlam çıkarmaz. */
+export const AgentText = ev("agent.text", z.object({ ...TurnRef, text: z.string() }));
+
+export const TurnCompleted = ev(
+  "turn.completed",
   z.object({
-    agent: AgentName,
-    turn: z.number().int().positive(),
-    stopReason: z.enum(["end_turn", "max_tokens", "interrupted", "error"]),
-    usage: z
-      .object({
-        inputTokens: z.number().int().nonnegative(),
-        outputTokens: z.number().int().nonnegative(),
-        cacheReadTokens: z.number().int().nonnegative().default(0),
-        costUsd: z.number().nonnegative().default(0),
-      })
-      .nullable(),
+    ...TurnRef,
+    subtype: z.string(),
+    numTurns: z.number().int().nonnegative(),
+    durationMs: z.number().nonnegative(),
+    costUsd: z.number().nonnegative(),
+    usage: z.record(z.unknown()),
+  }),
+);
+
+export const TurnFailed = ev(
+  "turn.failed",
+  z.object({
+    ...TurnRef,
+    reason: z.enum(["aborted", "crash", "sdk_error", "stopped"]),
+    error: z.string(),
   }),
 );
 
 // --- Tool çağrıları: kontrol düzleminin tek kaynağı -------------------------
 
-export const ToolCalled = ev(
-  "tool.called",
+export const ToolCall = ev(
+  "tool.call",
   z.object({
-    agent: AgentName,
+    ...TurnRef,
     toolUseId: z.string().min(1),
-    name: z.string().min(1),
+    tool: z.string().min(1),
+    /** 16 KB'ı aşarsa kırpılır; `truncated` bunu söyler. */
     input: z.unknown(),
-    /** Tool-öncesi hook'un risk sınıfı. `risky` olanlar onay kuyruğuna düşer. */
-    risk: z.enum(["safe", "risky"]).default("safe"),
+    truncated: z.boolean(),
   }),
 );
 
 export const ToolResult = ev(
   "tool.result",
   z.object({
-    agent: AgentName,
+    ...TurnRef,
     toolUseId: z.string().min(1),
     isError: z.boolean(),
-    /** Redaction'dan GEÇMİŞ çıktı. Ham hali hiçbir zaman DB'ye yazılmaz. */
+    /** Hafta 4'ten itibaren redaction'dan geçmiş olacak. */
     output: z.string(),
-    durationMs: z.number().int().nonnegative(),
+    truncated: z.boolean(),
   }),
+);
+
+/** PreToolUse hook'u YAML'a aykırı bir çağrıyı reddetti. Yetki kanıtı burada. */
+export const ToolDenied = ev(
+  "tool.denied",
+  z.object({ ...TurnRef, tool: z.string().min(1), reason: z.string() }),
 );
 
 // --- Dosya ve diff ---------------------------------------------------------
 
+/** Hafta 6'ya kadar sadece yol + tool. Diff üretimi orada gelecek. */
 export const FileChanged = ev(
   "file.changed",
-  z.object({
-    agent: AgentName,
-    path: z.string().min(1),
-    change: z.enum(["created", "modified", "deleted", "renamed"]),
-    additions: z.number().int().nonnegative(),
-    deletions: z.number().int().nonnegative(),
-  }),
+  z.object({ ...TurnRef, path: z.string().min(1), tool: z.string().min(1) }),
 );
 
 export const DiffUpdated = ev(
@@ -284,14 +318,19 @@ const EVENT_SCHEMAS = [
   RoomCreated,
   SessionStarted,
   SessionEnded,
-  AgentSpawned,
+  AgentStarting,
+  AgentReady,
   AgentExited,
-  AgentMessage,
+  AgentCrashed,
+  MessageReceived,
   AgentInterrupted,
   TurnStarted,
-  TurnEnded,
-  ToolCalled,
+  AgentText,
+  TurnCompleted,
+  TurnFailed,
+  ToolCall,
   ToolResult,
+  ToolDenied,
   FileChanged,
   DiffUpdated,
   JournalUpdated,
@@ -310,7 +349,13 @@ export const RoomEvent = z.discriminatedUnion("type", [...EVENT_SCHEMAS]);
 export type RoomEvent = z.infer<typeof RoomEvent>;
 export type RoomEventType = RoomEvent["type"];
 
-/** Log'a yazmadan önceki hali — `seq` ve `ts` sunucu tarafında atanır. */
+/**
+ * Log'a yazmadan önceki hali — `seq` ve `ts` sunucu tarafında atanır.
+ *
+ * DİKKAT: aşağıdaki cast yüzünden bu sabitin ÇIKARSANAN tipi yanlış (`seq`/`ts`
+ * içeriyor). Çalışma zamanı doğrulaması doğru. Tip için daima aşağıdaki
+ * `NewRoomEvent` takma adını kullan, `z.infer<typeof NewRoomEvent>` değil.
+ */
 export const NewRoomEvent = z.discriminatedUnion("type", [
   ...(EVENT_SCHEMAS.map((s) => s.omit({ seq: true, ts: true })) as unknown as [
     (typeof EVENT_SCHEMAS)[number],
@@ -318,7 +363,14 @@ export const NewRoomEvent = z.discriminatedUnion("type", [
     ...(typeof EVENT_SCHEMAS)[number][],
   ]),
 ]);
-export type NewRoomEvent = Omit<RoomEvent, "seq" | "ts">;
+/**
+ * Düz `Omit<RoomEvent, ...>` KULLANILMAZ: Omit birleşimi dağıtmaz, hepsini tek
+ * bir nesne tipine çökertir ve `type` üzerinden daraltma çalışmaz olur —
+ * `e.type === "tool.call" && e.payload.tool` derlenmez. Dağıtımlı hâli birleşimi
+ * korur.
+ */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+export type NewRoomEvent = DistributiveOmit<RoomEvent, "seq" | "ts">;
 
 export const ALL_EVENT_TYPES = EVENT_SCHEMAS.map((s) => s.shape.type.value) as RoomEventType[];
 

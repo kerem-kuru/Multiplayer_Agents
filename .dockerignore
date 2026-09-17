@@ -1,0 +1,8 @@
+node_modules
+**/node_modules
+rooms-data
+.git
+.env
+.env.local
+apps/web/dist
+packages/*/dist/*.tsbuildinfo

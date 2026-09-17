@@ -21,6 +21,17 @@ export interface ApiConfig {
   defaultConfigPath: string;
   /** false: container açılmaz. Docker'sız geliştirme için. */
   spawnContainer: boolean;
+  agent: AgentSettings;
+}
+
+export interface AgentSettings {
+  /** Boşsa agent uçları 503 döner — anahtar imaja veya compose'a gömülmez. */
+  apiKey: string;
+  /** YAML'daki model'i ezer. Kapı testleri maliyeti düşürmek için haiku verir. */
+  modelOverride: string;
+  maxTurns: number;
+  maxBudgetUsd: number;
+  heartbeatTimeoutMs: number;
 }
 
 export function loadApiConfig(): ApiConfig {
@@ -33,6 +44,13 @@ export function loadApiConfig(): ApiConfig {
       process.env.ROOM_CONFIG ?? "./config/room.example.yaml",
     ),
     spawnContainer: process.env.SPAWN_CONTAINER !== "0",
+    agent: {
+      apiKey: process.env.ANTHROPIC_API_KEY ?? "",
+      modelOverride: process.env.AGENT_MODEL ?? "",
+      maxTurns: Number(process.env.AGENT_MAX_TURNS ?? 30),
+      maxBudgetUsd: Number(process.env.AGENT_MAX_BUDGET_USD ?? 1),
+      heartbeatTimeoutMs: Number(process.env.AGENT_HEARTBEAT_TIMEOUT_MS ?? 20_000),
+    },
   };
 }
 

@@ -6,3 +6,4 @@ dist/
 .DS_Store
 /rooms-data/
 .week1-gate.tmp.yaml
+.week2-gate.tmp.yaml

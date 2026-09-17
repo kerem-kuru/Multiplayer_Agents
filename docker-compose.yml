@@ -33,8 +33,9 @@ services:
   # bir kopyasını ayağa kaldırır. Burada sadece build edilsin diye duruyor.
   room:
     build:
-      context: ./rooms
-      dockerfile: Dockerfile
+      # Bağlam repo kökü: imaj packages/runner/dist'i kopyalıyor.
+      context: .
+      dockerfile: rooms/Dockerfile
     image: agent-rooms/room:dev
     profiles: ["build-only"]
     command: ["sleep", "infinity"]

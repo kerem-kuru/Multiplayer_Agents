@@ -1,3 +1,6 @@
+export * from "./agents/exec.js";
+export * from "./agents/manager.js";
+export * from "./agents/runtime.js";
 export * from "./config/loadRoomConfig.js";
 export * from "./db/pool.js";
 export * from "./db/eventStore.js";

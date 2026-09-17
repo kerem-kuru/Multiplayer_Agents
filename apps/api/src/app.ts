@@ -4,6 +4,9 @@ import { z } from "zod";
 import type { Actor } from "@agent-rooms/protocol";
 import { NewRoomEvent, PROTOCOL_VERSION } from "@agent-rooms/protocol";
 import {
+  AgentBusyError,
+  AgentManager,
+  AgentNotFoundError,
   appendEvent,
   closeRoom,
   containerStatus,
@@ -15,6 +18,7 @@ import {
   listRooms,
   loadRoomConfig,
   openRoom,
+  listRuntime,
   readEvents,
   readJournal,
 } from "@agent-rooms/core";
@@ -45,9 +49,11 @@ const EventsQuery = z.object({
   limit: z.coerce.number().int().positive().max(1000).default(500),
 });
 
+const MessageBody = z.object({ text: z.string().min(1).max(100_000) }).strict();
+
 class HttpError extends Error {
   constructor(
-    readonly status: 400 | 404 | 409 | 500,
+    readonly status: 400 | 404 | 409 | 500 | 503,
     message: string,
     readonly issues?: string[],
   ) {
@@ -65,8 +71,16 @@ function actorFrom(header: string | undefined, name: string | undefined): Actor 
   return { kind: "system" };
 }
 
-export function createApp(cfg: ApiConfig = loadApiConfig()) {
+export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManager) {
   const app = new Hono();
+
+  /** Anahtar yoksa agent uçları kapalı — sessizce boş cevap vermek yerine söyle. */
+  const requireManager = (): AgentManager => {
+    if (!manager) {
+      throw new HttpError(503, "agent koşumu kapalı — ANTHROPIC_API_KEY tanımlı değil");
+    }
+    return manager;
+  };
 
   // DB'ye gerçekten dokunur: "ayakta" demek "yazabiliyorum" demektir.
   app.get("/health", async (c) => {
@@ -163,6 +177,76 @@ export function createApp(cfg: ApiConfig = loadApiConfig()) {
     const { room, config } = await mustFindRoom(c.req.param("id"));
     const roomRoot = path.join(cfg.roomsDataDir, room.id);
     return c.json(await readJournal(roomRoot, config));
+  });
+
+  // --- agent uçları (Hafta 2) ----------------------------------------------
+
+  app.get("/rooms/:id/agents", async (c) => {
+    const { room, config } = await mustFindRoom(c.req.param("id"));
+    const runtime = await listRuntime(room.id);
+    const byName = new Map(runtime.map((r) => [r.agentName, r]));
+    return c.json({
+      agents: config.agents.map((a) => ({
+        name: a.name,
+        workspace: a.workspace,
+        model: cfg.agent.modelOverride || a.model,
+        toolsAllow: a.toolsAllow,
+        toolsDeny: a.toolsDeny,
+        runtime: byName.get(a.name) ?? null,
+      })),
+    });
+  });
+
+  app.post("/rooms/:id/agents/:aid/start", async (c) => {
+    const { room } = await mustFindRoom(c.req.param("id"));
+    const agentName = c.req.param("aid");
+    const mgr = requireManager();
+    try {
+      const status = await mgr.start(room.id, agentName);
+      return c.json({ agent: agentName, status }, 202);
+    } catch (err) {
+      if (err instanceof AgentNotFoundError) throw new HttpError(404, err.message);
+      throw err;
+    }
+  });
+
+  app.post("/rooms/:id/agents/:aid/stop", async (c) => {
+    const { room } = await mustFindRoom(c.req.param("id"));
+    const agentName = c.req.param("aid");
+    await requireManager().stop(room.id, agentName);
+    return c.json({ agent: agentName, status: "stopped" }, 202);
+  });
+
+  app.post("/rooms/:id/agents/:aid/message", async (c) => {
+    const { room } = await mustFindRoom(c.req.param("id"));
+    const agentName = c.req.param("aid");
+    const parsed = MessageBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!parsed.success) {
+      throw new HttpError(
+        400,
+        "istek gövdesi geçersiz",
+        parsed.error.issues.map((i) => `${i.path.join(".") || "<kök>"}: ${i.message}`),
+      );
+    }
+
+    const mgr = requireManager();
+    try {
+      const messageId = await mgr.sendMessage(
+        room.id,
+        agentName,
+        actorFrom(c.req.header("x-user-id"), c.req.header("x-user-name")),
+        parsed.data.text,
+      );
+      // Turn'ün bitmesi BEKLENMEZ — ilerleme event log'dan izlenir.
+      return c.json({ messageId, agent: agentName }, 202);
+    } catch (err) {
+      if (err instanceof AgentBusyError) {
+        // Kuyruk Hafta 5'te; bu hafta meşgul agent yeni iş almaz.
+        return c.json({ error: "agent meşgul", status: err.status }, 409);
+      }
+      if (err instanceof AgentNotFoundError) throw new HttpError(404, err.message);
+      throw err;
+    }
   });
 
   app.post("/rooms/:id/stop", async (c) => {

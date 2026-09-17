@@ -48,7 +48,7 @@ await appendEvent(
 );
 for (const agent of config.agents) {
   await appendEvent(
-    { ...base, type: "agent.spawned", payload: { agent: agent.name, workspace: agent.workspace, model: agent.model, pid: null } },
+    { ...base, type: "agent.starting", payload: { agent: agent.name, resumeSessionId: null } },
     pool,
   );
 }

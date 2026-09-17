@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AgentName } from "./ids.js";
+import { ToolName } from "./tools.js";
 
 /**
  * Rol konfigürasyonu.
@@ -27,8 +28,10 @@ export const AgentConfig = z
     /** Oda köküne göre çalışma alanı: worktrees/frontend */
     workspace: z.string().min(1),
     model: z.string().min(1).default("claude-sonnet-5"),
-    toolsAllow: z.array(z.string().min(1)).default(["bash", "edit", "read", "test"]),
-    toolsDeny: z.array(z.string().min(1)).default([]),
+    // Serbest string değil sabit küme: YAML'da yanlış yazılmış bir tool adı
+    // sessizce yutulmak yerine config yüklenirken hata verir.
+    toolsAllow: z.array(ToolName).default(["bash", "edit", "read"]),
+    toolsDeny: z.array(ToolName).default([]),
     /** rw mount'lar. Bu listenin dışı container içinde read-only bağlanır. */
     writable: z.array(z.string().min(1)).default([]),
     approvalRequired: z.array(ApprovalKind).default(["git_push", "migration"]),

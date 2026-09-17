@@ -13,20 +13,22 @@
   },
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "typecheck": "tsc -b packages/protocol packages/core apps/api",
+    "typecheck": "tsc -b packages/protocol packages/core apps/api && tsc -p packages/runner",
     "test": "vitest run",
     "smoke": "node scripts/smoke.mjs",
     "smoke:api": "node scripts/smoke-api.mjs",
     "gate": "bash scripts/week1-gate.sh",
+    "gate:w2": "bash scripts/week2-gate.sh",
     "api": "node apps/api/dist/index.js",
     "api:dev": "node --watch apps/api/dist/index.js",
-    "room:build": "docker compose --profile build-only build room",
+    "room:build": "node scripts/build-runner.mjs && docker compose --profile build-only build room",
     "verify": "npm run build && node scripts/verify.mjs",
     "test:watch": "vitest",
     "db:up": "docker compose up -d postgres redis",
     "db:down": "docker compose down",
     "db:migrate": "node scripts/migrate.mjs",
-    "db:reset": "docker compose down -v && docker compose up -d postgres redis"
+    "db:reset": "docker compose down -v && docker compose up -d postgres redis",
+    "runner:build": "node scripts/build-runner.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

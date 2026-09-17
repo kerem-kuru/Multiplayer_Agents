@@ -9,6 +9,7 @@ import {
   startRoomContainer,
   stopRoomContainer,
 } from "../docker/container.js";
+import { ensureRuntimeRows } from "../agents/runtime.js";
 import { scaffoldRoomLayout } from "./layout.js";
 import {
   attachContainer,
@@ -72,6 +73,8 @@ export async function openRoom(input: OpenRoomInput): Promise<OpenRoomResult> {
   const session = await createSession(room.id, pool);
   const roomRoot = path.join(roomsDataDir, room.id);
   const dirs = await scaffoldRoomLayout(roomRoot, config);
+  // YAML'daki her agent için bir çalışma durumu satırı — hepsi 'stopped'.
+  await ensureRuntimeRows(room.id, config.agents.map((a) => a.name), pool);
   const events: RoomEvent[] = [];
 
   const base = { roomId: room.id, sessionId: session.id, actor } as const;

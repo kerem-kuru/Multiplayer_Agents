@@ -9,6 +9,7 @@ import {
 
 const roomId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "22222222-2222-4222-8222-222222222222";
+const messageId = "33333333-3333-4333-8333-333333333333";
 const base = {
   seq: 1,
   roomId,
@@ -21,10 +22,10 @@ describe("event kataloğu", () => {
   it("bilinen bir event'i ayrıştırır", () => {
     const e = parseEvent({
       ...base,
-      type: "agent.message",
-      payload: { agent: "backend", text: "auth endpoint'i yaz", queuePosition: 0 },
+      type: "message.received",
+      payload: { agent: "backend", messageId, text: "auth endpoint'i yaz" },
     });
-    expect(e.type).toBe("agent.message");
+    expect(e.type).toBe("message.received");
     expect(e.seq).toBe(1);
   });
 
@@ -34,13 +35,18 @@ describe("event kataloğu", () => {
 
   it("bozuk payload'ı reddeder", () => {
     expect(() =>
-      parseEvent({ ...base, type: "agent.spawned", payload: { agent: "Backend!" } }),
+      parseEvent({ ...base, type: "agent.ready", payload: { agent: "Backend!", runnerPid: 1 } }),
     ).toThrow();
   });
 
   it("seq 0 veya negatif olamaz", () => {
     expect(() =>
-      parseEvent({ ...base, seq: 0, type: "turn.started", payload: { agent: "backend", turn: 1 } }),
+      parseEvent({
+        ...base,
+        seq: 0,
+        type: "agent.ready",
+        payload: { agent: "backend", runnerPid: 12 },
+      }),
     ).toThrow();
   });
 
@@ -49,8 +55,8 @@ describe("event kataloğu", () => {
       roomId,
       sessionId,
       actor: { kind: "system" },
-      type: "turn.started",
-      payload: { agent: "frontend", turn: 3 },
+      type: "agent.starting",
+      payload: { agent: "frontend", resumeSessionId: null },
     });
     expect(parsed).not.toHaveProperty("seq");
     expect(parsed).not.toHaveProperty("ts");
@@ -63,15 +69,33 @@ describe("event kataloğu", () => {
 
   it("ham çıktı sunum düzlemine ait olarak işaretli", () => {
     expect(PRESENTATION_ONLY.has("output.chunk")).toBe(true);
-    expect(PRESENTATION_ONLY.has("tool.called")).toBe(false);
+    expect(PRESENTATION_ONLY.has("tool.call")).toBe(false);
   });
 
-  it("varsayılanlar uygulanır", () => {
+  it("turn içi event messageId olmadan reddedilir", () => {
+    // Hangi mesaja ait olduğu belli olmayan bir turn event'i log'u okunamaz kılar.
+    expect(() =>
+      parseEvent({
+        ...base,
+        type: "agent.text",
+        payload: { agent: "backend", text: "merhaba" },
+      }),
+    ).toThrow();
+  });
+
+  it("tool.call kırpma bayrağı taşır", () => {
     const e = parseEvent({
       ...base,
-      type: "tool.called",
-      payload: { agent: "backend", toolUseId: "t1", name: "bash", input: { cmd: "ls" } },
+      type: "tool.call",
+      payload: {
+        agent: "backend",
+        messageId,
+        toolUseId: "t1",
+        tool: "Bash",
+        input: { command: "ls" },
+        truncated: false,
+      },
     });
-    expect(e.type === "tool.called" && e.payload.risk).toBe("safe");
+    expect(e.type === "tool.call" && e.payload.truncated).toBe(false);
   });
 });

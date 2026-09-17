@@ -6,11 +6,11 @@ Agent'lar birbirine mesaj atmaz. Ortak bir **oda defterine** yazar ve oradan oku
 
 > **Tez:** Gerçek birim agent değil, her agent'ın okuyup yazdığı tek paylaşılan bağlam deposudur.
 
-Durum: **Hafta 1 / 12 tamam** — iskelet, event log ve `POST /rooms`. `npm run gate` 10 kontrolden geçiyor. Henüz hiçbir agent koşmuyor; sadece kemikler.
+Durum: **Hafta 1 tamam · Hafta 2 kodu tamam, kapısı koşulmadı** — agent artık container içinde Claude Agent SDK ile headless koşuyor ve attığı her adım yapılandırılmış event olarak DB'ye düşüyor. `npm run gate` (Hafta 1) 10/10 geçiyor; `npm run gate:w2` gerçek API çağrısı yapar ve `ANTHROPIC_API_KEY` ister.
 
 ## Hızlı başlangıç
 
-Gereksinimler: Node 20+, Docker.
+Gereksinimler: Node 20+, Docker. Agent koşumu için `ANTHROPIC_API_KEY` (BYOK — anahtar imaja veya compose'a gömülmez, sadece `.env`'de yaşar).
 
 ```bash
 cp .env.example .env
@@ -19,6 +19,7 @@ npm run build
 npm test             # 27 test — docker ve DB gerekmez
 
 npm run verify       # tek komut: docker bekle → db → migrate → smoke → imaj → kapı
+npm run gate:w2      # Hafta 2 kapısı — 14 kontrol, GERÇEK API çağrısı yapar
 ```
 
 `verify` her şeyi sırayla yapar. Ayrı ayrı koşturmak istersen kapıdan **önce** veritabanı gerekir:
@@ -43,6 +44,20 @@ curl  http://localhost:8787/rooms/<id>/journal
 curl -X POST http://localhost:8787/rooms/<id>/stop
 ```
 
+## Agent'a görev ver
+
+```bash
+curl -X POST http://localhost:8787/rooms/<id>/agents/backend/start
+
+curl -X POST http://localhost:8787/rooms/<id>/agents/backend/message   -H 'content-type: application/json' -H 'x-user-id: kerem'   -d '{"text":"hello.js dosyası oluştur ve node ile çalıştır"}'
+# → 202 {"messageId":"..."}  — turn'ün bitmesi beklenmez
+
+curl  http://localhost:8787/rooms/<id>/agents            # durum: stopped/idle/busy/crashed
+curl 'http://localhost:8787/rooms/<id>/events?since=0'   # her adım yapılandırılmış event
+```
+
+Agent meşgulken gelen ikinci mesaj **409** alır — kuyruk Hafta 5'te.
+
 Docker'sız çalışmak için `SPAWN_CONTAINER=0` — oda kaydı ve klasörler kurulur, container açılmaz.
 
 ## Yapı
@@ -53,12 +68,13 @@ apps/
   web/            React + Vite iskeleti. Hafta 3: SSE istemcisi, xterm.js
   desktop/        Tauri 2 kabuğu, apps/web ile aynı bileşenler
 packages/
-  protocol/       Zod event şemaları — istemci ve sunucu aynı tipleri kullanır
-  core/           YAML rol yükleyici, event store, oda düzeni, container
+  protocol/       Zod event şemaları + host↔runner NDJSON protokolü + tool eşlemesi
+  core/           YAML yükleyici, event store, oda düzeni, container, AgentManager
+  runner/         Container İÇİNDE koşan süreç: Claude Agent SDK turn döngüsü
 db/migrations/    Append-only şema
 rooms/Dockerfile  Oda container imajı
 config/           Örnek rol konfigürasyonu
-scripts/          migrate, smoke, smoke-api, week1-gate, verify
+scripts/          migrate, smoke, build-runner, validate-events, week1-gate, week2-gate
 docs/             Haftalık kapılar
 ```
 
@@ -79,6 +95,23 @@ docs/             Haftalık kapılar
 ```
 
 Frontend agent, backend'in yazmakta olduğu koda **yazamaz**. Bu bir kısıt değil, mimarinin amacı: koordinasyon `contracts/` ve defter üzerinden yapılmak *zorunda* kalır. `mountPlan()` bu planı rol YAML'ından üretir ve test ediliyor — **uygulaması Hafta 7'de** (worktree yönetimi ve izinler). Bu hafta klasörler kuruluyor, izin zorlaması henüz yok.
+
+## Kontrol düzlemi nasıl kuruluyor
+
+Agent, host'ta değil **container içinde** koşar: SDK'nın `Bash` ve `Edit` tool'ları sürecin bulunduğu yerde çalışır, host'ta koşsaydı sandbox anlamsızlaşırdı.
+
+```
+host                                  container
+────────────────────────────────      ──────────────────────────────
+apps/api → AgentManager               /opt/runner/dist/runner.js
+  ├─ dockerode exec ──────────────▶     ├─ stdin : NDJSON komut
+  ├─ stdout satırları ◀───────────      ├─ stdout: NDJSON çıktı
+  └─ appendEvent (SIRALI)               └─ Claude Agent SDK query()
+```
+
+Aradaki her satır bizim tanımladığımız bir şemadır ve Zod ile doğrulanır — bu **metin kazıma değildir**. Host, agent'ın ürettiği serbest metin üzerinde hiçbir zaman arama veya regex çalıştırmaz.
+
+**Tool yetkisi üç katmanda**, hiçbiri sistem prompt'u değil: SDK `tools` (agent sadece bunları görür), `disallowedTools` (yasaklılar kaldırılır), `PreToolUse` hook'u (her çağrı YAML'a karşı son kez kontrol edilir, reddedilen `tool.denied` olarak log'a düşer).
 
 ## Event log
 
@@ -113,3 +146,16 @@ Hafta 1 görev tanımından bilinçli olarak ayrılan noktalar ve gerekçeleri.
 | Event kataloğu 22 tip | Yol haritasının ileri haftaları (diff, yorum, defter, onay, presence) bu tipleri gerektiriyor. Katalog planın veri modeli hâli; boş tipler bugün kod gerektirmiyor. |
 | `actor` düz metin değil, ayrık birleşim | Hafta 5'teki `[Ali]: ...` etiketi ve sürücü devri için insan/agent/sistem ayrımı tipte lazım. |
 | POSIX agent izolasyonu **geri alındı** | Yazılmış ve çalışıyordu, ama hem yol haritası hem görev tanımı bunu **Hafta 7'ye** koyuyor. Kapsam dışıydı; Hafta 7'de yeniden yazılacak. |
+
+### Hafta 2
+
+| Karar | Gerekçe |
+| --- | --- |
+| SDK `0.3.274` tam sabitlendi | Görev tanımının istediği her seçenek (`tools`, `allowedTools`, `disallowedTools`, `permissionPrompts`, `systemPrompt` preset+append, `resume`, `settingSources`, `maxTurns`, `maxBudgetUsd`, `abortController`, `hooks`) kurulu sürümde birebir var — **tek sapma yok**. `permissionPrompts: 'none'` mevcut olduğu için dokümanın önerdiği `canUseTool` yedek planı gerekmedi. |
+| `mapMessage` bilinmeyen mesaj tiplerini sessizce atlar | Kurulu SDK'da `SDKMessage` 4 değil **~38 üyeli** bir birleşim. Doküman 4'ünü anlatıyor; geri kalanı bizi ilgilendirmiyor, hata değil. |
+| `Options.env` HİÇ set edilmiyor | Kurulu sürümün tipinde yazıyor: verilirse alt süreç ortamını birleştirmez, **tamamen değiştirir**. Set etseydik `PATH` ve `ANTHROPIC_API_KEY` kaybolurdu. |
+| `NewRoomEvent` dağıtımlı Omit ile tanımlandı | Düz `Omit<Union, K>` birleşimi çökertiyor ve `type` üzerinden daraltma çalışmıyordu; `e.type === "tool.call" && e.payload.tool` derlenmiyordu. Runner testlerini typecheck'e dahil edince ortaya çıktı. |
+| DoD'un `grep "query("` kontrolü uyarlandı | Bizim yığınımızda `pg` var, `pool.query(` ve `c.req.query(` yanlış pozitif veriyor. Niyet "SDK host'ta çağrılmasın"; doğru ölçüm `grep -rn "claude-agent-sdk" apps/api/src packages/core/src` — sonuç boş. |
+| Canlılık ölçümü heartbeat'e değil **herhangi bir satıra** bağlandı | Tek mesaj tipine bağlamak kırılgan: iş üretip heartbeat'i kaçıran bir runner boşuna öldürülürdü. |
+| Exec katmanı gelen satırları tamponluyor | Akış `startRunnerExec` dönmeden akmaya başlıyor; çağıran `onLine`'ı ancak sonra kaydedebiliyor. Arada kaybolan bir `ready` satırı agent'ı 30 sn "starting"de bırakıyordu — canlı testte bir kez gözlendi, tamponlama sonrası tekrarlanmadı. |
+| Tek sunucu örneği varsayımı | `AgentManager` bellekte. İkinci bir sunucu örneği açılış mutabakatında birincinin runner'larını öldürür. Çok sunuculu dağıtım Redis ile sonraki fazlarda — o zamana kadar tek örnek koş. |
