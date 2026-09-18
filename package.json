@@ -22,6 +22,8 @@
     "gate:w2": "bash scripts/week2-gate.sh",
     "gate:w3": "bash scripts/week3-gate.sh",
     "gate:w3:agent": "npm run test:e2e -w @agent-rooms/web",
+    "gate:w4": "bash scripts/week4-gate.sh",
+    "gate:w4:agent": "bash scripts/week4-agent-gate.sh",
     "api": "node apps/api/dist/index.js",
     "api:dev": "node --watch apps/api/dist/index.js",
     "dev:web": "npm run dev -w @agent-rooms/web",

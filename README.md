@@ -6,9 +6,11 @@ Agent'lar birbirine mesaj atmaz. Ortak bir **oda defterine** yazar ve oradan oku
 
 > **Tez:** Gerçek birim agent değil, her agent'ın okuyup yazdığı tek paylaşılan bağlam deposudur.
 
-Durum: **Hafta 3 bitti** — akış kapısı 11/11 (`gate:w3`) ve agent gerektiren iki tarayıcı
-testi (`gate:w3:agent`) Gemini koşum ortamına karşı geçti. Tarayıcıda bir görev baştan sona
-canlı izlenebiliyor; sayfa yenilendiğinde tek event eksilmiyor.
+Durum: **Hafta 4 bitti** — odaya ikinci insan girebiliyor. Paylaşım linkine tıklayan kişi
+saniyeler içinde odayı canlı izliyor, hiçbir şey yazamıyor; agent'a bilerek `.env` okutulduğunda
+secret ne ekranda ne veritabanında görünüyor.
+
+Hafta 3'ten devam: akış kapısı 11/11 (`gate:w3`) ve iki tarayıcı testi (`gate:w3:agent`) geçiyor.
 
 **Hafta 2 kapısı hâlâ koşulmadı:** kodu tamam ama `gate:w2` Claude Agent SDK ile gerçek çağrı
 yapar ve `ANTHROPIC_API_KEY` ister; anahtar yok. Hafta 2'nin boru hattı Gemini koşum ortamıyla
@@ -28,6 +30,8 @@ npm run verify       # tek komut: docker bekle → db → migrate → smoke → 
 npm run gate:w2      # Hafta 2 kapısı — 14 kontrol, GERÇEK API çağrısı yapar
 npm run gate:w3      # Hafta 3 akış kapısı — 11 kontrol, anahtar GEREKTİRMEZ
 npm run gate:w3:agent # Hafta 3'ün agent gerektiren 2 tarayıcı testi (api + web ayakta olmalı)
+npm run gate:w4      # Hafta 4 kapısı — 20 kontrol, anahtar GEREKTİRMEZ
+npm run gate:w4:agent # gerçek agent'a .env okutup sızıntı kontrolü (anahtar ister, yoksa atlar)
 ```
 
 ## Tarayıcıda izle
@@ -49,6 +53,62 @@ npm run db:migrate   # şema
 npm run room:build   # oda imajı
 npm run gate         # Hafta 1 kapısı — 10 kontrol
 ```
+
+## Giriş, paylaşım ve izleyici
+
+Hafta 4'ten itibaren **her uç oturum ister** — SSE dahil. Şifre yok: e-postaya tek
+kullanımlık bir bağlantı gider.
+
+```bash
+# .env
+APP_BASE_URL=http://localhost:5173   # magic link ve davet linklerinin gövdesi
+AUTH_DEV_MODE=true                   # SADECE geliştirme: bağlantıyı yanıtta/logda göster
+COOKIE_SECURE=false                  # HTTPS ardındaysan true
+```
+
+**`AUTH_DEV_MODE` yetkilendirmeyi ETKİLEMEZ.** Açıkken de her uç üyelik ve rol kontrolü
+yapar; tek yaptığı, e-posta gönderimi olmadığı için giriş bağlantısını yanıtta göstermek.
+Üretimde kapalı olmalı.
+
+**Giriş:** arayüzde e-postanı yaz → bağlantıya tıkla. Terminalden:
+
+```bash
+TOKEN=$(node scripts/dev-login.mjs --base http://localhost:8787 --email sen@ornek.com)
+curl -b "rooms_session=$TOKEN" http://localhost:8787/rooms
+```
+
+**Paylaşım:** oda sahibi "Paylaş" → link üretir. Link **çok kullanımlıktır** (ekibe tek link
+atılır), sürelidir ve iptal edilebilir; magic link ise tek kullanımlıktır. Linke tıklayan kişi
+odaya `viewer` olarak katılır: okur, **yazamaz**. Yazma yetkisi, kuyruk ve sürücü devri
+Hafta 5'in işi — kuyruk olmadan iki kişinin aynı agent'a yazması iki mesajı paralel
+inference'a sokardı.
+
+Ham token hiçbir tabloda durmaz: `magic_links`, `auth_sessions` ve `room_invites` yalnızca
+`sha256` taşır.
+
+## Redaction — neyi korur, neyi korumaz
+
+Her event, DB'ye **yazılmadan önce** tek geçitten (`appendEvent`) geçer: gitleaks'ten üretilmiş
+198 kural + entropi taraması. Eşleşen değer `[redacted:<kural>:<hash8>]` ile değişir; anahtar
+adı ekranda kalır, değer kaybolur. Aynı secret her yerde aynı işareti alır, yani "aynı anahtar
+iki yerde geçmiş" bilgisi korunur.
+
+**Korur:** event log, UI, snapshot, SSE akışı, sunucu logu (runner'ın stderr'i dahil) ve
+`redaction_findings` (orada da sadece kural, yol, uzunluk ve hash'in ilk 8 hex'i durur).
+
+**KORUMAZ: agent'ın kendi context'i.** Agent `.env` dosyasını okursa içerik modele gider. Bu
+tasarım gereği — dosya okumasını engellemek onay kuyruğunun işi (Hafta 10). Bu hafta
+garanti edilen şey, o içeriğin **log'a ve ekrana düşmemesi**.
+
+Projeye özgü tekrar eden yanlış pozitifler oda YAML'ından susturulur:
+
+```yaml
+redaction:
+  allow_patterns:
+    - "^FIXTURE_"
+```
+
+Bu yalnızca entropi taramasını susturur; bilinen formatlı bir secret her zaman maskelenir.
 
 ## Oda aç
 
@@ -231,6 +291,42 @@ cevaplanamıyor.
 3. **Her satır aynı görsel ağırlıkta.** Dosyayı *okumak* ile dosyayı *değiştirmek*
    aynı boyda: gözün "burada bir şey değişti" diye takılacağı yer yok.
 
+## Hafta 4 dogfood notları
+
+18 Eylül 2026. **Eksik yanı baştan söyleyeyim:** tünelle dışarı açıp ekipten başka bir
+insanı davet etme kısmı YAPILMADI. Yapılan, aynı makinede iki ayrı tarayıcı oturumu (biri
+oda sahibi, biri davetli izleyici) ve arayüzün ilk kez elle denenmesi. Üç sorunun cevabı
+bu kadarıyla:
+
+**Karşı taraf ekrana bakınca ilk 10 saniyede neyi anlamadı?**
+İlk elle denemede, **başarılı bir girişten sonra ekranda duran yanlış bir hata** vardı:
+*"Sunucuya ulaşılamadı — `npm run api` çalışıyor mu?"* Sunucu gayet çalışıyordu; giriş de
+başarılıydı. İki hata üst üste binmişti: StrictMode açılış effect'i iki kez koşuyor,
+magic link tek kullanımlık olduğu için ikinci çağrı 400 dönüyor; ve oda listesi HER hatayı
+"sunucu kapalı" diye gösteriyordu. İkisi de düzeltildi.
+
+Bunun kaydedilmeye değer yanı şu: o sırada 194 test, üç kapı script'i ve iki tarayıcı testi
+geçiyordu. Hiçbiri bunu yakalamadı, çünkü hepsi "giriş başarılı mı" diye soruyordu;
+**hiçbiri ekranda ne yazdığına bakmıyordu.**
+
+**Hangi anda "şunu ben yazayım" dedi?**
+İzleyici ekranını görür görmez: *"şu an sanırım izleyiciye müdahale etme yetkisini
+vermiyoruz."* Yani soru, izleyici bir şey denemeden önce, ekrana bakar bakmaz geldi —
+Hafta 5'in (yazma yetkisi, kuyruk, sürücü devri) gerekçesi olarak bundan iyisi yok.
+İzleyicinin gördüğü "Bu odayı izliyorsun" satırı **ne olduğunu** söylüyor ama **ne zaman
+değişeceğini** söylemiyor; Hafta 5'te oraya "yetki iste" eylemi girmeli.
+
+**Redaction bir şeyi gereksiz yere maskeledi mi?**
+Bu oturumda hayır. Kapının 5. kontrolü tam bunu ölçüyor: git sha, UUID ve uzun `node_modules`
+yolları içeren normal bir kaynak dosya yazıldığında bulgu sayısı değişmiyor. Ama bu ölçüm
+sentetik bir dosyayla yapıldı; gerçek bir projenin çıktısında yanlış pozitif çıkması
+sürpriz olmaz — `redaction.allow_patterns` tam da onun için var ve ilk gerçek yanlış pozitif
+görüldüğünde buraya yazılmalı.
+
+**Kalan:** tünel (cloudflared/ngrok) + gerçek ikinci kişi. O deneme yapıldığında bu başlık
+güncellenecek; özellikle "ilk 10 saniye" sorusunun cevabı, sistemi hiç bilmeyen birinden
+gelmeli.
+
 ## Karar notları
 
 Hafta 1 görev tanımından bilinçli olarak ayrılan noktalar ve gerekçeleri.
@@ -271,3 +367,19 @@ Hafta 1 görev tanımından bilinçli olarak ayrılan noktalar ve gerekçeleri.
 | Tarayıcı testi agent çubuğundaki `idle`'ı bekler, alanın etkinliğini değil | Aynı yarış testin içindeydi: durum event'i gelmeden alan zaten etkin görünüyor. Hazır olmanın tek dürüst kanıtı `agent.ready` event'inin ekrana düşmesi. |
 | `başlat` seçicisi `nav`'a daraltıldı | İki düğmede geçiyor (agent çubuğu ve gönderme alanı); Playwright ad eşlemesi büyük/küçük harfe duyarsız olduğu için "strict mode violation" veriyordu. |
 | Kapının agent kısmı Gemini ile kapatıldı | `gate:w3:agent`'ın ölçtüğü şey akışın uçtan uca UI'da göründüğü: hangi koşum ortamı olduğu bu kontrolde önemsiz. Claude anahtarı gelince aynı test `E2E_AGENT` ile Claude odasına da koşulur. |
+
+### Hafta 4
+
+| Karar | Gerekçe |
+| --- | --- |
+| Kural seti gitleaks'ten ÜRETİLİYOR, elle yazılmıyor | 198 servis formatını elde tutmak imkânsız. `scripts/import-gitleaks.mjs` indirip `rules.generated.ts` üretiyor; dosya repoda duruyor ki build ağ istemesin. |
+| RE2'nin `\A` / `\z` çapaları ATLANMADI, ÇEVRİLDİ | `m` bayrağı olmadan JS'te `^`/`$` tam olarak girdinin başı ve sonudur — RE2'nin anlamıyla birebir aynı. Atlasaydık 153 kural (setin yarısından fazlası) kaybolurdu. Karakter sınıfı içindekiler yine atlanıyor; `(?i)` ortada olan 22 kural da atlanıyor, çünkü orada çeviri uydurma olurdu. |
+| Tek yakalama grubu olan kurallara `secretGroup=1` türetiliyor | gitleaks kuralları secret'ı tek gruba alıp çevresine bağlam yazıyor ama TOML'da `secretGroup` çoğunda yok. Kullanmayınca `generic-api-key` `DB_PASSWORD=...` satırının TAMAMINI maskeliyordu; "çevresindeki metin korunur" kuralı böyle bozuluyordu. |
+| Entropi eşikleri test setine göre seçildi | 12 pozitif, 20 negatif. Ölçmeden tahmin etseydik üç hatayı bulamazdık: tokenizer'da ortadaki `=`, "`/` varsa yoldur" varsayımı (AWS secret'ı da `/` içeriyor) ve SRI `sha512-...`. |
+| "Kural başına bir pozitif test" 198 kural için uygulanmadı | gitleaks kuralları örnek değer taşımıyor; 198 fixture elde yazmak ölçtüğü şeye bir şey katmaz. Bunun yerine 15 yaygın servis formatı + motorun tüm davranışları test ediliyor, ayrıca 198 kuralın **hepsinin** derlendiği ve doğru bayrakları taşıdığı otomatik doğrulanıyor. |
+| Presence frame'i `id:` taşımıyor | `id` yalnızca event sırasını ilerletir. Presence'a id verseydik yeniden bağlanan istemcinin `Last-Event-ID` imleci bozulur ve gerçek event'ler atlanırdı. |
+| `allow_patterns` yalnızca entropi katmanını susturur | Bilinen formatlı bir secret hiçbir ayarla maskelenmekten kurtulmamalı; aksi hâlde ayar dosyası bir sızıntı yoluna dönüşür. |
+| Var olmayan oda `404` değil `403` | `404` dönmek hangi oda kimliklerinin var olduğunu sızdırır. Üye olmayan için ikisi de aynı görünmeli. |
+| Kapı script'leri auth'u ATLATMIYOR, kullanıyor | `scripts/dev-session.mjs` magic link akışının tamamını koşuyor. Bir bypass eklemek, kapının "oturumsuz istek 401 alır" kontrolünü anlamsız kılardı. |
+| Hafta 4 kapısı da agent'a bağlanmadı | Redaction'ın ölçtüğü şey GEÇİT: `appendEvent`. Event'i dev ucundan yazmak aynı geçitten geçiyor — gerçek DB, gerçek SSE, gerçek redaction, ama deterministik ve ücretsiz. Gerçek agent'ın dosya okumasıyla yapılan kontrol ayrı: `gate:w4:agent`. |
+| Magic link hız sınırı kapı e-postalarını da vurdu | Sabit e-postayla kapıyı 5 dakikada iki kez koşturmak sınırı tetikliyordu. Sınırı gevşetmek yerine kapılar her koşumda benzersiz e-posta üretiyor: koruma gerçek kalsın. |

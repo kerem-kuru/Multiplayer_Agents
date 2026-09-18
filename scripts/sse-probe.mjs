@@ -34,12 +34,18 @@ const base = flag("base", "http://localhost:8787");
 const since0 = Number(flag("since", 0));
 const dropAfter = args.includes("--drop-after") ? Number(flag("drop-after", 0)) : 0;
 const outFile = flag("out", "");
+/** Presence frame'lerini ayrı dosyaya yaz — Hafta 4 kapısı bunu okuyor. */
+const presenceOut = flag("presence-out", "");
 const durationSec = Number(flag("duration", 30));
 
 const seen = new Map(); // seq -> event
 let duplicates = 0;
 let frames = 0;
 let reconnects = 0;
+/** Presence AYRI kanal: event sayımına karışmaz. */
+const presenceFrames = []; // { atMs, people }
+const startedAt = Date.now();
+let firstFrameMs = null;
 
 /** SSE gövdesini çerçevelere böl ve alanları ayıkla. */
 function parseFrames(buffer) {
@@ -70,6 +76,15 @@ function ingest(frame) {
     console.error("  ! sunucu overflow bildirdi:", frame.data.join(""));
     return "overflow";
   }
+  if (frame.event === "presence") {
+    try {
+      presenceFrames.push({ atMs: Date.now() - startedAt, people: JSON.parse(frame.data.join("")) });
+    } catch {
+      // Bozuk presence frame'i ölçümü düşürmesin.
+    }
+    if (firstFrameMs === null) firstFrameMs = Date.now() - startedAt;
+    return null;
+  }
   if (frame.event !== "events") return null;
   let events;
   try {
@@ -79,6 +94,7 @@ function ingest(frame) {
     return null;
   }
   frames += 1;
+  if (firstFrameMs === null) firstFrameMs = Date.now() - startedAt;
   for (const e of events) {
     if (seen.has(e.seq)) duplicates += 1;
     else seen.set(e.seq, e);
@@ -187,6 +203,11 @@ for (let i = 1; i < seqs.length; i++) {
   }
 }
 
+if (presenceOut) {
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(presenceOut, JSON.stringify(presenceFrames, null, 2), "utf8");
+}
+
 if (outFile) {
   const { writeFile } = await import("node:fs/promises");
   await writeFile(outFile, JSON.stringify(seqs.map((s) => seen.get(s)), null, 2), "utf8");
@@ -200,6 +221,10 @@ const summary = {
   duplicates,
   reconnects,
   eventsPerFrame: frames > 0 ? Number((seen.size / frames).toFixed(2)) : 0,
+  /** İlk anlamlı frame'e kadar geçen süre — "3 saniyede senkron" ölçümü. */
+  firstFrameMs,
+  presenceFrames: presenceFrames.length,
+  people: presenceFrames.length > 0 ? presenceFrames[presenceFrames.length - 1].people.length : 0,
 };
 console.log(JSON.stringify(summary));
 

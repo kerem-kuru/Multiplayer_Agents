@@ -27,7 +27,7 @@ ROOM=""; SID=""
 # Yol GÖRELİ olmalı: Git Bash'in mutlak yollarını (/tmp/..., /c/Users/...)
 # Node Windows tarafında C:\tmp ve C:\c\Users diye çözüyor ve yazamıyor.
 # Script yukarıda `cd "$ROOT"` yaptığı için göreli yol iki tarafta da doğru.
-TMPDIR_G=".gate-tmp"
+TMPDIR_G=".gate-tmp-$$"
 rm -rf "$TMPDIR_G"; mkdir -p "$TMPDIR_G"
 
 ok()   { echo "  ✓ $1"; PASS=$((PASS + 1)); }

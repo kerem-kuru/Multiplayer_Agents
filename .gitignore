@@ -7,7 +7,9 @@ dist/
 /rooms-data/
 .week1-gate.tmp.yaml
 .week2-gate.tmp.yaml
-.gate-tmp/
+.gate-tmp*/
+.gate4-tmp*/
+.gate4a-tmp*/
 
 # Playwright çıktıları
 test-results/
