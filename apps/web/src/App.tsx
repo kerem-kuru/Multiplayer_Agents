@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   consumeLoginToken,
   createRoom,
@@ -35,6 +35,17 @@ export function App() {
   /** Girişten sonra dönülecek yer. */
   const [next, setNext] = useState<string | undefined>(undefined);
 
+  /**
+   * Açılış BİR KEZ koşar.
+   *
+   * React 18 StrictMode geliştirmede her effect'i iki kez çağırıyor. Magic
+   * link TEK KULLANIMLIK olduğu için ikinci çağrı token'ı "zaten kullanılmış"
+   * bulup 400 dönüyordu: giriş aslında başarılıyken ekranda hata kalıyordu.
+   * Token tüketmek yan etkili bir iş; effect'in iki kez koşmasına dayanıklı
+   * olması gerekiyor.
+   */
+  const bootstrapped = useRef(false);
+
   const loadRooms = (): void => {
     void listRooms()
       .then(setRooms)
@@ -42,7 +53,11 @@ export function App() {
   };
 
   useEffect(() => {
+    if (bootstrapped.current) return;
+    bootstrapped.current = true;
     const params = new URLSearchParams(location.search);
+
+    let loginError: string | null = null;
 
     void (async () => {
       // 1 — Magic link dönüşü: token'ı tüket, URL'i temizle.
@@ -53,7 +68,9 @@ export function App() {
           try {
             await consumeLoginToken(token);
           } catch (err) {
-            setError((err as Error).message);
+            // Başarısızlığı HEMEN gösterme: asıl ölçüt oturumun açılıp
+            // açılmadığı. Aşağıdaki `me()` başarılıysa bu hata yanıltıcıdır.
+            loginError = (err as Error).message;
           }
         }
         history.replaceState(null, "", target);
@@ -76,6 +93,8 @@ export function App() {
         setPhase("ready");
         if (!joinToken) loadRooms();
       } catch {
+        // Oturum yoksa VE giriş denemesi hata verdiyse sebebi göster.
+        if (loginError) setError(loginError);
         setPhase("login");
       }
     })();
@@ -91,7 +110,7 @@ export function App() {
     return <p style={{ padding: 24, color: "var(--ink-soft)" }}>Yükleniyor…</p>;
   }
 
-  if (phase === "login") return <Login next={next} />;
+  if (phase === "login") return <Login next={next} notice={error} />;
 
   if (inviteToken) {
     return (
@@ -141,7 +160,15 @@ export function App() {
 
       {error && (
         <p style={{ color: "var(--fail)" }}>
-          Sunucuya ulaşılamadı: {error} — <code>npm run api</code> çalışıyor mu?
+          {/* "Sunucu kapalı" demek SADECE gerçekten ulaşılamadığında doğru;
+              401 veya 400'ü de öyle göstermek yanlış yere baktırıyor. */}
+          {error === "Failed to fetch" ? (
+            <>
+              Sunucuya ulaşılamadı — <code>npm run api</code> çalışıyor mu?
+            </>
+          ) : (
+            error
+          )}
         </p>
       )}
 

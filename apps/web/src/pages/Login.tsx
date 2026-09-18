@@ -8,7 +8,7 @@ import { requestLogin } from "../lib/api.js";
  * bağlantı ekranda da görünür; üretimde görünmez çünkü sunucu onu yanıta
  * koymaz — bu ayrım sunucuda, burada değil.
  */
-export function Login({ next }: { next?: string }) {
+export function Login({ next, notice }: { next?: string; notice?: string | null }) {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [devLink, setDevLink] = useState<string | null>(null);
@@ -77,7 +77,9 @@ export function Login({ next }: { next?: string }) {
         </div>
       )}
 
-      {error && <p style={{ color: "var(--fail)", fontSize: 13 }}>{error}</p>}
+      {(error || notice) && (
+        <p style={{ color: "var(--fail)", fontSize: 13 }}>{error ?? notice}</p>
+      )}
     </div>
   );
 }
