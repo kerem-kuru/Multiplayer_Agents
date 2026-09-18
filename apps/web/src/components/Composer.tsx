@@ -26,8 +26,12 @@ export function Composer({
   const [error, setError] = useState<string | null>(null);
 
   const running = status === "busy";
+  // Agent AYAĞA KALKARKEN de sunucu 409 döner: container ve runner hazır değil.
+  // Alan açık kalırsa kullanıcı yazıp gönderiyor ve reddediliyor — alanın
+  // "açık" olması "gönderilebilir" demek olmalı.
+  const starting = status === "starting";
   const stopped = status === "stopped" || status === "failed";
-  const disabled = running || busy;
+  const disabled = running || starting || busy;
 
   const submit = async (): Promise<void> => {
     const body = text.trim();
@@ -66,7 +70,13 @@ export function Composer({
             }
           }}
           rows={2}
-          placeholder={running ? "Agent çalışıyor…" : `${agent} agent'ına görev yaz (Enter gönderir)`}
+          placeholder={
+            running
+              ? "Agent çalışıyor…"
+              : starting
+                ? "Agent başlıyor…"
+                : `${agent} agent'ına görev yaz (Enter gönderir)`
+          }
           disabled={disabled}
           style={{
             flex: 1,
@@ -87,9 +97,9 @@ export function Composer({
           </button>
         )}
       </div>
-      {running && (
+      {(running || starting) && (
         <div style={{ color: "var(--ink-soft)", fontSize: 12, marginTop: 4 }}>
-          Agent çalışıyor — bitmesini bekle.
+          {running ? "Agent çalışıyor — bitmesini bekle." : "Agent başlıyor — birkaç saniye."}
         </div>
       )}
     </div>

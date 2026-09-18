@@ -17,10 +17,29 @@ const AGENT = process.env.E2E_AGENT ?? "backend";
 /** Gemini ücretsiz katmanda 90 sn'ye kadar sürebiliyor. */
 const TURN_TIMEOUT = Number(process.env.E2E_TURN_TIMEOUT ?? 180_000);
 
+/**
+ * "başlat" iki yerde geçiyor: agent çubuğunda (nav) ve gönderme alanında
+ * (agent durmuşken "Başlat"). Playwright ad eşlemesi büyük/küçük harfe
+ * duyarsız olduğu için seçici HER ZAMAN nav'a daraltılır.
+ */
+const startButton = (page: import("@playwright/test").Page) =>
+  page.locator("nav").getByRole("button", { name: "başlat" });
+
+/**
+ * "başlat"a basmak agent'ı ANINDA hazır yapmaz: container ayağa kalkana kadar
+ * durum `starting` ve sunucu mesajı 409 ile reddediyor. Gönderme alanının o
+ * anda açık görünmesi yeterli kanıt değil — durumu agent çubuğundan bekle.
+ */
+async function waitForIdle(page: import("@playwright/test").Page): Promise<void> {
+  await expect(
+    page.locator("nav").getByRole("button", { name: new RegExp(`${AGENT}.*idle`) }),
+  ).toBeVisible({ timeout: 90_000 });
+}
+
 async function openNewRoom(page: import("@playwright/test").Page): Promise<void> {
   await page.goto("/");
   await page.getByRole("button", { name: "Yeni oda aç" }).click();
-  await expect(page.getByRole("button", { name: "başlat" })).toBeVisible({ timeout: 30_000 });
+  await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
 }
 
 test.describe("oda", () => {
@@ -28,8 +47,8 @@ test.describe("oda", () => {
     test.setTimeout(TURN_TIMEOUT + 120_000);
     await openNewRoom(page);
 
-    await page.getByRole("button", { name: "başlat" }).click();
-    // Agent hazır olunca gönderme alanı açılır.
+    await startButton(page).click();
+    await waitForIdle(page);
     const box = page.getByPlaceholder(new RegExp(`${AGENT} agent`));
     await expect(box).toBeEnabled({ timeout: 60_000 });
 
@@ -37,14 +56,15 @@ test.describe("oda", () => {
     await box.press("Enter");
 
     // Turn bitene kadar bekle: "çalışıyor" gidip bir sonuç gelmeli.
-    await expect(page.getByText(/● (tamamlandı|bitti|başarısız)/)).toBeVisible({
+    await expect(page.getByText(/● (tamamlandı|bitti|başarısız)/).first()).toBeVisible({
       timeout: TURN_TIMEOUT,
     });
 
     // Etkinlik akışında dosya yazma ve kabuk komutu satırları.
-    const feed = page.locator("section");
-    await expect(feed.getByText(/Write|write_file/)).toBeVisible();
-    await expect(feed.getByText(/Bash|run_shell_command/)).toBeVisible();
+    // Turn sayısı birden fazla olabileceği için akışın tamamına bakılır.
+    const feed = page.getByRole("main");
+    await expect(feed.getByText(/Write|write_file/).first()).toBeVisible();
+    await expect(feed.getByText(/Bash|run_shell_command/).first()).toBeVisible();
 
     // Terminal sekmesinde komut görünüyor.
     await page.getByRole("button", { name: "Terminal" }).click();
@@ -54,13 +74,14 @@ test.describe("oda", () => {
   test("yeniden yükleme: tek event kaybolmuyor, hiçbiri iki kez görünmüyor", async ({ page }) => {
     test.setTimeout(TURN_TIMEOUT + 120_000);
     await openNewRoom(page);
-    await page.getByRole("button", { name: "başlat" }).click();
+    await startButton(page).click();
+    await waitForIdle(page);
 
     const box = page.getByPlaceholder(new RegExp(`${AGENT} agent`));
     await expect(box).toBeEnabled({ timeout: 60_000 });
     await box.fill("hello.js dosyası oluştur");
     await box.press("Enter");
-    await expect(page.getByText(/● (tamamlandı|bitti|başarısız)/)).toBeVisible({
+    await expect(page.getByText(/● (tamamlandı|bitti|başarısız)/).first()).toBeVisible({
       timeout: TURN_TIMEOUT,
     });
 
