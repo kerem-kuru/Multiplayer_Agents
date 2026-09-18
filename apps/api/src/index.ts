@@ -1,6 +1,6 @@
 import path from "node:path";
 import { serve } from "@hono/node-server";
-import { AgentManager, closePool } from "@agent-rooms/core";
+import { AgentManager, closePool, createRedactingLogger } from "@agent-rooms/core";
 import { collectProviderEnv, hasProviderBackend } from "@agent-rooms/protocol";
 import { createApp } from "./app.js";
 import { REPO_ROOT, loadApiConfig } from "./config.js";
@@ -38,7 +38,11 @@ const manager = anyRuntime
       maxTurns: cfg.agent.maxTurns,
       maxBudgetUsd: cfg.agent.maxBudgetUsd,
       heartbeatTimeoutMs: cfg.agent.heartbeatTimeoutMs,
-      log: (level, msg) => console[level === "info" ? "log" : level](msg),
+      // Secret'ı event log'dan temizleyip stdout'a basmak bir şey kazandırmaz:
+      // runner stderr'i de buradan geçiyor.
+      log: createRedactingLogger((level, msg) =>
+        console[level === "info" ? "log" : level](msg),
+      ),
     })
   : undefined;
 

@@ -5,7 +5,9 @@ import {
   parseEvent,
   type NewRoomEvent,
 } from "@agent-rooms/protocol";
+import type { Finding } from "@agent-rooms/redact";
 import { getEventBus } from "../bus.js";
+import { redactEventPayload } from "../redaction.js";
 import { getPool, withTx } from "./pool.js";
 
 /**
@@ -14,6 +16,11 @@ import { getPool, withTx } from "./pool.js";
  * `seq` oturum başına tek bir satır kilidi üzerinden dağıtılır
  * (`sessions.next_seq`), böylece iki paralel yazıcı aynı sırayı alamaz.
  * `(session_id, seq)` üzerindeki unique index son savunma hattıdır.
+ *
+ * REDACTION TEK GEÇİT: temizleme burada, YAZMADAN ÖNCE yapılır. Görüntüleme
+ * anına bırakılsaydı secret veritabanında, yedeklerde, replay'de ve denetim
+ * çıktısında dururdu — append-only bir log'dan sonradan silmek mümkün değil.
+ * Bu yüzden `INSERT INTO session_events` başka hiçbir yerde yazılmaz.
  */
 
 export interface AppendResult {
@@ -26,7 +33,11 @@ async function appendOne(
   event: NewRoomEvent,
 ): Promise<RoomEvent> {
   // Şemadan geçmeyen hiçbir şey log'a giremez.
-  const validated = NewRoomEventSchema.parse(event) as NewRoomEvent;
+  const parsed = NewRoomEventSchema.parse(event) as NewRoomEvent;
+
+  // ...ve temizlenmemiş hiçbir şey. Bundan sonrası SADECE temiz veriyle çalışır.
+  const cleaned = redactEventPayload(parsed.roomId, parsed.payload);
+  const validated = { ...parsed, payload: cleaned.payload } as NewRoomEvent;
 
   const seqRow = await client.query<{ seq: string }>(
     `UPDATE sessions
@@ -54,11 +65,43 @@ async function appendOne(
     ],
   );
 
+  await writeFindings(client, validated.sessionId, seq, cleaned.findings);
+
   return parseEvent({
     ...validated,
     seq,
     ts: inserted.rows[0]!.ts.toISOString(),
   });
+}
+
+/**
+ * Bulgu kaydı — AYNI transaction'da. Event yazılıp bulgusu yazılmadan çökerse
+ * "burada bir secret vardı" bilgisi kaybolur.
+ *
+ * Kayıt ASLA ham secret içermez: kural adı, payload içindeki yol, uzunluk ve
+ * sha256'nın ilk 8 hex'i.
+ */
+async function writeFindings(
+  client: pg.PoolClient,
+  sessionId: string,
+  seq: number,
+  findings: readonly Finding[],
+): Promise<void> {
+  if (findings.length === 0) return;
+
+  // Satır başına dört alan; ilk iki parametre (session, seq) ortak.
+  const params: unknown[] = [sessionId, seq];
+  const placeholders = findings.map((f, i) => {
+    const b = 2 + i * 4;
+    params.push(f.rule, f.path, f.hash8, f.length);
+    return `($1, $2, $${b + 1}, $${b + 2}, $${b + 3}, $${b + 4})`;
+  });
+
+  await client.query(
+    `INSERT INTO redaction_findings (session_id, seq, rule, path, hash8, length)
+     VALUES ${placeholders.join(", ")}`,
+    params,
+  );
 }
 
 /**

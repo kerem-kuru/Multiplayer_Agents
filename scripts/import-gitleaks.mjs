@@ -105,6 +105,34 @@ function toJsRegex(source) {
   return { pattern, flags };
 }
 
+/**
+ * Desendeki YAKALAMA grubu sayısı (`(?:...)`, `(?=...)`, `(?<=...)` sayılmaz).
+ *
+ * NEDEN LAZIM: gitleaks kuralları secret'ı tek bir gruba alıp çevresine bağlam
+ * yazar (`generic-api-key` → `...key...=...([\w.=-]{10,150})`). `secretGroup`
+ * alanı TOML'da çoğu kuralda yok; grubu kullanmazsak satırın tamamını
+ * maskeleriz ve "DB_PASSWORD=" gibi okunması gereken bağlam kaybolur.
+ * Tek grup varsa secret odur — şüpheye yer yok; birden fazlaysa dokunmuyoruz.
+ */
+function captureGroupCount(pattern) {
+  let count = 0;
+  let inClass = false;
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === "\\") {
+      i++;
+      continue;
+    }
+    if (inClass) {
+      if (ch === "]") inClass = false;
+      continue;
+    }
+    if (ch === "[") inClass = true;
+    else if (ch === "(" && pattern[i + 1] !== "?") count++;
+  }
+  return count;
+}
+
 const toml = arg("file")
   ? await readFile(arg("file"), "utf8")
   : await fetch(arg("url") ?? DEFAULT_URL).then((r) => {
@@ -138,7 +166,12 @@ for (const rule of rules) {
     // Anahtar kelime ön filtresi: ucuz `includes` geçmezse pahalı regex hiç koşmaz.
     keywords: Array.isArray(rule.keywords) ? rule.keywords.map((k) => String(k).toLowerCase()) : [],
     entropy: typeof rule.entropy === "number" ? rule.entropy : undefined,
-    secretGroup: typeof rule.secretGroup === "number" ? rule.secretGroup : undefined,
+    secretGroup:
+      typeof rule.secretGroup === "number"
+        ? rule.secretGroup
+        : captureGroupCount(converted.pattern) === 1
+          ? 1
+          : undefined,
   });
 }
 

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import type { RoomConfig } from "@agent-rooms/protocol";
 import { getPool } from "../db/pool.js";
+import { setRoomAllowPatterns } from "../redaction.js";
 
 export interface RoomRecord {
   id: string;
@@ -161,6 +162,13 @@ export async function listRooms(
 }
 
 /** Odanın açıldığı andaki rol konfigürasyonu — YAML sonradan değişse de bu durur. */
+/**
+ * Odanın konfigürasyonu.
+ *
+ * Okurken redaction ayarını da kaydediyoruz: `appendEvent` oda başına
+ * `allow_patterns`'ı buradan buluyor ve hem API hem AgentManager bu
+ * fonksiyondan geçiyor, yani tek bir yer yeter.
+ */
 export async function getRoomConfig(
   roomId: string,
   pool: pg.Pool = getPool(),
@@ -170,7 +178,10 @@ export async function getRoomConfig(
     [roomId],
   );
   const row = res.rows[0];
-  return row ? (row.config as RoomConfig) : null;
+  if (!row) return null;
+  const config = row.config as RoomConfig;
+  setRoomAllowPatterns(roomId, config.redaction?.allow_patterns ?? []);
+  return config;
 }
 
 /** Oturumu kimliğiyle bul. Elle event yazma ucu roomId'yi buradan alır. */

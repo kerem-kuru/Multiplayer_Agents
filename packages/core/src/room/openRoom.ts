@@ -10,6 +10,7 @@ import {
   stopRoomContainer,
 } from "../docker/container.js";
 import { ensureRuntimeRows } from "../agents/runtime.js";
+import { setRoomAllowPatterns } from "../redaction.js";
 import { scaffoldRoomLayout } from "./layout.js";
 import {
   attachContainer,
@@ -70,6 +71,10 @@ export async function openRoom(input: OpenRoomInput): Promise<OpenRoomResult> {
   } = input;
 
   const room = await createRoom(config, configDigest, pool);
+
+  // Redaction ayarını İLK event'ten önce kaydet: `room.created` de geçitten
+  // geçiyor ve odanın kendi `allow_patterns`'ı o anda bilinmeli.
+  setRoomAllowPatterns(room.id, config.redaction?.allow_patterns ?? []);
   const session = await createSession(room.id, pool);
   const roomRoot = path.join(roomsDataDir, room.id);
   const dirs = await scaffoldRoomLayout(roomRoot, config);
