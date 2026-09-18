@@ -6,9 +6,13 @@ Agent'lar birbirine mesaj atmaz. Ortak bir **oda defterine** yazar ve oradan oku
 
 > **Tez:** Gerçek birim agent değil, her agent'ın okuyup yazdığı tek paylaşılan bağlam deposudur.
 
-Durum: **Hafta 1-2 tamam · Hafta 3 akış kapısı geçti** — tarayıcıda canlı izleme çalışıyor. Ayrıntı aşağıda.
+Durum: **Hafta 3 bitti** — akış kapısı 11/11 (`gate:w3`) ve agent gerektiren iki tarayıcı
+testi (`gate:w3:agent`) Gemini koşum ortamına karşı geçti. Tarayıcıda bir görev baştan sona
+canlı izlenebiliyor; sayfa yenilendiğinde tek event eksilmiyor.
 
-Eski durum notu: **Hafta 2 kodu tamam, kapısı koşulmadı** — agent artık container içinde Claude Agent SDK ile headless koşuyor ve attığı her adım yapılandırılmış event olarak DB'ye düşüyor. `npm run gate` (Hafta 1) 10/10 geçiyor; `npm run gate:w2` gerçek API çağrısı yapar ve `ANTHROPIC_API_KEY` ister.
+**Hafta 2 kapısı hâlâ koşulmadı:** kodu tamam ama `gate:w2` Claude Agent SDK ile gerçek çağrı
+yapar ve `ANTHROPIC_API_KEY` ister; anahtar yok. Hafta 2'nin boru hattı Gemini koşum ortamıyla
+uçtan uca doğrulandı (`npm run smoke:gemini`).
 
 ## Hızlı başlangıç
 
@@ -23,6 +27,7 @@ npm test             # 27 test — docker ve DB gerekmez
 npm run verify       # tek komut: docker bekle → db → migrate → smoke → imaj → kapı
 npm run gate:w2      # Hafta 2 kapısı — 14 kontrol, GERÇEK API çağrısı yapar
 npm run gate:w3      # Hafta 3 akış kapısı — 11 kontrol, anahtar GEREKTİRMEZ
+npm run gate:w3:agent # Hafta 3'ün agent gerektiren 2 tarayıcı testi (api + web ayakta olmalı)
 ```
 
 ## Tarayıcıda izle
@@ -177,6 +182,10 @@ Yeni bir durum eklemenin yolu yeni bir event tipi eklemektir, mevcut bir kaydı 
 
 Roller `config/room.example.yaml` içinde bir dizidir. Kod her yerde bu diziyi dolaşır, UI `agents.map()` yapar, defter referansları isimle verilir. Üçüncü agent eklemek tek bir YAML bloğu olmalı — `roomConfig.test.ts` bunu test ediyor.
 
+Hafta 3'te bir kez elle de denendi: YAML'a üçüncü bir `docs` agent'ı eklendi, hiçbir koda
+dokunulmadan arayüzde kendiliğinden üçüncü satır çıktı (`GET /rooms/:id/agents` üç agent
+döndü, sol çubuk üçünü de çizdi). Kontrolden sonra geçici YAML silindi.
+
 ## Yol haritası
 
 12 haftalık plan `docs/roadmap.md` içinde. Hafta 8 sonundaki kapı gerçek bir durak noktasıdır: *backend agent bir mimari karar alır, deftere yazar, frontend agent turn'üne başlarken onu okur ve sözleşmeye uygun kodu yazar — aralarında hiç mesaj geçmeden.* Bu çalışmadan 3. ve 4. agent eklemek sadece hatayı büyütür.
@@ -184,6 +193,43 @@ Roller `config/room.example.yaml` içinde bir dizidir. Kod her yerde bu diziyi d
 ## Ölçülecek tek metrik
 
 **Aynı oturuma iki farklı insanın yazdığı oturum sayısı, haftalık.** Kurulum sayısı değil, star sayısı değil.
+
+## Hafta 3 dogfood notları
+
+18 Eylül 2026 · gerçek bir iş, **ekrandan** izlendi (psql'den değil) · koşum ortamı
+**Gemini** (Claude anahtarı yok) · oda `3437e583`.
+
+Kendi FastAPI projem (`main.py`, `models.py`, `database.py` — 118 satır, secret yok)
+worktree'ye kopyalandı ve gerçekten ihtiyacım olan iş verildi: *"sadece POST uçları var;
+GET listeleme uçlarını ekle, randevu açarken `pet_id` yoksa 404 dön."* Agent 52,9 sn'de
+bitirdi, `main.py` doğru değişti (üç GET ucu + 404 kontrolü). Ardından ikinci bir görevle
+kabuk yolu da denendi (`wc -l`, 11,2 sn).
+
+**Neyi görmek için Terminal sekmesine geçmek zorunda kaldın?**
+Hiçbir şeyi — ve sorun tam olarak bu. Bu koşum ortamında Terminal sekmesi etkinlik
+akışından **daha boş**: `$ wc -l /room/worktrees/backend/*.py` satırı var, çıktısı yok
+(Gemini `tool_result` metnini vermiyor, sadece `status`). Satır sayılarını agent'ın düz
+metin cevabından okudum. Yani Terminal şu an Claude koşum ortamı için hazır bir görünüm;
+Gemini'de bilgi taşımıyor. **Hafta 6-7 için:** sekme, koşum ortamı çıktı vermiyorsa
+kendini gizlemeli veya nedenini söylemeli; kullanıcıyı boş bir panele göndermemeli.
+
+**Hangi bilgiyi ekranda bulamayıp DB'ye (dosyaya) baktın?**
+`replace` satırı "worktrees/backend/main.py · 1 dosya" diyor; **ne değiştiğini**
+söylemiyor. Değişikliğin doğruluğunu ekrandan doğrulayamadım, host'ta `diff` çektim.
+Agent'ın kendi özeti tek kanıttı ve onu doğrulayacak yer ekranda yok. Diff görünümü
+zaten Hafta 6'da — bu dogfood onun en çok istenen şey olduğunu doğruluyor. İkinci eksik:
+turn başlığında **saat yok**, sadece süre var; "bu ne zaman oldu" sorusu ekrandan
+cevaplanamıyor.
+
+**5 dakika sonra ekranda gürültü olmaya başlayan ne vardı?**
+1. **`update_topic` satırları.** Gemini'nin iç defter tutma tool'u; 7 satırlık turn'ün
+   3'ü bu (yaklaşık %43) ve özet sütunu `Object.keys(input)`'ten ibaret:
+   `title, summary, strategic_intent`. Kullanıcıya hiçbir şey anlatmıyor.
+   **Hafta 6-7:** koşum ortamına özgü "iç" tool'lar varsayılan olarak katlanmalı.
+2. **Agent'ın son metni ham markdown.** `###`, `**`, ``` ``` ``` işaretleri tek bir
+   paragraf bloğu olarak düşüyor; cevap uzadıkça okunaksızlaşıyor.
+3. **Her satır aynı görsel ağırlıkta.** Dosyayı *okumak* ile dosyayı *değiştirmek*
+   aynı boyda: gözün "burada bir şey değişti" diye takılacağı yer yok.
 
 ## Karar notları
 
@@ -216,3 +262,12 @@ Hafta 1 görev tanımından bilinçli olarak ayrılan noktalar ve gerekçeleri.
 | Hafta 3 kapısı agent'a bağlanmadı | Bu haftanın konusu agent değil AKIŞ. Event üretmek için dev ucu kullanılıyor: gerçek event, gerçek DB, gerçek SSE — ama deterministik ve ücretsiz. Canlı agent'a bağlamak testi yavaşlatıp kararsızlaştırırdı, ölçtüğü şeye hiçbir şey katmadan. Agent gerektiren 2 kontrol ayrı: `gate:w3:agent`. |
 | SSE geri baskısı `res.write()` dönüşüyle değil, bekleyen tampon boyutuyla ölçülüyor | Hono'nun `writeSSE`'si await edilebiliyor; yazım beklerken bus'tan gelenler tamponda birikiyor. Ölçülmesi gereken zaten o tampon: yavaş istemci sunucunun belleğini şişirmemeli. 5 MB'ı aşınca `overflow` + kapat. |
 | Tek sunucu örneği varsayımı | `AgentManager` bellekte. İkinci bir sunucu örneği açılış mutabakatında birincinin runner'larını öldürür. Çok sunuculu dağıtım Redis ile sonraki fazlarda — o zamana kadar tek örnek koş. |
+
+### Hafta 3 — tarayıcı kapısı koşulduktan sonra
+
+| Karar | Gerekçe |
+| --- | --- |
+| Gönderme alanı `starting` durumunda da kilitli | Tarayıcı testi ilk koşumda buna düştü: "başlat"a basıldıktan sonra alan açık görünüyordu ama sunucu `409 (starting)` dönüyordu. Alanın "açık" olması "gönderilebilir" demek olmalı; aksi hâlde kullanıcı yazdığını reddedilmiş görüyor. |
+| Tarayıcı testi agent çubuğundaki `idle`'ı bekler, alanın etkinliğini değil | Aynı yarış testin içindeydi: durum event'i gelmeden alan zaten etkin görünüyor. Hazır olmanın tek dürüst kanıtı `agent.ready` event'inin ekrana düşmesi. |
+| `başlat` seçicisi `nav`'a daraltıldı | İki düğmede geçiyor (agent çubuğu ve gönderme alanı); Playwright ad eşlemesi büyük/küçük harfe duyarsız olduğu için "strict mode violation" veriyordu. |
+| Kapının agent kısmı Gemini ile kapatıldı | `gate:w3:agent`'ın ölçtüğü şey akışın uçtan uca UI'da göründüğü: hangi koşum ortamı olduğu bu kontrolde önemsiz. Claude anahtarı gelince aynı test `E2E_AGENT` ile Claude odasına da koşulur. |
