@@ -53,6 +53,22 @@ export const RoomBudget = z
   .strict();
 export type RoomBudget = z.infer<typeof RoomBudget>;
 
+/**
+ * Oda başına redaction ayarı.
+ *
+ * `allow_patterns`: projede TEKRAR EDEN yanlış pozitifler için. Örneğin bir
+ * test fixture'ı gerçek anahtar formatında sahte bir değer taşıyorsa her
+ * turn'de maskelenip çıktıyı okunmaz hale getirir. Desenler entropi
+ * taramasına uygulanır; kural setini SUSTURMAZ (bilinen formatlı bir secret
+ * her zaman maskelenir).
+ */
+export const RedactionConfig = z
+  .object({
+    allow_patterns: z.array(z.string().min(1)).default([]),
+  })
+  .strict();
+export type RedactionConfig = z.infer<typeof RedactionConfig>;
+
 export const RoomConfig = z
   .object({
     version: z.literal(1),
@@ -63,6 +79,7 @@ export const RoomConfig = z
     contractsDir: z.string().min(1).default("contracts"),
     journalDir: z.string().min(1).default("journal"),
     budget: RoomBudget.default({ maxUsd: 25, maxTurns: 2000 }),
+    redaction: RedactionConfig.default({ allow_patterns: [] }),
     agents: z.array(AgentConfig).min(1),
   })
   .strict()

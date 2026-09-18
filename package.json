@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "typecheck": "tsc -b packages/protocol packages/core apps/api && tsc -p packages/runner && tsc -p packages/runner-gemini",
+    "typecheck": "tsc -b packages/protocol packages/redact packages/core apps/api && tsc -p packages/runner && tsc -p packages/runner-gemini",
     "test": "vitest run",
     "smoke": "node scripts/smoke.mjs",
     "smoke:api": "node scripts/smoke-api.mjs",
@@ -33,11 +33,13 @@
     "db:down": "docker compose down",
     "db:migrate": "node scripts/migrate.mjs",
     "db:reset": "docker compose down -v && docker compose up -d postgres redis",
-    "runner:build": "node scripts/build-runner.mjs"
+    "runner:build": "node scripts/build-runner.mjs",
+    "rules:import": "node scripts/import-gitleaks.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "concurrently": "^10.0.5",
+    "smol-toml": "^1.8.0",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }
