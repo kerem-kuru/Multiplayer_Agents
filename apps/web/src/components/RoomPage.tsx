@@ -51,6 +51,8 @@ export function RoomPage({
    */
   const [role, setRole] = useState<"owner" | "viewer" | null>(null);
   const [sharing, setSharing] = useState(false);
+  /** Başlatma/durdurma hatası — sessizce yutulursa agent "starting"de asılı görünür. */
+  const [actionError, setActionError] = useState<string | null>(null);
   const canWrite = role === "owner";
 
   useEffect(() => {
@@ -168,9 +170,34 @@ export function RoomPage({
             );
           })}
           {selected && canWrite && (
-            <div style={{ marginTop: 10, display: "flex", gap: 4 }}>
-              <button onClick={() => void startAgent(roomId, selected)}>başlat</button>
-              <button onClick={() => void stopAgent(roomId, selected)}>durdur</button>
+            <div style={{ marginTop: 10 }}>
+              <div style={{ display: "flex", gap: 4 }}>
+                <button
+                  onClick={() => {
+                    setActionError(null);
+                    void startAgent(roomId, selected).catch((e: Error) =>
+                      setActionError(e.message),
+                    );
+                  }}
+                >
+                  başlat
+                </button>
+                <button
+                  onClick={() => {
+                    setActionError(null);
+                    void stopAgent(roomId, selected).catch((e: Error) =>
+                      setActionError(e.message),
+                    );
+                  }}
+                >
+                  durdur
+                </button>
+              </div>
+              {actionError && (
+                <div style={{ color: "var(--fail)", fontSize: 11, marginTop: 6 }}>
+                  {actionError}
+                </div>
+              )}
             </div>
           )}
         </nav>

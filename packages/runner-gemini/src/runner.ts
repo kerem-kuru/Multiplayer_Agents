@@ -86,7 +86,17 @@ function runTurn(messageId: string, text: string): Promise<void> {
       // biçiminde yargs dizinin sonunu bulamayıp prompt'u pozisyonel argümana
       // çeviriyor ve "Cannot use both a positional prompt and --prompt" diyor.
       ...tools.allow.flatMap((t) => ["--allowed-tools", t]),
-      ...(agent.model && agent.model !== "auto" ? ["-m", agent.model] : []),
+      /**
+       * `AGENT_MODEL` YAML'ı EZER — Claude runner'ı da böyle davranıyor
+       * (`model: process.env.AGENT_MODEL`). Burada sadece `agent.model`'e
+       * bakılıyordu, yani ortam değişkeni Gemini tarafında sessizce yok
+       * sayılıyordu: kapı testleri "haiku ile koş" diyor, biz gemini'ye
+       * söylemiyorduk.
+       */
+      ...(() => {
+        const model = process.env.AGENT_MODEL || agent.model;
+        return model && model !== "auto" ? ["-m", model] : [];
+      })(),
       "-p",
       text,
     ];

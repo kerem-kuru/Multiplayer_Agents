@@ -23,7 +23,10 @@ export type AgentStatus = (typeof AGENT_STATUSES)[number];
 const ALLOWED: Record<AgentStatus, readonly AgentStatus[]> = {
   stopped: ["starting"],
   failed: ["starting"],
-  starting: ["idle", "stopped", "crashed"],
+  // `failed`: ayağa kalkarken kurtarılamaz bir sorun çıktı (ör. odanın
+  // container'ı silinmiş). Bu geçiş olmadan runtime sonsuza kadar
+  // `starting`de asılı kalıyordu ve ekranda hiçbir açıklama görünmüyordu.
+  starting: ["idle", "stopped", "crashed", "failed"],
   idle: ["busy", "stopped", "crashed"],
   busy: ["idle", "stopped", "crashed"],
   crashed: ["starting", "failed"],

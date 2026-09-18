@@ -69,6 +69,14 @@ interface AgentHandle {
 }
 
 export class AgentNotFoundError extends Error {}
+/** Agent ayağa kalkamadı — sebebi kullanıcıya gösterilebilir. */
+export class AgentStartError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "AgentStartError";
+  }
+}
+
 export class AgentBusyError extends Error {
   constructor(readonly status: AgentStatus) {
     super(`agent meşgul: ${status}`);
@@ -210,13 +218,51 @@ export class AgentManager {
     }
     if (resumeSessionId) env.RESUME_SESSION_ID = resumeSessionId;
 
-    const exec = await startRunnerExec({
-      container,
-      workdir: `/room/${agent.workspace}`,
-      env,
-      user: "agent",
-      runnerPath: `/opt/runner/${agent.runtime}/dist/runner.js`,
-    });
+    /**
+     * Buradan sonrası başarısız olursa runtime `starting`de KALMAMALI.
+     *
+     * Gerçekte oldu: odanın container'ı dışarıdan silinince (docker prune,
+     * elle temizlik) `start` 404 alıyor, hata yukarı gidiyor ve agent sonsuza
+     * kadar "starting" görünüyordu — ekranda tek kelime açıklama olmadan.
+     * Ayağa kalkamamak bir sonuçtur; sessizlik değil.
+     */
+    let exec;
+    try {
+      exec = await startRunnerExec({
+        container,
+        workdir: `/room/${agent.workspace}`,
+        env,
+        user: "agent",
+        runnerPath: `/opt/runner/${agent.runtime}/dist/runner.js`,
+      });
+    } catch (err) {
+      const missing =
+        (err as { statusCode?: number }).statusCode === 404 ||
+        /no such container/i.test(String(err));
+      const reason = missing
+        ? "odanın container'ı yok (silinmiş olabilir) — odayı yeniden aç"
+        : `container'a bağlanılamadı: ${String(err)}`;
+
+      await transition(roomId, agentName, "failed", { lastError: reason }, this.pool);
+      await appendEvent(
+        {
+          roomId,
+          sessionId,
+          actor: { kind: "system" },
+          type: "agent.crashed",
+          payload: {
+            agent: agentName,
+            exitCode: null,
+            error: reason,
+            willRestart: false,
+            restartCount: 0,
+          },
+        } satisfies NewRoomEvent,
+        this.pool,
+      );
+      this.opts.log("error", `agent başlatılamadı (${agentName}): ${reason}`);
+      throw new AgentStartError(reason, { cause: err });
+    }
 
     const handle: AgentHandle = {
       roomId,

@@ -8,6 +8,7 @@ import {
   AgentBusyError,
   AgentManager,
   AgentNotFoundError,
+  AgentStartError,
   appendEvent,
   closeRoom,
   containerStatus,
@@ -290,6 +291,9 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
       const status = await mgr.start(room.id, agentName);
       return c.json({ agent: agentName, status }, 202);
     } catch (err) {
+      // Ayağa kalkamama SEBEBİ kullanıcıya gider: "starting"de asılı kalmak
+      // veya çıplak 500 görmek, ekrana bakan kişiye hiçbir şey anlatmıyor.
+      if (err instanceof AgentStartError) throw new HttpError(409, err.message);
       if (err instanceof AgentNotFoundError) throw new HttpError(404, err.message);
       throw err;
     }
