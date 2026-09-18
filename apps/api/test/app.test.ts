@@ -50,21 +50,35 @@ describe("api", () => {
     expect((await app.request("/yok")).status).toBe(404);
   });
 
-  it("UUID olmayan oda kimliği DB'ye hiç gitmeden 400", async () => {
+  /**
+   * Hafta 4'ten itibaren SIRA: önce kimlik, sonra doğrulama.
+   *
+   * Kimliksiz bir istek gövde doğrulamasına HİÇ ulaşmamalı — hangi alanın
+   * kabul edildiği, hangi oda kimliğinin geçerli olduğu bilgisi de yetki
+   * ister. Bu iki test o sırayı kilitliyor.
+   */
+  it("kimliksiz istek UUID doğrulamasına bile ulaşmadan 401", async () => {
     const res = await app.request("/rooms/abc");
-    expect(res.status).toBe(400);
-    await expect(res.json()).resolves.toMatchObject({ error: expect.stringContaining("UUID") });
+    expect(res.status).toBe(401);
   });
 
-  it("bilinmeyen alan taşıyan gövdeyi reddeder — sessiz yazım hatası olmasın", async () => {
+  it("kimliksiz oda açma gövde doğrulamasına ulaşmadan 401", async () => {
     const res = await app.request("/rooms", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ spawn_container: false }),
     });
+    expect(res.status).toBe(401);
+  });
+
+  it("giriş uçları oturum istemez — 401 döngüsüne girmesin", async () => {
+    // Geçersiz e-posta: uç çalıştı demektir (401 değil, 400).
+    const res = await app.request("/auth/request", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "eposta-degil" }),
+    });
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { issues: string[] };
-    expect(body.issues.join(" ")).toMatch(/spawn_container/);
   });
 });
 

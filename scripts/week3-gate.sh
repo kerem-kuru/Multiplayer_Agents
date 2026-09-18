@@ -51,7 +51,7 @@ psql_q() { docker compose exec -T postgres psql -U rooms -d agent_rooms -tA -c "
 # Her curl ZAMAN SINIRLI: sinirsiz bir curl takilirsa onu bekleyen alt kabuk
 # hic bitmez ve kapi sonsuza kadar asili kalir — bir kez basimiza geldi.
 note() { # <n> — dev ucuyla gerçek event yaz
-  curl -s --max-time 10 -o /dev/null -X POST "$BASE/sessions/$SID/events" \
+  curl -s --max-time 10 -b "rooms_session=$SESSION" -o /dev/null -X POST "$BASE/sessions/$SID/events" \
     -H 'content-type: application/json' \
     -d "{\"type\":\"debug.note\",\"payload\":{\"text\":\"gate-$1\"}}"
 }
@@ -79,14 +79,21 @@ fi
 npm run build >/dev/null 2>&1 || { echo "build başarısız"; exit 1; }
 
 # Container'a gerek yok: bu kapı akışı ölçüyor.
-SPAWN_CONTAINER=0 PORT="$PORT" node apps/api/dist/index.js >"$TMPDIR_G/server.log" 2>&1 &
+AUTH_DEV_MODE=true SPAWN_CONTAINER=0 PORT="$PORT" node apps/api/dist/index.js >"$TMPDIR_G/server.log" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 40); do
   [ "$(curl -s --max-time 5 "$BASE/health" | jget ok)" = "true" ] && break
   sleep 0.5
 done
 
-CREATE=$(curl -s --max-time 30 -X POST "$BASE/rooms" -H 'content-type: application/json' -d '{}')
+# Hafta 4: her uc uyelik ister; kapi normal giris yolundan gecer.
+# Kapı e-postası HER KOŞUMDA FARKLI: magic link hız sınırı (5 dk'da 3)
+# gerçek bir koruma ve kapıyı iki kez koşturmak onu tetikliyordu.
+GATE_EMAIL="gate-$$-$(date +%s)@rooms.local"
+SESSION=$(node scripts/dev-login.mjs --base "$BASE" --email $GATE_EMAIL)
+export ROOMS_SESSION="$SESSION"   # sse-probe bunu okur
+
+CREATE=$(curl -s --max-time 30 -b "rooms_session=$SESSION" -X POST "$BASE/rooms" -H 'content-type: application/json' -d '{}')
 ROOM=$(echo "$CREATE" | jget room.id)
 SID=$(echo "$CREATE" | jget session.id)
 [ -z "$ROOM" ] && { echo "oda açılamadı: $CREATE"; exit 1; }
@@ -137,7 +144,7 @@ fi
 
 # --- 5 --------------------------------------------------------------------
 step "5) Last-Event-ID query'yi ezer"
-FIRST=$(timeout 6 curl -sN -H 'Accept: text/event-stream' -H 'Last-Event-ID: 3' \
+FIRST=$(timeout 6 curl -sN -b "rooms_session=$SESSION" -H 'Accept: text/event-stream' -H 'Last-Event-ID: 3' \
   "$BASE/rooms/$ROOM/events?since=0" 2>/dev/null \
   | grep '^data: \[' | head -1 \
   | sed 's/^data: //' \
@@ -167,7 +174,7 @@ fi
 step "7) Sızıntı yok"
 HEAP0=$(curl -s --max-time 5 "$BASE/health" | jget heapUsedMb)
 for _ in $(seq 1 10); do
-  timeout 1 curl -sN -H 'Accept: text/event-stream' "$BASE/rooms/$ROOM/events?since=0" >/dev/null 2>&1
+  timeout 1 curl -sN -b "rooms_session=$SESSION" -H 'Accept: text/event-stream' "$BASE/rooms/$ROOM/events?since=0" >/dev/null 2>&1
 done
 sleep 3
 SUBS=$(curl -s --max-time 5 "$BASE/health" | jget sseSubscribers)

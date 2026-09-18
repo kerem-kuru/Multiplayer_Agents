@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { closePool, containerStatus, dockerAvailable } from "@agent-rooms/core";
 import { createApp } from "../apps/api/dist/app.js";
+import { cookieHeader, devSession } from "./dev-session.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.env.DATABASE_URL ??= "postgres://rooms:Kk2007..@localhost:5433/agent_rooms";
@@ -24,6 +25,10 @@ const cfg = {
   roomImage: process.env.ROOM_IMAGE ?? "agent-rooms/room:dev",
   defaultConfigPath: path.join(root, "config", "room.example.yaml"),
   spawnContainer: true,
+  // Hafta 4: uclar uyelik istiyor; smoke da normal giris yolundan gecer.
+  appBaseUrl: `http://localhost:${PORT}`,
+  authDevMode: true,
+  cookieSecure: false,
 };
 
 if (!(await dockerAvailable())) {
@@ -33,7 +38,8 @@ if (!(await dockerAvailable())) {
 
 const server = serve({ fetch: createApp(cfg).fetch, port: PORT });
 const base = `http://localhost:${PORT}`;
-const headers = { "content-type": "application/json", "x-user-id": "u-kerem", "x-user-name": "Kerem" };
+const session = await devSession(base, "smoke@rooms.local");
+const headers = { "content-type": "application/json", ...cookieHeader(session) };
 
 const api = async (method, urlPath, body) => {
   const res = await fetch(`${base}${urlPath}`, {
@@ -75,8 +81,10 @@ try {
   // 4 — since=N: yeniden bağlanan istemcinin boşluk doldurması
   const since = await api("GET", `/rooms/${roomId}/events?since=1`);
   assert.equal(since.json.events.length, 1, "since=1 tek event dönmeli");
-  assert.equal(since.json.nextSince, 2, "nextSince istemcinin bir sonraki imleci");
-  console.log(`since=1   ${since.json.events.map((e) => `${e.seq}:${e.type}`).join(" ")} (nextSince=${since.json.nextSince})`);
+  // Hafta 3'te alan adı değişti: `nextSince` → `lastSeq` (+ `hasMore`).
+  assert.equal(since.json.lastSeq, 2, "lastSeq istemcinin bir sonraki imleci");
+  assert.equal(since.json.hasMore, false, "tek sayfalık geçmişte hasMore false");
+  console.log(`since=1   ${since.json.events.map((e) => `${e.seq}:${e.type}`).join(" ")} (lastSeq=${since.json.lastSeq})`);
 
   // 5 — defter iskeleti
   const journal = await api("GET", `/rooms/${roomId}/journal`);

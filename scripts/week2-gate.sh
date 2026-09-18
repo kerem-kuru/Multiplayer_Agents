@@ -46,9 +46,9 @@ psql_q() { docker compose exec -T postgres psql -U rooms -d agent_rooms -tA -c "
 api() { # method path [body]
   local m="$1" p="$2" b="${3:-}"
   if [ -n "$b" ]; then
-    curl -s -X "$m" "$BASE$p" -H 'content-type: application/json' -H 'x-user-id: gate' -d "$b"
+    curl -s -b "rooms_session=$SESSION" -X "$m" "$BASE$p" -H 'content-type: application/json' -d "$b"
   else
-    curl -s -X "$m" "$BASE$p" -H 'x-user-id: gate'
+    curl -s -b "rooms_session=$SESSION" -X "$m" "$BASE$p"
   fi
 }
 
@@ -124,9 +124,15 @@ npm run build >/dev/null 2>&1 || { echo "build başarısız"; exit 1; }
 # bilinmeyen alanlara takılıp çökme döngüsüne girer.
 npm run room:build >/dev/null 2>&1 || { echo "oda imajı build başarısız"; exit 1; }
 
-PORT="$PORT" AGENT_MODEL="$GATE_MODEL" node apps/api/dist/index.js >/tmp/week2-server.log 2>&1 &
+AUTH_DEV_MODE=true PORT="$PORT" AGENT_MODEL="$GATE_MODEL" node apps/api/dist/index.js >/tmp/week2-server.log 2>&1 &
 SERVER_PID=$!
 wait_health "$BASE" || { echo "sunucu açılmadı"; cat /tmp/week2-server.log; exit 1; }
+
+# Hafta 4: her uc uyelik ister. Kapi da normal giris yolundan gecer.
+# Kapı e-postası HER KOŞUMDA FARKLI: magic link hız sınırı (5 dk'da 3)
+# gerçek bir koruma ve kapıyı iki kez koşturmak onu tetikliyordu.
+GATE_EMAIL="gate-$$-$(date +%s)@rooms.local"
+SESSION=$(node scripts/dev-login.mjs --base "$BASE" --email $GATE_EMAIL)
 
 # --- 1 --------------------------------------------------------------------
 step "1) Oda ve agent listesi"
@@ -220,7 +226,7 @@ fi
 step "8) Meşgulken ikinci mesaj reddediliyor"
 api POST "/rooms/$ROOM/agents/$AGENT/message" '{"text":"sleep 60 komutunu bash ile çalıştır"}' >/dev/null
 wait_status "$ROOM" busy 30 || true
-CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/rooms/$ROOM/agents/$AGENT/message" \
+CODE=$(curl -s -b "rooms_session=$SESSION" -o /dev/null -w '%{http_code}' -X POST "$BASE/rooms/$ROOM/agents/$AGENT/message" \
   -H 'content-type: application/json' -H 'x-user-id: gate' -d '{"text":"ikinci is"}')
 [ "$CODE" = "409" ] && ok "409 döndü (kuyruk Hafta 5'te)" || no "beklenen 409, gelen $CODE"
 
@@ -312,9 +318,10 @@ agents:
     writable: [worktrees/backend, contracts]
 YAML
 PORT="$PORT2" ROOM_CONFIG=".week2-gate.tmp.yaml" AGENT_MODEL="$GATE_MODEL" \
-  node apps/api/dist/index.js >/tmp/week2-server2.log 2>&1 &
+  AUTH_DEV_MODE=true node apps/api/dist/index.js >/tmp/week2-server2.log 2>&1 &
 SERVER2_PID=$!
 if wait_health "http://localhost:$PORT2"; then
+  SESSION=$(node scripts/dev-login.mjs --base "http://localhost:$PORT2" --email $GATE_EMAIL)
   BASE_SAVE="$BASE"; BASE="http://localhost:$PORT2"
   ROOM2=$(api POST /rooms '{}' | jget room.id)
   ROOM_IDS+=("$ROOM2")
@@ -342,9 +349,10 @@ step "13) Sunucu yeniden başlatma"
 api POST "/rooms/$ROOM/agents/$AGENT/start" >/dev/null
 wait_status "$ROOM" idle 60 || true
 kill "$SERVER_PID" 2>/dev/null; wait "$SERVER_PID" 2>/dev/null
-PORT="$PORT" AGENT_MODEL="$GATE_MODEL" node apps/api/dist/index.js >>/tmp/week2-server.log 2>&1 &
+AUTH_DEV_MODE=true PORT="$PORT" AGENT_MODEL="$GATE_MODEL" node apps/api/dist/index.js >>/tmp/week2-server.log 2>&1 &
 SERVER_PID=$!
 if wait_health "$BASE"; then
+  SESSION=$(node scripts/dev-login.mjs --base "$BASE" --email $GATE_EMAIL)
   ST=$(agent_status "$ROOM")
   RESTART_EV=$(events_json "$ROOM" | node -e '
     let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{

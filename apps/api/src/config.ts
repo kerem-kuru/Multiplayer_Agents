@@ -21,6 +21,18 @@ export interface ApiConfig {
   defaultConfigPath: string;
   /** false: container açılmaz. Docker'sız geliştirme için. */
   spawnContainer: boolean;
+  /**
+   * Magic link ve davet linklerinin gövdesi. Tarayıcı arayüzü 5173'te
+   * çalıştığı için varsayılan oradır; tünelle dışarı açarken bu değişir.
+   */
+  appBaseUrl: string;
+  /**
+   * SADECE geliştirme: giriş bağlantısını yanıtta ve logda göster.
+   * YETKİLENDİRMEYİ ETKİLEMEZ — açıkken de her uç üyelik kontrolü yapar.
+   */
+  authDevMode: boolean;
+  /** Çerez `Secure` bayrağı. HTTPS ardındaysan açık olmalı. */
+  cookieSecure: boolean;
   agent: AgentSettings;
 }
 
@@ -46,6 +58,9 @@ export function loadApiConfig(): ApiConfig {
       process.env.ROOM_CONFIG ?? "./config/room.example.yaml",
     ),
     spawnContainer: process.env.SPAWN_CONTAINER !== "0",
+    appBaseUrl: process.env.APP_BASE_URL ?? "http://localhost:5173",
+    authDevMode: process.env.AUTH_DEV_MODE === "true",
+    cookieSecure: process.env.COOKIE_SECURE === "true" || process.env.NODE_ENV === "production",
     agent: {
       apiKey: process.env.ANTHROPIC_API_KEY ?? "",
       geminiApiKey: process.env.GEMINI_API_KEY ?? "",

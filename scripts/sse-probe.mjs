@@ -21,6 +21,8 @@ const flag = (name, fallback) => {
   return i >= 0 && args[i + 1] !== undefined ? args[i + 1] : fallback;
 };
 
+const session = flag("session", process.env.ROOMS_SESSION ?? "");
+
 if (!roomId) {
   console.error(
     "kullanım: node scripts/sse-probe.mjs <roomId> [--since N] [--drop-after N] [--out f.json] [--duration SN]",
@@ -94,7 +96,11 @@ async function connect(since, budgetMs, stopAfterEvents) {
   let res;
   try {
     res = await fetch(url, {
-      headers: { Accept: "text/event-stream" },
+      headers: {
+        Accept: "text/event-stream",
+        // Hafta 4: SSE de yetki ister. Çerezi ortamdan veya --session ile al.
+        ...(session ? { cookie: `rooms_session=${session}` } : {}),
+      },
       signal: ac.signal,
     });
   } catch (err) {

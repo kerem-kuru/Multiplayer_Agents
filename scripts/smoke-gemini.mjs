@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { closePool, dockerAvailable, listRoomContainers, stopRoomContainer } from "@agent-rooms/core";
 import { createApp } from "../apps/api/dist/app.js";
+import { cookieHeader, devSession } from "./dev-session.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 process.env.DATABASE_URL ??= "postgres://rooms:Kk2007..@localhost:5433/agent_rooms";
@@ -51,6 +52,10 @@ const cfg = {
   roomImage: process.env.ROOM_IMAGE ?? "agent-rooms/room:dev",
   defaultConfigPath: path.join(root, "config", "room.gemini.yaml"),
   spawnContainer: true,
+  // Hafta 4: uclar uyelik istiyor; smoke da normal giris yolundan gecer.
+  appBaseUrl: `http://localhost:${PORT}`,
+  authDevMode: true,
+  cookieSecure: false,
   agent: {
     apiKey: "",
     geminiApiKey: process.env.GEMINI_API_KEY,
@@ -74,7 +79,8 @@ manager.startHealthChecks();
 
 const server = serve({ fetch: createApp(cfg, manager).fetch, port: PORT });
 const base = `http://localhost:${PORT}`;
-const headers = { "content-type": "application/json", "x-user-id": "smoke" };
+const session = await devSession(base, "smoke-gemini@rooms.local");
+const headers = { "content-type": "application/json", ...cookieHeader(session) };
 
 const api = async (method, urlPath, body) => {
   const res = await fetch(`${base}${urlPath}`, {

@@ -102,7 +102,7 @@ npm run build >/dev/null 2>&1 || { echo "build başarısız"; exit 1; }
 
 # PORT prefix ile geçilmeli: .env içindeki PORT'u ezmek için ortamda olması şart
 # (process.loadEnvFile ortamda tanımlı değişkeni ezmez).
-PORT="$PORT" node apps/api/dist/index.js >/tmp/week1-gate-server.log 2>&1 &
+AUTH_DEV_MODE=true PORT="$PORT" node apps/api/dist/index.js >/tmp/week1-gate-server.log 2>&1 &
 SERVER_PID=$!
 if ! wait_health "$BASE"; then
   echo "sunucu açılmadı. log:"; cat /tmp/week1-gate-server.log; exit 1
@@ -110,7 +110,14 @@ fi
 
 # --- 1 --------------------------------------------------------------------
 step "1) POST /rooms"
-CREATE=$(curl -s -w '\n%{http_code}' -X POST "$BASE/rooms" \
+# Hafta 4: her uc uyelik ister. Kapi da normal giris yolundan gecer.
+# Kapı e-postası HER KOŞUMDA FARKLI: magic link hız sınırı (5 dk'da 3)
+# gerçek bir koruma ve kapıyı iki kez koşturmak onu tetikliyordu.
+GATE_EMAIL="gate-$$-$(date +%s)@rooms.local"
+SESSION=$(node scripts/dev-login.mjs --base "$BASE" --email $GATE_EMAIL)
+AUTH=(-b "rooms_session=$SESSION")
+
+CREATE=$(curl -s "${AUTH[@]}" -w '\n%{http_code}' -X POST "$BASE/rooms" \
   -H 'content-type: application/json' -H 'x-user-id: gate' -d '{}')
 CODE=$(echo "$CREATE" | tail -1)
 BODY=$(echo "$CREATE" | sed '$d')
@@ -154,7 +161,7 @@ fi
 
 # --- 4 --------------------------------------------------------------------
 step "4) Event'ler since=0"
-EVENTS=$(curl -s "$BASE/rooms/$ROOM_ID/events?since=0")
+EVENTS=$(curl -s "${AUTH[@]}" "$BASE/rooms/$ROOM_ID/events?since=0")
 E1=$(echo "$EVENTS" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const e=JSON.parse(s).events;console.log(e.map(x=>x.seq+":"+x.type).join(" "))});')
 if [ "$E1" = "1:room.created 2:session.started" ]; then
   ok "$E1"
@@ -164,11 +171,11 @@ fi
 
 # --- 5 --------------------------------------------------------------------
 step "5) Elle event yaz, since ile geri oku"
-NOTE=$(curl -s -w '\n%{http_code}' -X POST "$BASE/sessions/$SESSION_ID/events" \
+NOTE=$(curl -s "${AUTH[@]}" -w '\n%{http_code}' -X POST "$BASE/sessions/$SESSION_ID/events" \
   -H 'content-type: application/json' \
   -d '{"type":"debug.note","payload":{"text":"kapi testi"}}')
 NCODE=$(echo "$NOTE" | tail -1)
-SINCE2=$(curl -s "$BASE/rooms/$ROOM_ID/events?since=2")
+SINCE2=$(curl -s "${AUTH[@]}" "$BASE/rooms/$ROOM_ID/events?since=2")
 S2=$(echo "$SINCE2" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const e=JSON.parse(s).events;console.log(e.length+" "+e.map(x=>x.type).join(","))});')
 if [ "$NCODE" = "201" ] && [ "$S2" = "1 debug.note" ]; then
   ok "201 · since=2 sadece debug.note döndü"
@@ -179,7 +186,7 @@ fi
 # --- 6 --------------------------------------------------------------------
 step "6) Eşzamanlılık: 50 istek, 20 paralel"
 BEFORE=$(psql_q "SELECT count(*) FROM session_events WHERE session_id='$SESSION_ID'")
-seq 1 50 | xargs -P 20 -I@@ curl -s -o /dev/null -X POST "$BASE/sessions/$SESSION_ID/events" \
+seq 1 50 | xargs -P 20 -I@@ curl -s -b "rooms_session=$SESSION" -o /dev/null -X POST "$BASE/sessions/$SESSION_ID/events" \
   -H 'content-type: application/json' -d '{"type":"debug.note","payload":{"text":"yuk-@@"}}'
 STATS=$(psql_q "SELECT count(*)||' '||count(DISTINCT seq)||' '||max(seq) FROM session_events WHERE session_id='$SESSION_ID'")
 read -r C_ALL C_DISTINCT C_MAX <<< "$STATS"
@@ -193,7 +200,7 @@ fi
 # --- 7 --------------------------------------------------------------------
 step "7) Şema koruması"
 ROWS_BEFORE=$(psql_q "SELECT count(*) FROM session_events WHERE session_id='$SESSION_ID'")
-BAD=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/sessions/$SESSION_ID/events" \
+BAD=$(curl -s "${AUTH[@]}" -o /dev/null -w '%{http_code}' -X POST "$BASE/sessions/$SESSION_ID/events" \
   -H 'content-type: application/json' -d '{"type":"uydurma","payload":{"x":1}}')
 ROWS_AFTER=$(psql_q "SELECT count(*) FROM session_events WHERE session_id='$SESSION_ID'")
 if [ "$BAD" = "400" ] && [ "$ROWS_BEFORE" = "$ROWS_AFTER" ]; then
@@ -231,11 +238,12 @@ agents:
     writable: [journal]
 YAML
 
-PORT="$PORT2" ROOM_CONFIG=".week1-gate.tmp.yaml" node apps/api/dist/index.js \
+AUTH_DEV_MODE=true PORT="$PORT2" ROOM_CONFIG=".week1-gate.tmp.yaml" node apps/api/dist/index.js \
   >/tmp/week1-gate-server2.log 2>&1 &
 SERVER2_PID=$!
 if wait_health "http://localhost:$PORT2"; then
-  BODY3=$(curl -s -X POST "http://localhost:$PORT2/rooms" -H 'content-type: application/json' -d '{}')
+  SESSION2=$(node scripts/dev-login.mjs --base "http://localhost:$PORT2" --email $GATE_EMAIL)
+  BODY3=$(curl -s -b "rooms_session=$SESSION2" -X POST "http://localhost:$PORT2/rooms" -H 'content-type: application/json' -d '{}')
   ROOM3=$(echo "$BODY3" | jget room.id)
   ROOM_IDS+=("$ROOM3")
   HAS_SEC=$(echo "$BODY3" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{console.log(JSON.parse(s).agents.some(a=>a.name==="security"))});')

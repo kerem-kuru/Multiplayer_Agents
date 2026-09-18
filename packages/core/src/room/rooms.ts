@@ -225,9 +225,15 @@ export interface RoomOverview {
  * sayfası her yenilendiğinde büyür. LATERAL join ile son oturum satır başına
  * bir kez bulunur.
  */
+/**
+ * @param forUserId Verilirse SADECE bu kullanıcının üye olduğu odalar döner.
+ *   Yetki sunucuda: listede görünmemesi gereken oda sorgudan çıkar, UI'da
+ *   gizlenmez.
+ */
 export async function listRoomsOverview(
   limit = 50,
   pool: pg.Pool = getPool(),
+  forUserId?: string,
 ): Promise<RoomOverview[]> {
   const res = await pool.query<{
     id: string;
@@ -250,10 +256,15 @@ export async function listRoomsOverview(
              LIMIT 1
        ) s ON true
        LEFT JOIN session_events e ON e.session_id = s.id
+      WHERE $2::uuid IS NULL
+         OR EXISTS (
+              SELECT 1 FROM room_members m
+               WHERE m.room_id = r.id AND m.user_id = $2::uuid
+            )
       GROUP BY r.id, r.name, r.created_at, r.config, s.id, s.status
       ORDER BY r.created_at DESC
       LIMIT $1`,
-    [limit],
+    [limit, forUserId ?? null],
   );
 
   return res.rows.map((r) => {

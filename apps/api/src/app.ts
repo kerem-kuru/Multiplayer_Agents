@@ -28,6 +28,10 @@ import {
   readJournal,
 } from "@agent-rooms/core";
 import { loadApiConfig, resolveConfigPath, type ApiConfig } from "./config.js";
+import { HttpError } from "./http-error.js";
+import { addMember, requireRoom, requireUser } from "./auth/guard.js";
+import { authRoutes } from "./routes/auth.js";
+import { inviteRoutes } from "./routes/invites.js";
 import { resolveSince, streamSession, wantsSse } from "./routes/events-sse.js";
 
 /**
@@ -57,24 +61,13 @@ const EventsQuery = z.object({
 
 const MessageBody = z.object({ text: z.string().min(1).max(100_000) }).strict();
 
-class HttpError extends Error {
-  constructor(
-    readonly status: 400 | 404 | 409 | 500 | 503,
-    message: string,
-    readonly issues?: string[],
-  ) {
-    super(message);
-  }
-}
-
 /**
- * İsteği kimin yaptığı. Auth Hafta 4'te (magic link) gelecek; o zamana kadar
- * başlıktan okunuyor. Şekli şimdiden doğru olsun ki Hafta 5'teki `[Ali]: ...`
- * etiketi ve sürücü devri aynı `Actor` tipine otursun.
+ * İsteği kimin yaptığı — Hafta 4'ten itibaren OTURUMDAN gelir, başlıktan
+ * değil. İstemcinin söylediği kimliğe güvenmek, `[Ali]: ...` etiketini
+ * (Hafta 5) anlamsız kılardı.
  */
-function actorFrom(header: string | undefined, name: string | undefined): Actor {
-  if (header) return { kind: "human", id: header, name: name || header };
-  return { kind: "system" };
+function actorOf(user: { id: string; name: string }): Actor {
+  return { kind: "human", id: user.id, name: user.name };
 }
 
 export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManager) {
@@ -115,9 +108,18 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
     });
   });
 
-  app.get("/rooms", async (c) => c.json({ rooms: await listRoomsOverview() }));
+  // Auth ve davet uçları — bunlar oda üyeliği İSTEMEZ (giriş yolu onlar).
+  app.route("/", authRoutes(cfg));
+  app.route("/", inviteRoutes(cfg));
+
+  /** Sadece ÜYE olduğun odalar. Gizleme UI'da değil sorguda. */
+  app.get("/rooms", async (c) => {
+    const user = await requireUser(c);
+    return c.json({ rooms: await listRoomsOverview(50, getPool(), user.id) });
+  });
 
   app.post("/rooms", async (c) => {
+    const user = await requireUser(c);
     const raw = await c.req.json().catch(() => ({}));
     const parsed = CreateRoomBody.safeParse(raw);
     if (!parsed.success) {
@@ -136,9 +138,16 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
       configDigest: digest,
       roomsDataDir: cfg.roomsDataDir,
       image: cfg.roomImage,
-      actor: actorFrom(c.req.header("x-user-id"), c.req.header("x-user-name")),
+      actor: actorOf(user),
       spawnContainer: parsed.data.spawnContainer ?? cfg.spawnContainer,
     });
+
+    // Odayı açan onun sahibidir: davet edebilir, agent başlatabilir.
+    await addMember(result.room.id, user.id, "owner");
+    await getPool().query(`UPDATE rooms SET created_by = $1 WHERE id = $2`, [
+      user.id,
+      result.room.id,
+    ]);
 
     return c.json(
       {
@@ -159,6 +168,7 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
   });
 
   app.get("/rooms/:id", async (c) => {
+    await requireRoom(c, c.req.param("id"));
     const { room } = await mustFindRoom(c.req.param("id"));
     const session = await latestSession(room.id);
     const status = session?.containerId ? await containerStatus(session.containerId) : null;
@@ -172,6 +182,7 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
    * bağlanır. Snapshot yoksa Hafta 3'teki tam replay yolu devreye girer.
    */
   app.get("/rooms/:id/snapshot", async (c) => {
+    await requireRoom(c, c.req.param("id"));
     const { room } = await mustFindRoom(c.req.param("id"));
     const session = await latestSession(room.id);
     if (!session) throw new HttpError(404, "bu odanın oturumu yok");
@@ -186,6 +197,7 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
    * `Accept: text/event-stream` ise SSE, değilse sayfalanmış JSON.
    */
   app.get("/rooms/:id/events", async (c) => {
+    await requireRoom(c, c.req.param("id"));
     const { room } = await mustFindRoom(c.req.param("id"));
     const session = await latestSession(room.id);
     if (!session) throw new HttpError(404, "bu odanın oturumu yok");
@@ -212,6 +224,7 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
   });
 
   app.get("/rooms/:id/journal", async (c) => {
+    await requireRoom(c, c.req.param("id"));
     const { room, config } = await mustFindRoom(c.req.param("id"));
     const roomRoot = path.join(cfg.roomsDataDir, room.id);
     return c.json(await readJournal(roomRoot, config));
@@ -220,6 +233,7 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
   // --- agent uçları (Hafta 2) ----------------------------------------------
 
   app.get("/rooms/:id/agents", async (c) => {
+    await requireRoom(c, c.req.param("id"));
     const { room, config } = await mustFindRoom(c.req.param("id"));
     const runtime = await listRuntime(room.id);
     const byName = new Map(runtime.map((r) => [r.agentName, r]));
@@ -236,6 +250,7 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
   });
 
   app.post("/rooms/:id/agents/:aid/start", async (c) => {
+    await requireRoom(c, c.req.param("id"), "owner");
     const { room } = await mustFindRoom(c.req.param("id"));
     const agentName = c.req.param("aid");
     const mgr = requireManager();
@@ -249,6 +264,7 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
   });
 
   app.post("/rooms/:id/agents/:aid/stop", async (c) => {
+    await requireRoom(c, c.req.param("id"), "owner");
     const { room } = await mustFindRoom(c.req.param("id"));
     const agentName = c.req.param("aid");
     await requireManager().stop(room.id, agentName);
@@ -256,6 +272,8 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
   });
 
   app.post("/rooms/:id/agents/:aid/message", async (c) => {
+    // İzleyici YAZAMAZ: yazma yetkisi Hafta 5'in işi (kuyruk, sürücü, kesme).
+    const { user } = await requireRoom(c, c.req.param("id"), "owner");
     const { room } = await mustFindRoom(c.req.param("id"));
     const agentName = c.req.param("aid");
     const parsed = MessageBody.safeParse(await c.req.json().catch(() => ({})));
@@ -269,12 +287,7 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
 
     const mgr = requireManager();
     try {
-      const messageId = await mgr.sendMessage(
-        room.id,
-        agentName,
-        actorFrom(c.req.header("x-user-id"), c.req.header("x-user-name")),
-        parsed.data.text,
-      );
+      const messageId = await mgr.sendMessage(room.id, agentName, actorOf(user), parsed.data.text);
       // Turn'ün bitmesi BEKLENMEZ — ilerleme event log'dan izlenir.
       return c.json({ messageId, agent: agentName }, 202);
     } catch (err) {
@@ -288,11 +301,9 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
   });
 
   app.post("/rooms/:id/stop", async (c) => {
+    const { user } = await requireRoom(c, c.req.param("id"), "owner");
     const { room } = await mustFindRoom(c.req.param("id"));
-    const event = await closeRoom({
-      roomId: room.id,
-      actor: actorFrom(c.req.header("x-user-id"), c.req.header("x-user-name")),
-    });
+    const event = await closeRoom({ roomId: room.id, actor: actorOf(user) });
     return c.json({ stopped: true, event: event ? { seq: event.seq, type: event.type } : null });
   });
 
@@ -307,13 +318,15 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
       if (!Uuid.safeParse(sid).success) throw new HttpError(400, "oturum kimliği UUID değil");
       const session = await getSession(sid);
       if (!session) throw new HttpError(404, "oturum bulunamadı");
+      // Geliştirme ucu da yetkisiz değil: odanın sahibi olmayan event yazamaz.
+      const { user } = await requireRoom(c, session.roomId, "owner");
 
       const raw = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
       // seq ve ts sunucunun; roomId oturumdan gelir. Çağıran sadece type + payload verir.
       const parsed = NewRoomEvent.safeParse({
         roomId: session.roomId,
         sessionId: session.id,
-        actor: raw.actor ?? actorFrom(c.req.header("x-user-id"), c.req.header("x-user-name")),
+        actor: raw.actor ?? actorOf(user),
         type: raw.type,
         payload: raw.payload,
       });
