@@ -82,13 +82,27 @@ function ruleSpans(text: string, rules: readonly CompiledRule[]): Span[] {
 }
 
 /**
- * Çakışmaları çöz: EN UZUN eşleşme kazanır.
+ * Genel kurallar — her şeye uyar, bu yüzden bulguda AZ şey anlatır.
+ *
+ * `AWS_ACCESS_KEY_ID=AKIA...` hem `env-assignment` hem `aws-access-token`
+ * tarafından, AYNI aralıkta yakalanıyor. Maskeleme iki türlü de doğru ama
+ * denetim kaydında "bir env değeri sızmış" ile "bir AWS anahtarı sızmış"
+ * arasında dağlar kadar fark var.
+ */
+const GENERIC_RULES = new Set(["env-assignment", "entropy", "generic-api-key"]);
+
+/**
+ * Çakışmaları çöz: EN UZUN eşleşme kazanır; eşit uzunlukta SPESİFİK kural
+ * kazanır.
  *
  * Aynı yeri iki kural yakaladığında daha geniş olanı almak, secret'ın bir
  * parçasının açıkta kalmasını engeller.
  */
 function resolveOverlaps(spans: Span[]): Span[] {
-  const sorted = [...spans].sort((a, b) => b.end - b.start - (a.end - a.start) || a.start - b.start);
+  const rank = (s: Span): number => (GENERIC_RULES.has(s.rule) ? 1 : 0);
+  const sorted = [...spans].sort(
+    (a, b) => b.end - b.start - (a.end - a.start) || rank(a) - rank(b) || a.start - b.start,
+  );
   const chosen: Span[] = [];
   for (const span of sorted) {
     if (chosen.some((c) => span.start < c.end && c.start < span.end)) continue;

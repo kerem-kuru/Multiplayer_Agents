@@ -101,6 +101,14 @@ describe(".env satırı", () => {
 });
 
 describe("işaret ve bulgu", () => {
+  it("aynı aralığı iki kural yakalarsa SPESİFİK olan isim verir", () => {
+    // Hem env-assignment hem aws-access-token aynı değeri yakalıyor.
+    // Denetim kaydında "bir env değeri" değil "AWS anahtarı" yazmalı.
+    const out = redactValue(`AWS_ACCESS_KEY_ID=${"AKIA" + "IOSFODNN7EXAMPLE"}`);
+    expect(out.text).toContain("[redacted:aws-access-token:");
+    expect(out.findings.map((f) => f.rule)).toContain("aws-access-token");
+  });
+
   it("aynı secret her yerde aynı işareti alır", () => {
     const secret = "sk-ant-" + "api03-AbCdEfGhIjKlMnOpQrStUv";
     const out = clean(`bir: ${secret}\niki: ${secret}`);
