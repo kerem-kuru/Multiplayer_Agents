@@ -25,6 +25,13 @@ export type StoredEvent = RoomEvent;
  * böyle doğru çalışır.
  */
 export const SSE_EVENT_NAME = "events";
+
+/**
+ * Presence frame'i. `id:` ALANI TAŞIMAZ — `id` yalnızca event sırasını
+ * ilerletir; presence'a id vermek `Last-Event-ID` imlecini bozar ve yeniden
+ * bağlanan istemci event atlar.
+ */
+export const SSE_PRESENCE_EVENT = "presence";
 export const SSE_OVERFLOW_EVENT = "overflow";
 
 /** Frame başına üst sınır; fazlası sonraki frame'e kalır. */

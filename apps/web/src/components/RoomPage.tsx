@@ -1,10 +1,19 @@
 import { useEffect, useState } from "react";
-import { listAgents, startAgent, stopAgent, type AgentInfo } from "../lib/api.js";
+import {
+  fetchRoom,
+  listAgents,
+  setPresence,
+  startAgent,
+  stopAgent,
+  type AgentInfo,
+} from "../lib/api.js";
 import { useEventStream, type Connection } from "../lib/useEventStream.js";
 import type { AgentStatus } from "@agent-rooms/view";
 import { ActivityFeed } from "./ActivityFeed.js";
 import { TerminalView } from "./TerminalView.js";
 import { Composer } from "./Composer.js";
+import { PresenceBar } from "./PresenceBar.js";
+import { ShareDialog } from "./ShareDialog.js";
 
 /** Renk tek başına bilgi taşımaz — her durumun yanında kelimesi yazar. */
 const STATUS_COLOR: Record<string, string> = {
@@ -23,11 +32,44 @@ const CONNECTION_LABEL: Record<Connection, string> = {
   offline: "bağlantı yok",
 };
 
-export function RoomPage({ roomId, onBack }: { roomId: string; onBack: () => void }) {
-  const { view, connection, lastSeq, reconnect } = useEventStream(roomId);
+export function RoomPage({
+  roomId,
+  onBack,
+  meId,
+}: {
+  roomId: string;
+  onBack: () => void;
+  meId: string | null;
+}) {
+  const { view, connection, lastSeq, people, reconnect } = useEventStream(roomId);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<"feed" | "terminal">("feed");
+  /**
+   * Rol SUNUCUDAN gelir. UI'ın düğme gizlemesi yetki değildir — sunucu zaten
+   * 403 döner; buradaki amaç kullanıcıyı boşuna denemekten kurtarmak.
+   */
+  const [role, setRole] = useState<"owner" | "viewer" | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const canWrite = role === "owner";
+
+  useEffect(() => {
+    let alive = true;
+    void fetchRoom(roomId)
+      .then((r) => {
+        if (alive) setRole(r.role);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [roomId]);
+
+  // Bakılan agent değişince odadakilere bildir. Presence event log'a yazılmaz.
+  useEffect(() => {
+    if (!selected) return;
+    void setPresence(roomId, selected).catch(() => undefined);
+  }, [roomId, selected]);
 
   // Agent listesi config'ten gelir; sayı hiçbir yerde sabit değil.
   useEffect(() => {
@@ -68,11 +110,17 @@ export function RoomPage({ roomId, onBack }: { roomId: string; onBack: () => voi
       >
         <button onClick={onBack}>← odalar</button>
         <strong className="mono">{roomId.slice(0, 8)}</strong>
-        <span style={{ marginLeft: "auto", color: "var(--ink-soft)", fontSize: 12 }}>
+        <span style={{ marginLeft: "auto" }}>
+          <PresenceBar people={people} meId={meId} />
+        </span>
+        <span style={{ color: "var(--ink-soft)", fontSize: 12 }}>
           seq {lastSeq} · {CONNECTION_LABEL[connection]}
         </span>
+        {canWrite && <button onClick={() => setSharing((v) => !v)}>Paylaş</button>}
         {connection === "offline" && <button onClick={reconnect}>Yeniden bağlan</button>}
       </header>
+
+      {sharing && <ShareDialog roomId={roomId} onClose={() => setSharing(false)} />}
 
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         {/* AgentBar — her zaman agents.map() */}
@@ -105,11 +153,21 @@ export function RoomPage({ roomId, onBack }: { roomId: string; onBack: () => voi
                 <div style={{ fontWeight: 600 }}>{a.name}</div>
                 <div style={{ fontSize: 11, color: STATUS_COLOR[st] ?? "var(--ink-soft)" }}>
                   ● {st}
+                  {/* Kim bu agent'a bakıyor — renk değil, isim. */}
+                  {people.some((p) => p.viewing === a.name && p.userId !== meId) && (
+                    <span style={{ color: "var(--ink-soft)" }}>
+                      {" · "}
+                      {people
+                        .filter((p) => p.viewing === a.name && p.userId !== meId)
+                        .map((p) => p.name)
+                        .join(", ")}
+                    </span>
+                  )}
                 </div>
               </button>
             );
           })}
-          {selected && (
+          {selected && canWrite && (
             <div style={{ marginTop: 10, display: "flex", gap: 4 }}>
               <button onClick={() => void startAgent(roomId, selected)}>başlat</button>
               <button onClick={() => void stopAgent(roomId, selected)}>durdur</button>
@@ -134,14 +192,29 @@ export function RoomPage({ roomId, onBack }: { roomId: string; onBack: () => voi
           </div>
 
           <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-            {tab === "feed" ? <ActivityFeed turns={turns} /> : null}
+            {tab === "feed" ? <ActivityFeed turns={turns} canWrite={canWrite} /> : null}
             {/* Terminal DOM'da kalır: unmount olursa geçmiş kaybolur. */}
             <div style={{ height: "100%", display: tab === "terminal" ? "block" : "none" }}>
               <TerminalView turns={turns} visible={tab === "terminal"} />
             </div>
           </div>
 
-          {selected && <Composer roomId={roomId} agent={selected} status={status} />}
+          {selected && canWrite && <Composer roomId={roomId} agent={selected} status={status} />}
+          {selected && role === "viewer" && (
+            /* Gizlemek değil, YERİNE koymak: boşluk bırakmak "bozuk mu?"
+               sorusunu doğurur. Yazma yetkisi Hafta 5'in işi. */
+            <div
+              style={{
+                borderTop: "1px solid var(--rule)",
+                padding: 10,
+                background: "var(--paper)",
+                color: "var(--ink-soft)",
+                fontSize: 13,
+              }}
+            >
+              Bu odayı izliyorsun. Görev vermek için oda sahibinden yetki iste.
+            </div>
+          )}
         </main>
       </div>
     </div>

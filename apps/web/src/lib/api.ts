@@ -7,11 +7,11 @@ const BASE = "/api";
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: {
-      "content-type": "application/json",
-      "x-user-id": "local",
-      ...(init?.headers ?? {}),
-    },
+    // Kimlik ÇEREZDE: Hafta 4'ten itibaren sunucu istemcinin söylediği
+    // kimliğe güvenmiyor. `credentials` aynı origin'de zaten varsayılan ama
+    // açıkça yazmak niyeti belli ediyor.
+    credentials: "same-origin",
+    headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
   });
   const body: unknown = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -97,3 +97,81 @@ export const sendMessage = (
 
 export const sseUrl = (roomId: string, since: number): string =>
   `${BASE}/rooms/${roomId}/events?since=${since}`;
+
+// --- Hafta 4: kimlik, davet, presence ---------------------------------------
+
+export interface Me {
+  id: string;
+  email: string;
+  name: string;
+}
+
+export const me = (): Promise<Me> => json<Me>("/auth/me");
+
+export const requestLogin = (email: string, next?: string): Promise<{ devLink?: string }> =>
+  json<{ devLink?: string }>("/auth/request", {
+    method: "POST",
+    body: JSON.stringify({ email, next }),
+  });
+
+/**
+ * Magic link'i tüket. Çağrı AYNI ORIGIN'den (vite proxy) gider; çerez
+ * bu yüzden arayüzün origin'ine yazılır. Doğrudan API adresine gitseydik
+ * çerez 8787'ye yazılır ve arayüz onu göremezdi.
+ */
+export async function consumeLoginToken(token: string): Promise<void> {
+  const res = await fetch(`/api/auth/callback?token=${encodeURIComponent(token)}`, {
+    redirect: "manual",
+    credentials: "same-origin",
+  });
+  // 302 (yönlendirme) veya opaqueredirect = başarılı; gezinmeyi biz yapıyoruz.
+  if (res.type !== "opaqueredirect" && res.status >= 400) {
+    throw new Error("bağlantı geçersiz veya süresi dolmuş");
+  }
+}
+
+export const logout = (): Promise<unknown> => json("/auth/logout", { method: "POST" });
+
+export interface RoomDetail {
+  room: { id: string; name: string };
+  role: "owner" | "viewer";
+}
+
+export const fetchRoom = (roomId: string): Promise<RoomDetail> =>
+  json<RoomDetail>(`/rooms/${roomId}`);
+
+export interface Invite {
+  prefix: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  active: boolean;
+}
+
+export const createInvite = (
+  roomId: string,
+  expiresInHours?: number,
+): Promise<{ url: string; prefix: string; expiresAt: string }> =>
+  json(`/rooms/${roomId}/invites`, {
+    method: "POST",
+    body: JSON.stringify(expiresInHours ? { expiresInHours } : {}),
+  });
+
+export const listInvites = (roomId: string): Promise<Invite[]> =>
+  json<{ invites: Invite[] }>(`/rooms/${roomId}/invites`).then((r) => r.invites);
+
+export const revokeInvite = (roomId: string, prefix: string): Promise<unknown> =>
+  json(`/rooms/${roomId}/invites/${prefix}`, { method: "DELETE" });
+
+export const acceptInvite = (token: string): Promise<{ roomId: string; role: string }> =>
+  json("/invites/accept", { method: "POST", body: JSON.stringify({ token }) });
+
+export interface Person {
+  userId: string;
+  name: string;
+  viewing: string | null;
+  since: number;
+}
+
+export const setPresence = (roomId: string, viewing: string | null): Promise<unknown> =>
+  json(`/rooms/${roomId}/presence`, { method: "POST", body: JSON.stringify({ viewing }) });

@@ -144,11 +144,10 @@ fi
 
 # --- 5 --------------------------------------------------------------------
 step "5) Last-Event-ID query'yi ezer"
-FIRST=$(timeout 6 curl -sN -b "rooms_session=$SESSION" -H 'Accept: text/event-stream' -H 'Last-Event-ID: 3' \
-  "$BASE/rooms/$ROOM/events?since=0" 2>/dev/null \
-  | grep '^data: \[' | head -1 \
-  | sed 's/^data: //' \
-  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s)[0].seq)}catch{console.log("")}});')
+# Akışta artık iki frame tipi var (events + presence). `data:` satırını
+# körlemesine almak presence frame'ini event sanardı; `event: events`
+# satırından SONRAKİ ilk data alınır.
+FIRST=$(timeout 6 curl -sN -b "rooms_session=$SESSION" -H 'Accept: text/event-stream' -H 'Last-Event-ID: 3'   "$BASE/rooms/$ROOM/events?since=0" 2>/dev/null   | awk '/^event: events$/ { f = 1; next } f && /^data: \[/ { sub(/^data: /, ""); print; exit }'   | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s)[0].seq)}catch{console.log("")}});')
 [ "$FIRST" = "4" ] && ok "ilk event seq=4 (başlık kazandı, since=0 yok sayıldı)" \
                    || no "ilk event seq=$FIRST, beklenen 4"
 

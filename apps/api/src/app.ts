@@ -23,8 +23,11 @@ import {
   loadRoomConfig,
   openRoom,
   listRoomsOverview,
+  listPresence,
   listRuntime,
+  presenceConnectionCount,
   readEvents,
+  setViewing,
   readJournal,
 } from "@agent-rooms/core";
 import { loadApiConfig, resolveConfigPath, type ApiConfig } from "./config.js";
@@ -60,6 +63,8 @@ const EventsQuery = z.object({
 });
 
 const MessageBody = z.object({ text: z.string().min(1).max(100_000) }).strict();
+
+const PresenceBody = z.object({ viewing: z.string().min(1).max(120).nullable() }).strict();
 
 /**
  * İsteği kimin yaptığı — Hafta 4'ten itibaren OTURUMDAN gelir, başlıktan
@@ -104,6 +109,7 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
        * 0'a dönmeli ve `heapUsedMb` şişmemeli. Kapı testi bu iki değeri okur.
        */
       sseSubscribers: getEventBus().subscriberCount(),
+      presenceConnections: presenceConnectionCount(),
       heapUsedMb: Number((mem.heapUsed / 1024 / 1024).toFixed(1)),
     });
   });
@@ -168,11 +174,13 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
   });
 
   app.get("/rooms/:id", async (c) => {
-    await requireRoom(c, c.req.param("id"));
+    // Rol yanıta giriyor: UI izleyici modunu buna göre kuruyor. Yetki yine
+    // sunucuda — bu alan sadece kullanıcıyı boşuna denemekten kurtarıyor.
+    const { role } = await requireRoom(c, c.req.param("id"));
     const { room } = await mustFindRoom(c.req.param("id"));
     const session = await latestSession(room.id);
     const status = session?.containerId ? await containerStatus(session.containerId) : null;
-    return c.json({ room, session, container: session?.containerId ? { status } : null });
+    return c.json({ room, role, session, container: session?.containerId ? { status } : null });
   });
 
   /**
@@ -197,13 +205,18 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
    * `Accept: text/event-stream` ise SSE, değilse sayfalanmış JSON.
    */
   app.get("/rooms/:id/events", async (c) => {
-    await requireRoom(c, c.req.param("id"));
+    const { user } = await requireRoom(c, c.req.param("id"));
     const { room } = await mustFindRoom(c.req.param("id"));
     const session = await latestSession(room.id);
     if (!session) throw new HttpError(404, "bu odanın oturumu yok");
 
     if (wantsSse(c)) {
-      return streamSession(c, { sessionId: session.id, since: resolveSince(c) });
+      return streamSession(c, {
+        sessionId: session.id,
+        since: resolveSince(c),
+        roomId: room.id,
+        user: { userId: user.id, name: user.name },
+      });
     }
 
     const q = EventsQuery.safeParse({
@@ -221,6 +234,25 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
       hasMore: events.length === q.data.limit,
       events,
     });
+  });
+
+  /**
+   * Bakılan agent değişti. Presence event log'a YAZILMAZ — bu uç hiçbir şey
+   * append etmez, sadece bellekteki kaydı günceller ve yayını tetikler.
+   */
+  app.post("/rooms/:id/presence", async (c) => {
+    const roomId = c.req.param("id");
+    const { user } = await requireRoom(c, roomId);
+    const body = PresenceBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) throw new HttpError(400, "viewing alanı geçersiz");
+    setViewing(roomId, user.id, body.data.viewing ?? null);
+    return c.json({ ok: true, people: listPresence(roomId) });
+  });
+
+  app.get("/rooms/:id/presence", async (c) => {
+    const roomId = c.req.param("id");
+    await requireRoom(c, roomId);
+    return c.json({ people: listPresence(roomId) });
   });
 
   app.get("/rooms/:id/journal", async (c) => {

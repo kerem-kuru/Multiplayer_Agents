@@ -1,35 +1,117 @@
 import { useEffect, useState } from "react";
-import { createRoom, listRooms, type RoomSummary } from "./lib/api.js";
+import {
+  consumeLoginToken,
+  createRoom,
+  listRooms,
+  logout,
+  me,
+  type Me,
+  type RoomSummary,
+} from "./lib/api.js";
 import { RoomPage } from "./components/RoomPage.js";
+import { Login } from "./pages/Login.js";
+import { AcceptInvite } from "./pages/AcceptInvite.js";
+
+/**
+ * Uygulama kabuğu ve üç yol:
+ *   /auth/callback?token=  → magic link'i tüket, sonra devam et
+ *   /join?token=           → daveti kabul et, odaya gir
+ *   /?room=<id>            → oda
+ *
+ * Yönlendirici yok: üç yol için kütüphane eklemek, taşıdığı bakım yükü
+ * kadar bile fayda vermezdi.
+ */
+
+type Phase = "loading" | "login" | "ready";
 
 export function App() {
+  const [user, setUser] = useState<Me | null>(null);
+  const [phase, setPhase] = useState<Phase>("loading");
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
-  const [roomId, setRoomId] = useState<string | null>(
-    () => new URLSearchParams(location.search).get("room"),
-  );
+  const [roomId, setRoomId] = useState<string | null>(null);
+  const [inviteToken, setInviteToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = (): void => {
+  /** Girişten sonra dönülecek yer. */
+  const [next, setNext] = useState<string | undefined>(undefined);
+
+  const loadRooms = (): void => {
     void listRooms()
       .then(setRooms)
       .catch((e: Error) => setError(e.message));
   };
 
-  useEffect(load, []);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+
+    void (async () => {
+      // 1 — Magic link dönüşü: token'ı tüket, URL'i temizle.
+      if (location.pathname === "/auth/callback") {
+        const token = params.get("token");
+        const target = params.get("next") ?? "/";
+        if (token) {
+          try {
+            await consumeLoginToken(token);
+          } catch (err) {
+            setError((err as Error).message);
+          }
+        }
+        history.replaceState(null, "", target);
+      }
+
+      // 2 — Davet linki: oturum varsa kabul et, yoksa girişe yolla.
+      const joinToken =
+        location.pathname === "/join" ? new URLSearchParams(location.search).get("token") : null;
+      if (joinToken) {
+        setInviteToken(joinToken);
+        setNext(`/join?token=${joinToken}`);
+      }
+
+      const roomParam = new URLSearchParams(location.search).get("room");
+      if (roomParam) setRoomId(roomParam);
+
+      try {
+        const current = await me();
+        setUser(current);
+        setPhase("ready");
+        if (!joinToken) loadRooms();
+      } catch {
+        setPhase("login");
+      }
+    })();
+  }, []);
 
   const open = (id: string): void => {
+    setInviteToken(null);
     setRoomId(id);
-    history.replaceState(null, "", `?room=${id}`);
+    history.replaceState(null, "", `/?room=${id}`);
   };
+
+  if (phase === "loading") {
+    return <p style={{ padding: 24, color: "var(--ink-soft)" }}>Yükleniyor…</p>;
+  }
+
+  if (phase === "login") return <Login next={next} />;
+
+  if (inviteToken) {
+    return (
+      <AcceptInvite
+        token={inviteToken}
+        onJoined={open}
+        onNeedLogin={() => setPhase("login")}
+      />
+    );
+  }
 
   if (roomId) {
     return (
       <RoomPage
         roomId={roomId}
+        meId={user?.id ?? null}
         onBack={() => {
           setRoomId(null);
-          history.replaceState(null, "", location.pathname);
-          load();
+          history.replaceState(null, "", "/");
+          loadRooms();
         }}
       />
     );
@@ -37,7 +119,22 @@ export function App() {
 
   return (
     <div style={{ padding: 24, maxWidth: 820, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 20, margin: "0 0 4px" }}>Agent Odaları</h1>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+        <h1 style={{ fontSize: 20, margin: "0 0 4px" }}>Agent Odaları</h1>
+        <span style={{ marginLeft: "auto", color: "var(--ink-soft)", fontSize: 13 }}>
+          {user?.email}
+        </span>
+        <button
+          onClick={() => {
+            void logout().then(() => {
+              setUser(null);
+              setPhase("login");
+            });
+          }}
+        >
+          Çıkış
+        </button>
+      </div>
       <p style={{ color: "var(--ink-soft)", margin: "0 0 18px" }}>
         Bir odayı aç, agent'a görev ver, canlı izle.
       </p>
@@ -60,7 +157,9 @@ export function App() {
 
       <div style={{ marginTop: 18 }}>
         {rooms.length === 0 && !error && (
-          <p style={{ color: "var(--ink-soft)" }}>Henüz oda yok.</p>
+          <p style={{ color: "var(--ink-soft)" }}>
+            Henüz üye olduğun bir oda yok. Yeni bir tane aç ya da bir davet linki iste.
+          </p>
         )}
         {rooms.map((r) => (
           <button

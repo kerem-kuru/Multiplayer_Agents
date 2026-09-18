@@ -168,11 +168,13 @@ function Item({ item }: { item: TurnItem }) {
   return <ToolRow item={item} />;
 }
 
-export function ActivityFeed({ turns }: { turns: TurnView[] }) {
+export function ActivityFeed({ turns, canWrite = true }: { turns: TurnView[]; canWrite?: boolean }) {
   if (turns.length === 0) {
     return (
       <p style={{ color: "var(--ink-soft)", padding: 16 }}>
-        Henüz görev yok. Aşağıdan bir şey yaz.
+        {/* İzleyiciye "aşağıdan bir şey yaz" demek yanlış yönlendirme olurdu:
+            yazma alanı onda yok. */}
+        {canWrite ? "Henüz görev yok. Aşağıdan bir şey yaz." : "Henüz görev yok."}
       </p>
     );
   }

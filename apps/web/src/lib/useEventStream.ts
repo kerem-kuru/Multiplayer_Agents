@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { StoredEvent } from "@agent-rooms/protocol";
 import { project, type RoomView } from "@agent-rooms/view";
-import { fetchEvents, fetchSnapshot, sseUrl } from "./api.js";
+import { fetchEvents, fetchSnapshot, sseUrl, type Person } from "./api.js";
 
 /**
  * Oda akışı: snapshot al → kalan geçmişi sayfala → SSE'ye bağlan → boşluk
@@ -24,6 +24,8 @@ export interface StreamState {
   view: RoomView;
   connection: Connection;
   lastSeq: number;
+  /** Odadakiler — AYRI kanaldan gelir, event log'un parçası değildir. */
+  people: Person[];
   reconnect: () => void;
 }
 
@@ -33,6 +35,7 @@ export function useEventStream(roomId: string | null): StreamState {
   const [view, setView] = useState<RoomView>(EMPTY);
   const [connection, setConnection] = useState<Connection>("loading");
   const [lastSeq, setLastSeq] = useState(0);
+  const [people, setPeople] = useState<Person[]>([]);
   const [nonce, setNonce] = useState(0);
 
   /** Snapshot sonrası event'ler seq -> event. Projeksiyon bunun üzerinden. */
@@ -52,6 +55,7 @@ export function useEventStream(roomId: string | null): StreamState {
     base.current = undefined;
     baseSeq.current = 0;
     setView(EMPTY);
+    setPeople([]);
     setLastSeq(0);
     setConnection("loading");
 
@@ -119,6 +123,19 @@ export function useEventStream(roomId: string | null): StreamState {
         absorb(batch);
       });
 
+      /**
+       * Presence frame'i. `id:` taşımadığı için `Last-Event-ID` imlecini
+       * ilerletmez — event akışıyla hiç karışmaz.
+       */
+      source.addEventListener("presence", (ev) => {
+        if (cancelled) return;
+        try {
+          setPeople(JSON.parse((ev as MessageEvent<string>).data) as Person[]);
+        } catch {
+          // Bozuk frame presence'ı düşürmez, sadece bu güncelleme atlanır.
+        }
+      });
+
       source.addEventListener("overflow", () => {
         // Sunucu bizi yavaş buldu ve kapattı; baştan bağlan.
         source?.close();
@@ -184,6 +201,7 @@ export function useEventStream(roomId: string | null): StreamState {
     view,
     connection,
     lastSeq,
+    people,
     reconnect: () => {
       failures.current = 0;
       setNonce((n) => n + 1);

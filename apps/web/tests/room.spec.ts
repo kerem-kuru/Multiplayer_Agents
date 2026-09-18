@@ -36,8 +36,26 @@ async function waitForIdle(page: import("@playwright/test").Page): Promise<void>
   ).toBeVisible({ timeout: 90_000 });
 }
 
-async function openNewRoom(page: import("@playwright/test").Page): Promise<void> {
+/**
+ * Hafta 4: her uç oturum ister. Test de ARAYÜZDEN giriyor — magic link akışı
+ * geliştirme modunda bağlantıyı ekranda gösteriyor. Bypass yok; kullanıcının
+ * yaptığının aynısı.
+ */
+async function login(page: import("@playwright/test").Page): Promise<void> {
+  const email = `e2e-${Date.now()}@rooms.local`;
   await page.goto("/");
+  const box = page.getByPlaceholder("sen@ornek.com");
+  if ((await box.count()) === 0) return; // oturum zaten var
+  await box.fill(email);
+  await page.getByRole("button", { name: "Bağlantı gönder" }).click();
+  const link = page.locator("a[href*='token=']");
+  await expect(link).toBeVisible({ timeout: 15_000 });
+  await link.click();
+  await expect(page.getByRole("button", { name: "Yeni oda aç" })).toBeVisible({ timeout: 15_000 });
+}
+
+async function openNewRoom(page: import("@playwright/test").Page): Promise<void> {
+  await login(page);
   await page.getByRole("button", { name: "Yeni oda aç" }).click();
   await expect(startButton(page)).toBeVisible({ timeout: 30_000 });
 }

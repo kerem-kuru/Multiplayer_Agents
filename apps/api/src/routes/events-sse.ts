@@ -8,9 +8,18 @@ import {
   SSE_MAX_PENDING_BYTES,
   SSE_OVERFLOW_EVENT,
   SSE_PING_MS,
+  SSE_PRESENCE_EVENT,
   SSE_RETRY_MS,
 } from "@agent-rooms/protocol";
-import { getEventBus, readEvents } from "@agent-rooms/core";
+import {
+  getEventBus,
+  joinPresence,
+  leavePresence,
+  listPresence,
+  readEvents,
+  subscribePresence,
+  type PresencePerson,
+} from "@agent-rooms/core";
 
 /**
  * Oturumun event akışı — SSE.
@@ -32,6 +41,9 @@ interface StreamOptions {
   sessionId: string;
   /** Bu sıradan SONRAKİ event'ler gönderilir. */
   since: number;
+  /** Presence oda bazlıdır, oturum bazlı değil. */
+  roomId: string;
+  user: { userId: string; name: string };
 }
 
 /**
@@ -67,6 +79,18 @@ export function streamSession(c: Context, opts: StreamOptions) {
     let lastSentSeq = opts.since;
     let closed = false;
 
+    /**
+     * BAĞLANTI = VARLIK. Bu bağlantı açıkken kişi odada görünür.
+     * Presence event log'a YAZILMAZ; bellekte durur ve ayrı frame'le akar.
+     */
+    const connectionId = `${opts.sessionId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    joinPresence(opts.roomId, connectionId, opts.user);
+    /** Yazımlar tek yerden sırayla gitsin diye kuyruğa alınır. */
+    let pendingPresence: PresencePerson[] | null = listPresence(opts.roomId);
+    const unsubscribePresence = subscribePresence(opts.roomId, (people) => {
+      if (!closed) pendingPresence = people;
+    });
+
     /** Adım 1: abone ol ve tamponla — henüz yazma. */
     let pending: StoredEvent[] = [];
     const unsubscribe = bus.subscribe(opts.sessionId, (event) => {
@@ -78,7 +102,10 @@ export function streamSession(c: Context, opts: StreamOptions) {
       if (closed) return;
       closed = true;
       unsubscribe();
+      unsubscribePresence();
+      leavePresence(opts.roomId, connectionId);
       pending = [];
+      pendingPresence = null;
     };
     stream.onAbort(cleanup);
 
@@ -94,10 +121,29 @@ export function streamSession(c: Context, opts: StreamOptions) {
       lastSentSeq = Math.max(lastSentSeq, maxSeq);
     };
 
+    /**
+     * Presence frame'i `id:` TAŞIMAZ: `id` yalnızca event sırasını ilerletir.
+     * Presence'a id verseydik yeniden bağlanan istemcinin `Last-Event-ID`
+     * imleci bozulur ve gerçek event'ler atlanırdı.
+     */
+    const flushPresence = async (): Promise<void> => {
+      if (pendingPresence === null) return;
+      const people = pendingPresence;
+      pendingPresence = null;
+      await stream.writeSSE({
+        event: SSE_PRESENCE_EVENT,
+        data: JSON.stringify(people),
+      });
+    };
+
     try {
       await stream.writeSSE({ data: "", event: "open" });
       // İstemciye yeniden bağlanma gecikmesi önerisi.
       await stream.write(`retry: ${SSE_RETRY_MS}\n\n`);
+
+      // Odaya girerken kimlerin olduğunu HEMEN gör: geçmiş replay'i uzun
+      // sürebilir, presence onu beklemesin.
+      await flushPresence();
 
       /** Adım 2: geçmişi DB'den sayfalayarak yaz. */
       for (;;) {
@@ -127,6 +173,8 @@ export function streamSession(c: Context, opts: StreamOptions) {
       while (!closed) {
         await new Promise((r) => setTimeout(r, SSE_FLUSH_MS));
         if (closed) break;
+
+        await flushPresence();
 
         if (pending.length === 0) {
           if (Date.now() - lastPing >= SSE_PING_MS) {
