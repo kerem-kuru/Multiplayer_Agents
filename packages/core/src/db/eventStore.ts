@@ -7,6 +7,7 @@ import {
 } from "@agent-rooms/protocol";
 import type { Finding } from "@agent-rooms/redact";
 import { getEventBus } from "../bus.js";
+import { noteEventForSnapshot } from "../snapshot.js";
 import { redactEventPayload } from "../redaction.js";
 import { getPool, withTx } from "./pool.js";
 
@@ -116,6 +117,7 @@ export async function appendEvent(
 ): Promise<RoomEvent> {
   const stored = await withTx((client) => appendOne(client, event), pool);
   getEventBus().publish(stored.sessionId, stored);
+  noteEventForSnapshot(stored.sessionId, stored.seq);
   return stored;
 }
 
@@ -132,6 +134,8 @@ export async function appendEvents(
   // Hepsi tek commit'te yazıldı; yayın da commit'ten sonra, sırayla.
   const bus = getEventBus();
   for (const e of stored) bus.publish(e.sessionId, e);
+  const last = stored[stored.length - 1];
+  if (last) noteEventForSnapshot(last.sessionId, last.seq);
   return stored;
 }
 

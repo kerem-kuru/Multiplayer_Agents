@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { StoredEvent } from "@agent-rooms/protocol";
-import { project, type RoomView } from "../model/project.js";
-import { fetchEvents, sseUrl } from "./api.js";
+import { project, type RoomView } from "@agent-rooms/view";
+import { fetchEvents, fetchSnapshot, sseUrl } from "./api.js";
 
 /**
- * Oda akışı: geçmişi sayfalayarak çek → SSE'ye bağlan → boşluk gördüysen doldur.
+ * Oda akışı: snapshot al → kalan geçmişi sayfala → SSE'ye bağlan → boşluk
+ * gördüysen doldur.
+ *
+ * Snapshot Hafta 4'te eklendi: davet linkiyle giren kişi `since=0`'dan replay
+ * YAPMAZ. Snapshot yoksa (veya sürümü eskiyse) sunucu `state: null` döner ve
+ * tam replay yolu aynen çalışır.
  *
  * Sunucu boşluğu zaten dolduruyor; buradaki kontrol İSTEMCİ TARAFI GÜVENCE.
  * "seq boşluğu hiçbir zaman sessizce geçilmez" kuralı iki yerde de duruyor.
@@ -30,8 +35,11 @@ export function useEventStream(roomId: string | null): StreamState {
   const [lastSeq, setLastSeq] = useState(0);
   const [nonce, setNonce] = useState(0);
 
-  /** Tüm event'ler seq -> event. Projeksiyon her zaman bunun üzerinden. */
+  /** Snapshot sonrası event'ler seq -> event. Projeksiyon bunun üzerinden. */
   const store = useRef(new Map<number, StoredEvent>());
+  /** Snapshot state'i ve kapsadığı son seq — projeksiyonun temeli. */
+  const base = useRef<RoomView | undefined>(undefined);
+  const baseSeq = useRef(0);
   const frame = useRef<number | null>(null);
   const failures = useRef(0);
 
@@ -41,6 +49,8 @@ export function useEventStream(roomId: string | null): StreamState {
     let cancelled = false;
     let source: EventSource | null = null;
     store.current = new Map();
+    base.current = undefined;
+    baseSeq.current = 0;
     setView(EMPTY);
     setLastSeq(0);
     setConnection("loading");
@@ -51,8 +61,8 @@ export function useEventStream(roomId: string | null): StreamState {
         frame.current = null;
         if (cancelled) return;
         const all = [...store.current.values()];
-        setView(project(all));
-        setLastSeq(all.reduce((m, e) => Math.max(m, e.seq), 0));
+        setView(project(all, base.current));
+        setLastSeq(all.reduce((m, e) => Math.max(m, e.seq), baseSeq.current));
       });
     };
 
@@ -68,7 +78,9 @@ export function useEventStream(roomId: string | null): StreamState {
     };
 
     const currentSeq = (): number => {
-      let max = 0;
+      // Snapshot'ın kapsadığı aralık da "elimizde" sayılır: SSE `since`'ı ve
+      // boşluk kontrolü bunun üzerinden yürür.
+      let max = baseSeq.current;
       for (const seq of store.current.keys()) if (seq > max) max = seq;
       return max;
     };
@@ -128,9 +140,22 @@ export function useEventStream(roomId: string | null): StreamState {
       };
     };
 
-    /** Önce geçmiş: hasMore bitene kadar sayfala, sonra SSE. */
+    /** Önce snapshot, sonra kalan geçmiş, sonra SSE. */
     void (async () => {
-      let since = 0;
+      try {
+        const snapshot = await fetchSnapshot(roomId);
+        if (cancelled) return;
+        if (snapshot.state) {
+          base.current = snapshot.state;
+          baseSeq.current = snapshot.seq;
+          setView(snapshot.state);
+          setLastSeq(snapshot.seq);
+        }
+      } catch {
+        // Snapshot bir hızlandırmadır; alınamazsa tam replay'e düşeriz.
+      }
+
+      let since = baseSeq.current;
       for (;;) {
         try {
           const page = await fetchEvents(roomId, since);

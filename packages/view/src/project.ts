@@ -8,7 +8,21 @@ import type { StoredEvent } from "@agent-rooms/protocol";
  *
  * İdempotent: aynı event iki kez verilse sonuç değişmez (`seq` bazlı eleme).
  * Bu, yeniden bağlanmada tekrar gelen event'lerin ekranı bozmamasını sağlar.
+ *
+ * HEM SUNUCU HEM İSTEMCİ BU FONKSİYONU ÇAĞIRIR: sunucu snapshot üretirken,
+ * istemci ekranı çizerken. İkisi ayrı kod olsaydı snapshot ile ekran zamanla
+ * birbirinden ayrılırdı ve kimse fark etmezdi.
+ *
+ * SAF VE DETERMİNİST olmak zorunda: `Date.now()` yok, rastgelelik yok, girdi
+ * dışında hiçbir şeye bakmıyor. Snapshot doğruluğu buna dayanıyor —
+ * `project(hepsi)` ile `snapshot + sonrası` derin eşit olmalı.
  */
+
+/**
+ * Projeksiyon sürümü. Bu dosyadaki üretim mantığı değiştiğinde ARTIRILIR:
+ * eski sürümle üretilmiş snapshot'lar okunmaz, tam replay'e düşülür.
+ */
+export const SNAPSHOT_VERSION = 1;
 
 export type AgentStatus = "stopped" | "starting" | "idle" | "busy" | "crashed" | "failed";
 
@@ -74,11 +88,24 @@ const actorLabel = (actor: unknown): string => {
   return a.kind === "human" || a.kind === "agent" ? (a.name ?? a.kind) : "system";
 };
 
-export function project(events: StoredEvent[]): RoomView {
-  const view: RoomView = { lastSeq: 0, agents: {} };
+/**
+ * @param base Önceki state (snapshot). Verilirse üzerine uygulanır ve
+ *   `base.lastSeq`'ten eski event'ler yutulur. KOPYALANIR, değiştirilmez.
+ */
+export function project(events: StoredEvent[], base?: RoomView): RoomView {
+  const view: RoomView = base
+    ? { lastSeq: base.lastSeq, agents: structuredClone(base.agents) }
+    : { lastSeq: 0, agents: {} };
+
   // Tekrarı yut: aynı event iki kez gelirse sonuç değişmemeli.
   const applied = new Set<number>();
   const turnIndex = new Map<string, TurnView>();
+
+  // Snapshot üzerine devam ediyorsak turn dizinini ondan kur: snapshot sonrası
+  // gelen `tool.result` kendi turn'ünü bulabilmeli.
+  for (const agent of Object.values(view.agents)) {
+    for (const turn of agent.turns) turnIndex.set(turn.messageId, turn);
+  }
 
   const agentOf = (name: string): AgentView => {
     let a = view.agents[name];
@@ -92,6 +119,8 @@ export function project(events: StoredEvent[]): RoomView {
   const sorted = [...events].sort((a, b) => a.seq - b.seq);
 
   for (const e of sorted) {
+    // Snapshot'ın kapsadığı event'ler tekrar uygulanmaz.
+    if (base && e.seq <= base.lastSeq) continue;
     if (applied.has(e.seq)) continue;
     applied.add(e.seq);
     view.lastSeq = Math.max(view.lastSeq, e.seq);

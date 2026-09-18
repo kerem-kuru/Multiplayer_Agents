@@ -1,6 +1,11 @@
 import path from "node:path";
 import { serve } from "@hono/node-server";
-import { AgentManager, closePool, createRedactingLogger } from "@agent-rooms/core";
+import {
+  AgentManager,
+  closePool,
+  configureSnapshots,
+  createRedactingLogger,
+} from "@agent-rooms/core";
 import { collectProviderEnv, hasProviderBackend } from "@agent-rooms/protocol";
 import { createApp } from "./app.js";
 import { REPO_ROOT, loadApiConfig } from "./config.js";
@@ -14,6 +19,12 @@ try {
 }
 
 const cfg = loadApiConfig();
+
+// Snapshot üretimi sessizce ölmemeli: üretilemezse tam replay'e düşülür ama
+// bunu bilmek gerekir.
+configureSnapshots({
+  onError: (err) => console.warn("snapshot üretilemedi:", String(err)),
+});
 
 // Bedrock/Vertex/gateway seçiliyse API anahtarı GEREKMEZ — kimlik doğrulama
 // dışarıdan gelir (AWS kimlikleri, gcloud ADC).

@@ -1,4 +1,5 @@
 import type { StoredEvent } from "@agent-rooms/protocol";
+import type { RoomView } from "@agent-rooms/view";
 
 /** Dev proxy: /api → sunucu. CORS'la uğraşmamak için. */
 const BASE = "/api";
@@ -61,6 +62,22 @@ export const listAgents = (roomId: string): Promise<AgentInfo[]> =>
 
 export const fetchEvents = (roomId: string, since: number, limit = 500): Promise<EventsPage> =>
   json<EventsPage>(`/rooms/${roomId}/events?since=${since}&limit=${limit}`);
+
+/**
+ * Snapshot — açılışta İLK çağrılan uç.
+ *
+ * `since=0` replay'i uzun odalarda saniyeler sürüyor; davet linkine tıklayan
+ * kişi için hedef 3 saniyenin altı. Snapshot yoksa `state: null` döner ve
+ * Hafta 3'teki tam replay yolu devreye girer.
+ */
+export interface SnapshotResponse {
+  state: RoomView | null;
+  seq: number;
+  version: number;
+}
+
+export const fetchSnapshot = (roomId: string): Promise<SnapshotResponse> =>
+  json<SnapshotResponse>(`/rooms/${roomId}/snapshot`);
 
 export const startAgent = (roomId: string, agent: string): Promise<unknown> =>
   json(`/rooms/${roomId}/agents/${agent}/start`, { method: "POST" });

@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { Actor } from "@agent-rooms/protocol";
 import { NewRoomEvent, PROTOCOL_VERSION } from "@agent-rooms/protocol";
+import { SNAPSHOT_VERSION } from "@agent-rooms/view";
 import {
   AgentBusyError,
   AgentManager,
@@ -15,6 +16,8 @@ import {
   getRoomConfig,
   getEventBus,
   getSession,
+  currentView,
+  latestSnapshot,
   latestSession,
   listRooms,
   loadRoomConfig,
@@ -160,6 +163,22 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
     const session = await latestSession(room.id);
     const status = session?.containerId ? await containerStatus(session.containerId) : null;
     return c.json({ room, session, container: session?.containerId ? { status } : null });
+  });
+
+  /**
+   * Snapshot — yeni katılan `since=0`'dan replay YAPMAZ.
+   *
+   * Davet linkine tıklayan kişi bunu alır, sonra `?since=seq` ile SSE'ye
+   * bağlanır. Snapshot yoksa Hafta 3'teki tam replay yolu devreye girer.
+   */
+  app.get("/rooms/:id/snapshot", async (c) => {
+    const { room } = await mustFindRoom(c.req.param("id"));
+    const session = await latestSession(room.id);
+    if (!session) throw new HttpError(404, "bu odanın oturumu yok");
+
+    const stored = await latestSnapshot(session.id);
+    if (!stored) return c.json({ state: null, seq: 0, version: SNAPSHOT_VERSION });
+    return c.json({ state: stored.state, seq: stored.seq, version: stored.version });
   });
 
   /**

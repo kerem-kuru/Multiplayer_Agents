@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { TurnItem, TurnView } from "../model/project.js";
+import type { TurnItem, TurnView } from "@agent-rooms/view";
 import { formatTool, stripAnsi } from "../model/format-tool.js";
 
 /**

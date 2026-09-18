@@ -15,6 +15,7 @@
     "@agent-rooms/protocol": "*",
     "@hono/node-server": "^1.13.7",
     "hono": "^4.6.14",
-    "zod": "^3.24.1"
+    "zod": "^3.24.1",
+    "@agent-rooms/view": "*"
   }
 }

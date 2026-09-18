@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { listAgents, startAgent, stopAgent, type AgentInfo } from "../lib/api.js";
 import { useEventStream, type Connection } from "../lib/useEventStream.js";
-import type { AgentStatus } from "../model/project.js";
+import type { AgentStatus } from "@agent-rooms/view";
 import { ActivityFeed } from "./ActivityFeed.js";
 import { TerminalView } from "./TerminalView.js";
 import { Composer } from "./Composer.js";

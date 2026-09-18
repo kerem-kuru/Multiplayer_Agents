@@ -1,5 +1,5 @@
 {
-  "name": "@agent-rooms/core",
+  "name": "@agent-rooms/view",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -11,24 +11,12 @@
       "default": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "scripts": {
     "build": "tsc -b",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@agent-rooms/protocol": "*",
-    "dockerode": "^5.0.1",
-    "pg": "^8.13.1",
-    "yaml": "^2.6.1",
-    "zod": "^3.24.1",
-    "@agent-rooms/redact": "*",
-    "@agent-rooms/view": "*"
-  },
-  "devDependencies": {
-    "@types/dockerode": "^4.0.1",
-    "@types/pg": "^8.11.10"
+    "@agent-rooms/protocol": "*"
   }
 }

@@ -5,5 +5,9 @@
     "outDir": "./dist"
   },
   "include": ["src/**/*.ts"],
-  "references": [{ "path": "../../packages/protocol" }, { "path": "../../packages/core" }]
+  "references": [
+    { "path": "../../packages/protocol" },
+    { "path": "../../packages/view" },
+    { "path": "../../packages/core" }
+  ]
 }

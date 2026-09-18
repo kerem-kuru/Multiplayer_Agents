@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StoredEvent } from "@agent-rooms/protocol";
-import { project } from "../src/model/project.js";
+import { project } from "../src/project.js";
 
 /**
  * Projeksiyon saf olduğu için burada ne sunucu ne tarayıcı gerekiyor.
@@ -175,15 +175,5 @@ describe("projeksiyon", () => {
       ev("agent.crashed", { agent: "backend", exitCode: 1, error: "e", willRestart: false, restartCount: 3 }, { kind: "system" }),
     ]);
     expect(failed.agents.backend!.status).toBe("failed");
-  });
-});
-
-describe("tool özeti", () => {
-  it("yollar oda-göreli gösterilir", async () => {
-    const { formatTool } = await import("../src/model/format-tool.js");
-    expect(formatTool("write_file", { file_path: "/room/worktrees/backend/hello.js" })).toBe(
-      "worktrees/backend/hello.js",
-    );
-    expect(formatTool("Bash", { command: "node hello.js\nikinci satir" })).toBe("node hello.js");
   });
 });

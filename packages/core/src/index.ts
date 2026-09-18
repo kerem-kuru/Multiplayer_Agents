@@ -7,6 +7,7 @@ export * from "./db/pool.js";
 export * from "./db/eventStore.js";
 export * from "./log.js";
 export * from "./redaction.js";
+export * from "./snapshot.js";
 export * from "./docker/container.js";
 export * from "./room/journal.js";
 export * from "./room/layout.js";

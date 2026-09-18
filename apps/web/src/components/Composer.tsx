@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { sendMessage, startAgent } from "../lib/api.js";
-import type { AgentStatus } from "../model/project.js";
+import type { AgentStatus } from "@agent-rooms/view";
 
 /**
  * Gönderme alanı.
