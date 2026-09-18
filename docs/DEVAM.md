@@ -4,9 +4,9 @@ Bu dosya oturum sonu devir notudur. Yarın buradan devam edilir.
 
 ## Tek cümleyle
 
-**Hafta 4'ün on dört adımının on üçü bitti.** Odaya ikinci insan davet linkiyle giriyor,
-izliyor, yazamıyor; agent'a okutulan secret ne ekrana ne veritabanına düşüyor. Kalan tek
-madde **Adım 13: iki kişilik dogfood** (tünel + gerçek ikinci insan).
+**Hafta 4 bitti — on dört adımın hepsi.** İki kişi iki ayrı makineden aynı odayı canlı
+izledi, ikinci kişi hiçbir şey yazamadı, agent gerçek bir dosya yazdı; secret ne ekrana ne
+veritabanına düştü. Sırada **Hafta 5**: yazma yetkisi, kuyruk, kesme, sürücü devri.
 
 ## Durum tablosu
 
@@ -15,9 +15,9 @@ madde **Adım 13: iki kişilik dogfood** (tünel + gerçek ikinci insan).
 | 1 | İskelet ve event log | ✅ `npm run gate` → 10/10 |
 | 2 | Tek agent, headless koşum | ⏳ kod tamam, `gate:w2` **koşulmadı** (Claude anahtarı yok) |
 | 3 | Stream ve terminal görünümü | ✅ `gate:w3` 11/11 · `gate:w3:agent` 2/2 (Gemini) |
-| 4 | Redaction ve ikinci izleyici | ✅ kod + kapı · ⏳ iki kişilik dogfood |
+| 4 | Redaction ve ikinci izleyici | ✅ `gate:w4` 22/22 · dogfood ✅ (iki makine) |
 
-Testler: **194**. Paketler: `protocol`, `redact` (YENİ), `view` (YENİ), `core`, `runner`,
+Testler: **195**. Paketler: `protocol`, `redact` (YENİ), `view` (YENİ), `core`, `runner`,
 `runner-gemini`.
 
 ## Hafta 4'te ne yapıldı
@@ -39,19 +39,14 @@ Testler: **194**. Paketler: `protocol`, `redact` (YENİ), `view` (YENİ), `core`
 
 ## Yarın ilk üç iş
 
-1. **Adım 13 — iki kişilik dogfood.** Tünel aç, ekipten birine davet linki gönder, gerçek bir
-   görevi birlikte izleyin:
-   ```bash
-   npm run dev:all
-   cloudflared tunnel --url http://localhost:5173     # veya ngrok http 5173
-   # .env → APP_BASE_URL=<tünel adresi>, sonra api'yi yeniden başlat
-   ```
-   Üç soru README "Hafta 4 dogfood notları" başlığında; **ilk 10 saniye** sorusunun cevabı
-   sistemi hiç bilmeyen birinden gelmeli.
-2. **`npm run gate:w4:agent`** — Gemini kotası sıfırlanınca (günlük 20 istek) koş: gerçek
-   agent gerçek bir `.env` okuyor, secret log'a girmiyor mu?
-3. **Hafta 5'e başla:** yazma yetkisi, kuyruk, kesme, sürücü devri. Dogfood'da izleyici
-   ekranını gören ilk tepki zaten *"şu an izleyiciye müdahale yetkisi vermiyoruz"* oldu.
+1. **Hafta 5'e başla:** yazma yetkisi, kuyruk, kesme, sürücü devri. Gerekçesi dogfood'dan
+   geldi: izleyici ekranını gören ilk tepki *"şu an izleyiciye müdahale yetkisi vermiyoruz"*
+   oldu.
+2. **`npm run gate:w4:agent`** — kota sıfırlanınca (Pasifik gece yarısı ≈ TSİ 10:00) koş:
+   gerçek agent gerçek bir `.env` okuyor, secret log'a girmiyor mu?
+3. **Turn sonucuna sebep alanı** (Hafta 5/6 UI işi): ekranda `bitti · error` yazıyor ama
+   nedeni yalnızca sunucu logunda. Gemini runner'ı `result` satırındaki hata metnini
+   taşımıyor.
 
 Anthropic anahtarı gelirse ayrıca: `npm run gate:w2` (14 kontrol) ve Hafta 2 dogfood'u.
 
@@ -63,6 +58,12 @@ AUTH_DEV_MODE=true npm run api                    # giriş bağlantısı ekranda
 npm run gate     / gate:w3 / gate:w4              # kapılar (anahtar gerekmez)
 npm run gate:w3:agent / gate:w4:agent             # agent gerektirenler
 ```
+
+**Uzaktan erişim:** Cloudflare hızlı tüneli SSE'yi TAMPONLUYOR — izleyici odayı görür ama
+canlı akış hiç gelmez (ölçüldü). Aynı ağdaysanız `WEB_HOST=1 WEB_ALLOWED_HOSTS=<lan-ip>` ile
+`http://<lan-ip>:5173` çalışıyor; uzaktaysa akışı geçiren bir tünel (ngrok) gerekir.
+Her iki durumda da `APP_BASE_URL` o adres olmalı, yoksa giriş ve davet linkleri localhost'a
+çıkar.
 
 **Tuzaklar (bu oturumda üçüne de düşüldü):**
 - Kapı/test koşarken **portta eski bir sunucu** varsa eski derleme ölçülür. `gate:w4` artık

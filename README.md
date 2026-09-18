@@ -293,39 +293,58 @@ cevaplanamıyor.
 
 ## Hafta 4 dogfood notları
 
-18 Eylül 2026. **Eksik yanı baştan söyleyeyim:** tünelle dışarı açıp ekipten başka bir
-insanı davet etme kısmı YAPILMADI. Yapılan, aynı makinede iki ayrı tarayıcı oturumu (biri
-oda sahibi, biri davetli izleyici) ve arayüzün ilk kez elle denenmesi. Üç sorunun cevabı
-bu kadarıyla:
+18 Eylül 2026 · **iki kişi, iki ayrı makine**, aynı yerel ağ üzerinden
+(`http://<lan-ip>:5173`). İkinci kişi hiçbir kurulum yapmadan davet linkine tıkladı,
+odaya izleyici olarak girdi ve agent'ın çalışmasını canlı izledi. Turn gerçek bir dosya
+yazdı (`hello.js`), ikisi de aynı anda gördü, presence iki kişiyi de gösterdi.
 
 **Karşı taraf ekrana bakınca ilk 10 saniyede neyi anlamadı?**
-İlk elle denemede, **başarılı bir girişten sonra ekranda duran yanlış bir hata** vardı:
-*"Sunucuya ulaşılamadı — `npm run api` çalışıyor mu?"* Sunucu gayet çalışıyordu; giriş de
-başarılıydı. İki hata üst üste binmişti: StrictMode açılış effect'i iki kez koşuyor,
-magic link tek kullanımlık olduğu için ikinci çağrı 400 dönüyor; ve oda listesi HER hatayı
-"sunucu kapalı" diye gösteriyordu. İkisi de düzeltildi.
+İki şey, ikisi de "ne olduğunu söylemeyen durum" ailesinden:
 
-Bunun kaydedilmeye değer yanı şu: o sırada 194 test, üç kapı script'i ve iki tarayıcı testi
-geçiyordu. Hiçbiri bunu yakalamadı, çünkü hepsi "giriş başarılı mı" diye soruyordu;
-**hiçbiri ekranda ne yazdığına bakmıyordu.**
+1. **Başarılı bir girişten sonra ekranda duran yanlış hata:** *"Sunucuya ulaşılamadı —
+   `npm run api` çalışıyor mu?"* Sunucu çalışıyordu, giriş de başarılıydı. Sebebi iki hatanın
+   üst üste binmesiydi (StrictMode açılış effect'i iki kez koşuyor + magic link tek
+   kullanımlık + oda listesi HER hatayı "sunucu kapalı" diye gösteriyor). İkisi de
+   düzeltildi. Kaydedilmeye değer yanı: o sırada 194 test ve üç kapı script'i geçiyordu;
+   hiçbiri bunu yakalamadı, çünkü hepsi "giriş başarılı mı" diye soruyordu, **hiçbiri
+   ekranda ne yazdığına bakmıyordu.**
+2. **`● bitti · error · 0 ms`** — turn neden bittiğini söylemiyor. Sebep (Gemini günlük
+   kotası, `429`) yalnızca sunucu logunda. Ekran event log'un projeksiyonu olduğu için
+   asıl eksik log'da: Gemini runner'ı `result` satırındaki `status`'u yazıyor ama hata
+   metnini taşımıyor. **Hafta 5/6'nın işi:** turn sonucuna sebep alanı eklemek.
 
 **Hangi anda "şunu ben yazayım" dedi?**
-İzleyici ekranını görür görmez: *"şu an sanırım izleyiciye müdahale etme yetkisini
-vermiyoruz."* Yani soru, izleyici bir şey denemeden önce, ekrana bakar bakmaz geldi —
-Hafta 5'in (yazma yetkisi, kuyruk, sürücü devri) gerekçesi olarak bundan iyisi yok.
-İzleyicinin gördüğü "Bu odayı izliyorsun" satırı **ne olduğunu** söylüyor ama **ne zaman
-değişeceğini** söylemiyor; Hafta 5'te oraya "yetki iste" eylemi girmeli.
+İzleyici ekranını görür görmez, daha bir şey denemeden: *"şu an sanırım izleyiciye
+müdahale etme yetkisini vermiyoruz."* Hafta 5'in (yazma yetkisi, kuyruk, sürücü devri)
+gerekçesi olarak bundan iyisi yok. İzleyicinin gördüğü "Bu odayı izliyorsun" satırı **ne
+olduğunu** söylüyor ama **ne zaman değişeceğini** söylemiyor; oraya "yetki iste" eylemi
+girmeli.
 
 **Redaction bir şeyi gereksiz yere maskeledi mi?**
-Bu oturumda hayır. Kapının 5. kontrolü tam bunu ölçüyor: git sha, UUID ve uzun `node_modules`
-yolları içeren normal bir kaynak dosya yazıldığında bulgu sayısı değişmiyor. Ama bu ölçüm
-sentetik bir dosyayla yapıldı; gerçek bir projenin çıktısında yanlış pozitif çıkması
-sürpriz olmaz — `redaction.allow_patterns` tam da onun için var ve ilk gerçek yanlış pozitif
-görüldüğünde buraya yazılmalı.
+Hayır. Ekranda `scripts/demo-redaction.mjs` ile denendi: `.env` değerleri maskelendi,
+yanındaki git sha, UUID, uzun `node_modules` yolu ve semver dokunulmadan kaldı. Bir kusur
+çıktı ama maskelemede değil, **isimlendirmede**: AWS anahtarı `env-assignment` diye
+işaretleniyordu. Denetim kaydında "bir env değeri sızmış" ile "bir AWS anahtarı sızmış"
+arasında dağlar kadar fark var; artık aynı aralığı iki kural yakalarsa spesifik olan
+isim veriyor.
 
-**Kalan:** tünel (cloudflared/ngrok) + gerçek ikinci kişi. O deneme yapıldığında bu başlık
-güncellenecek; özellikle "ilk 10 saniye" sorusunun cevabı, sistemi hiç bilmeyen birinden
-gelmeli.
+### Dogfood'un asıl bulduğu şey: tünel seçimi bir mimari karar
+
+İlk deneme **Cloudflare hızlı tüneli** (`trycloudflare.com`) ile yapıldı ve izleyici odayı
+görüyor ama **hiçbir canlı güncelleme almıyordu** — presence yok, yeni event yok. Ölçüm:
+
+| Yol | SSE frame'leri |
+| --- | --- |
+| Doğrudan API (`:8787`) | akıyor |
+| Vite vekili (`localhost:5173`) | akıyor |
+| Cloudflare hızlı tünel | **25 saniyede tek byte yok** |
+| Cloudflare, `--protocol http2 --no-chunked-encoding` | yine yok |
+| Yerel ağ (`<lan-ip>:5173`) | akıyor |
+
+Yani sunucu doğru gönderiyordu, tünel tamponluyordu. **Olay akışı tabanlı bir arayüz,
+yanıtı tamponlayan hiçbir vekilin arkasında çalışmaz** — ve bu, kapı testleriyle
+görülemeyecek bir şeydi: kapılar hep aynı makinede koşuyor. Uzak erişim gerektiğinde
+akışı geçiren bir tünel (ngrok gibi) ya da doğrudan ağ yolu kullanılmalı.
 
 ## Karar notları
 
@@ -382,4 +401,5 @@ Hafta 1 görev tanımından bilinçli olarak ayrılan noktalar ve gerekçeleri.
 | Var olmayan oda `404` değil `403` | `404` dönmek hangi oda kimliklerinin var olduğunu sızdırır. Üye olmayan için ikisi de aynı görünmeli. |
 | Kapı script'leri auth'u ATLATMIYOR, kullanıyor | `scripts/dev-session.mjs` magic link akışının tamamını koşuyor. Bir bypass eklemek, kapının "oturumsuz istek 401 alır" kontrolünü anlamsız kılardı. |
 | Hafta 4 kapısı da agent'a bağlanmadı | Redaction'ın ölçtüğü şey GEÇİT: `appendEvent`. Event'i dev ucundan yazmak aynı geçitten geçiyor — gerçek DB, gerçek SSE, gerçek redaction, ama deterministik ve ücretsiz. Gerçek agent'ın dosya okumasıyla yapılan kontrol ayrı: `gate:w4:agent`. |
+| Uzak erişim için tünel seçimi mimari karar sayıldı | Cloudflare hızlı tüneli SSE'yi tamponluyor: izleyici odayı görüyor ama canlı akış hiç ulaşmıyor. Akışı geçirmeyen bir vekilin arkasında bu arayüz çalışmaz; ölçüm README "Hafta 4 dogfood notları"nda. |
 | Magic link hız sınırı kapı e-postalarını da vurdu | Sabit e-postayla kapıyı 5 dakikada iki kez koşturmak sınırı tetikliyordu. Sınırı gevşetmek yerine kapılar her koşumda benzersiz e-posta üretiyor: koruma gerçek kalsın. |

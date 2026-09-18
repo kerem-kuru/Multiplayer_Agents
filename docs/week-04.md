@@ -23,7 +23,7 @@ linki üretebilen ilk satır, redaction bittikten sonra yazıldı.
 | 10 | Presence | ✅ 250 ms debounce |
 | 11 | UI (login, davet, presence, paylaşım, izleyici modu) | ✅ |
 | 12 | Kapı script'i | ✅ `gate:w4` → 22/22 |
-| 13 | Cuma dogfood (iki kişi) | ⏳ tünel + ikinci kişi |
+| 13 | Cuma dogfood (iki kişi) | ✅ iki makine, yerel ağ |
 | 14 | README | ✅ |
 
 ## Redaction: ölçerek bulunan üç şey
@@ -134,9 +134,28 @@ Kapının kendisi üç koşumda oturdu ve ikisi ürün hatası değildi:
    Kontrol artık `isDeepStrictEqual` kullanıyor — istenen şey derin eşitlik, metin eşitliği
    değil.
 
+## Dogfood (Adım 13) — yapıldı
+
+İki kişi, iki ayrı makine, aynı yerel ağ. İkinci kişi kurulum yapmadan davet linkinden
+girdi, izleyici olarak canlı izledi; agent gerçek bir dosya yazdı. Üç sorunun cevabı
+README "Hafta 4 dogfood notları" başlığında.
+
+**Dogfood'un asıl bulduğu şey kodda değil, dağıtımdaydı:** Cloudflare hızlı tüneli SSE'yi
+tamamen tamponluyor (25 sn'de tek byte yok), yani izleyici odayı görüyor ama hiçbir canlı
+güncelleme almıyor. Doğrudan bağlantı, vite vekili ve yerel ağ akışı geçiriyor. Olay akışı
+tabanlı bir arayüz, yanıtı tamponlayan bir vekilin arkasında çalışmaz — ve bunu hiçbir kapı
+testi göremezdi, çünkü kapılar aynı makinede koşuyor.
+
+Dogfood sırasında çıkan iki ürün hatası (ikisi de düzeltildi):
+- Odanın container'ı dışarıdan silinince agent sonsuza kadar `starting`de kalıyordu; artık
+  `failed` + net mesaj + ekranda görünen hata.
+- `AGENT_MODEL` Gemini runner'ında sessizce yok sayılıyordu (Claude'da geçerliydi). Kota
+  dolunca başka modele geçilemiyordu; düzeltmeden sonra `gemini-3.1-flash-lite` ile turn
+  uçtan uca geçti.
+
 ## Kalan iş
 
-- **Adım 13 — iki kişilik dogfood.** Tünel (cloudflared/ngrok) + ikinci bir insan gerekiyor;
-  tek makinede iki tarayıcı oturumuyla yapılan kısmı README'de.
-- `gate:w2` hâlâ koşulmadı (`ANTHROPIC_API_KEY` yok).
+- `gate:w2` hâlâ koşulmadı (`ANTHROPIC_API_KEY` yok) — Hafta 2'den kalan boşluk.
 - `gate:w4:agent` gerçek agent'la `.env` okutur; Gemini günlük kotası dolduğu gün koşulamaz.
+- Turn sonucunda **sebep alanı yok**: ekranda `bitti · error` görünüyor, nedeni sunucu
+  logunda kalıyor. Hafta 5/6'nın UI işi.
