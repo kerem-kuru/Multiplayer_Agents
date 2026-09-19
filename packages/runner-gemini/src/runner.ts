@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
@@ -7,6 +7,7 @@ import type { NewRoomEvent } from "@agent-rooms/protocol";
 import {
   AgentConfig,
   PROTOCOL_VERSION,
+  ROOM_TOOLCHAIN_PROBES,
   RunnerCommand,
   RunnerOutput,
   geminiContextFile,
@@ -315,10 +316,26 @@ const turnRef = (messageId: string): { agent: string; messageId: string } => ({
  * Yazamamak turn'ü engellemez — rol bağlamı olmadan da agent çalışır, sadece
  * rolünü bilmez. Sessizce geçmek yerine söylenir.
  */
+/**
+ * Ortamda ne olduğunu ÖLÇ. Elle yazılmış bir liste imajla kayar; `node -v`
+ * kayamaz. Ölçüm yerel ve tek seferlik (agent başlangıcı), turn'e maliyeti yok.
+ */
+const probeToolchain = (): Array<{ label: string; version: string | null }> =>
+  ROOM_TOOLCHAIN_PROBES.map((probe) => {
+    try {
+      const res = spawnSync(probe.cmd, probe.args, { encoding: "utf8", timeout: 5_000 });
+      const out =
+        `${res.stdout ?? ""}${res.stderr ?? ""}`.trim().split(/\r?\n/)[0] ?? "";
+      return { label: probe.label, version: res.status === 0 && out.length > 0 ? out : null };
+    } catch {
+      return { label: probe.label, version: null };
+    }
+  });
+
 const writeContextFile = (): void => {
   const target = path.join(process.cwd(), "GEMINI.md");
   try {
-    writeFileSync(target, geminiContextFile(agent), "utf8");
+    writeFileSync(target, geminiContextFile(agent, probeToolchain()), "utf8");
     out({ kind: "log", level: "info", msg: `rol baglami yazildi: ${target}` });
   } catch (err) {
     out({

@@ -87,6 +87,19 @@ gösteriyor (kapı koşumlarının açtığı odalar gibi) → `GET /rooms/:id` 
 bağlanmaz; (b) oturum başka bir e-postaya ait. Tekrarlarsa sunucu logundaki satır tam yolu
 söyleyecek.
 
+## Dogfood denemesinde çıkan iki şey (19 Eylül akşamı)
+
+1. **Kota turn değil İSTEK sayıyor** — "Django ile blog yaz" tek başına günlük kotayı
+   bitirdi. Ekrandaki hata da işe yaramıyordu: sebep (`429`) yığın izinin ortasında
+   kalıyordu. `summarizeGeminiError` sebebi başa alıyor.
+2. **Oda imajında Python yoktu.** Agent doğru davranıp durdu ("kurulum iznim yok") ama
+   his "sınırsız yetki verdim, yapamıyor" oldu. İmaja Python 3 + hazır venv (`/opt/venv`,
+   PATH'te) + `build-essential` girdi; runner ortamdaki araçların sürümünü ÖLÇÜP rol
+   bağlamına yazıyor (elle liste imajla kayar, ölçüm kayamaz).
+
+   **Dikkat:** imaj değişikliği yalnızca YENİ odalar için geçerli. Var olan oda container'ı
+   eski imajdan yaratıldı; Python'ı görmesi için yeni oda açılmalı.
+
 ## Hafta 5'te ne yapıldı
 
 **Ürünün doğum haftası:** iki kişi aynı agent'a aynı anda yazıyor, iki mesaj asla paralel

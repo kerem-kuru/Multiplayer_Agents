@@ -7,6 +7,16 @@
 
 FROM node:22-bookworm-slim
 
+# Ortamdaki alet çantası. Agent container İÇİNDE her şeyi yapabilir ama
+# sistem paketi KURAMAZ (apt root ister, agent root değil). Yani buraya
+# koymadığımız bir dil/araç, agent için YOK demektir.
+#
+# Gerçekte oldu: "Django ile blog yaz" görevinde agent doğru davranıp durdu —
+# ortamda Python yoktu. Yetki sınırı değil, kurulum sınırıydı.
+#
+# Buradaki liste `ROOM_TOOLCHAIN_PROBES` ile eşleşir (packages/protocol/
+# src/prompts.ts): runner başlangıçta bunların sürümünü ÖLÇÜP agent'a
+# söylüyor, yani liste ile gerçek arasında kayma olamaz.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git \
       bash \
@@ -14,6 +24,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ripgrep \
       curl \
       procps \
+      python3 \
+      python3-venv \
+      build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Agent root olarak koşmaz. Container sınırı bir güvenlik katmanı,
@@ -39,6 +52,19 @@ RUN npm install --omit=dev && npm cache clean --force
 COPY packages/runner-gemini/dist/runner.js ./dist/runner.js
 
 RUN chown -R agent:agent /opt/runner
+
+# Python: HAZIR BİR VENV, PATH'in başında.
+#
+# Debian'da sistem python'una `pip install` yasak (PEP 668,
+# "externally-managed-environment"). Bunu her turn'de agent'a çözdürmek
+# tekrar eden bir engel olurdu; venv önceden kuruluyor ve agent'a ait, yani
+# `pip install django` doğrudan çalışıyor.
+RUN python3 -m venv /opt/venv \
+    && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
+    && chown -R agent:agent /opt/venv
+ENV PATH=/opt/venv/bin:$PATH \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /room
 RUN mkdir -p /room/worktrees /room/contracts /room/journal \

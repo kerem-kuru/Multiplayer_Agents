@@ -200,6 +200,35 @@ Kapılar geçtikten sonra arayüz elle denendi ve dört şey çıktı:
    `403 GET /rooms/... — sebep` olarak loglanıyor.
 4. **Gemini rol bağlamı** (`GEMINI.md`) — yukarıdaki Adım 7 satırı.
 
+## Dogfood'un bulduğu iki şey (kod dışında)
+
+Kapılar yeşilken yapılan ilk gerçek denemede iki şey çıktı ve ikisi de üründe düzeltildi:
+
+**1. Kota turn değil İSTEK sayıyor.** "Django ile blog sitesi yaz" görevi tek başına kalan
+günlük kotayı bitirdi: tool çağıran bir agentic turn modele birkaç kez gidiyor. Ekranda
+görünen hata ise işe yaramıyordu —
+
+```
+● başarısız · sdk_error · gemini: error — sync file:///opt/runner/gemini/.../gemini-LUNNHKPJ.js:11868:26
+```
+
+Sebep (`code: 429` + kota metni) yığın izinin ortasındaydı, UI metnin başını gösteriyor.
+`summarizeGeminiError` artık sebebi başa alıyor, yığın izi payload'da kalıyor. Yani Hafta 4
+borcunu kapatırken sebep log'a taşınmıştı ama **okunur** hâle getirilmemişti.
+
+**2. "Sınırsız yetki" oda imajıyla sınırlı.** Agent Django görevinde doğru davranıp durdu:
+*"Python yüklü değil, sistem düzeyinde kurulum iznim yok."* Doğru teşhis — oda imajı Node
+imajıydı. Ama kullanıcı tarafındaki his "sınırsız yetki verdim, yapamıyor" oldu.
+
+İki taraflı düzeltildi: imaja Python 3 + hazır venv (`/opt/venv`, PATH'in başında, yani
+`pip install django` doğrudan çalışıyor) ve `build-essential` girdi; runner da her
+başlangıçta ortamdaki araçların sürümünü **ölçüp** rol bağlamına yazıyor. Elle yazılmış bir
+liste imajla kayardı — `node --version` kayamaz. Eksik araç "ortamda YOK" diye yazılıyor ki
+agent uydurma bir yol aramak yerine neyin eksik olduğunu söylesin.
+
+Aynı metin iki koşum ortamına da gidiyor: Claude'da `systemPrompt.append`, Gemini'de
+`GEMINI.md`. Tek kaynak `packages/protocol/src/prompts.ts`.
+
 ## Kalan iş
 
 - **Streaming input'a geçilmedi.** Kesme `abortController` ile yapılıyor (`mode: "abort"`).

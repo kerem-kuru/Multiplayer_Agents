@@ -160,6 +160,54 @@ describe("sağlayıcı bağımsızlığı", () => {
     expect(appendMultiplayerNote("   ")).toBe(MULTIPLAYER_PROMPT_NOTE);
   });
 
+  /**
+   * Ortam notu ÖLÇÜLMÜŞ veriden kuruluyor: eksik olan araç "YOK" diye yazılıyor,
+   * uydurulmuyor. Agent'ın Python'suz bir odada Django'ya girişip yarıda
+   * durması bu yüzden bir daha olmamalı.
+   */
+  it("alet çantası notu kurulu ve eksik araçları ayırıyor", async () => {
+    const { toolchainNote, ROOM_TOOLCHAIN_PROBES } = await import("../src/prompts.js");
+    const note = toolchainNote([
+      { label: "node", version: "v22.14.0" },
+      { label: "python", version: "Python 3.11.2" },
+      { label: "go", version: null },
+    ]);
+    // Sürüm satırı sadeleşiyor: "pip 26.2.1 from /opt/venv/..." gibi uzun
+    // çıktılar agent'ın okuyacağı metni gürültüye çeviriyordu.
+    expect(note).toContain("node 22.14.0");
+    expect(note).toContain("python 3.11.2");
+    expect(note).not.toContain("Python 3.11.2 from");
+    expect(note).toContain("Ortamda YOK: go");
+    // Sistem paketi kuramama bir gerçek: agent bunu bilmeli.
+    expect(note).toContain("apt");
+    expect(ROOM_TOOLCHAIN_PROBES.length).toBeGreaterThanOrEqual(4);
+    expect(ROOM_TOOLCHAIN_PROBES.some((probe) => probe.label === "python")).toBe(true);
+  });
+
+  it("hiçbir şey ölçülemediyse not uydurmuyor", async () => {
+    const { geminiContextFile } = await import("../src/prompts.js");
+    const withoutProbe = geminiContextFile({ name: "backend", systemPrompt: "x" });
+    expect(withoutProbe).not.toContain("Ortamda ne var");
+
+    const withProbe = geminiContextFile({ name: "backend", systemPrompt: "x" }, [
+      { label: "node", version: "v22.14.0" },
+    ]);
+    expect(withProbe).toContain("Ortamda ne var");
+    expect(withProbe).toContain("node 22.14.0");
+  });
+
+  it("Claude yolundaki ek metin Gemini dosyasıyla AYNI parçaları taşıyor", async () => {
+    const { claudeSystemAppend, MULTIPLAYER_PROMPT_NOTE, toolchainNote } = await import(
+      "../src/prompts.js"
+    );
+    const probes = [
+      { label: "pip", version: "pip 26.2.1 from /opt/venv/lib/python3.11/site-packages/pip" },
+    ];
+    const text = claudeSystemAppend("Rol metni.", probes);
+    expect(text).toContain("Rol metni.");
+    expect(text).toContain(MULTIPLAYER_PROMPT_NOTE);
+    expect(text).toContain(toolchainNote(probes));
+  });
   it("rol YAML'ı koşum ortamını taşır, varsayılanı claude", async () => {
     const { AgentConfig } = await import("../src/room-config.js");
     const a = AgentConfig.parse({

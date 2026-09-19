@@ -241,6 +241,30 @@ docs/             Haftalık kapılar
 └── journal/          oda defteri
 ```
 
+### Sınırsız yetki neyle sınırlı: oda imajında ne varsa
+
+"Sınırlanmış dünyada sınırsız yetki" cümlesinin ölçülmüş sınırı şu: agent container içinde
+her şeyi yapabilir (dosya yaz, komut çalıştır, paket kur) ama **sistem paketi kuramaz** —
+root değil, `apt` çalışmaz. Yani `rooms/Dockerfile`'a koymadığımız bir dil, agent için yok.
+
+Gerçekte oldu: agent'a "Django ile blog sitesi yaz" dendi, agent doğru davranıp durdu ve
+*"Python yüklü değil, sistem düzeyinde kurulum iznim yok"* dedi. Ekrandaki his "sınırsız
+yetki verdim, hâlâ yapamıyor" oldu; oysa sınır yetkide değil kurulumdaydı.
+
+İki taraflı düzeltildi:
+
+1. **İmajda gerçekten var:** Node 22, Python 3 (+ hazır venv `/opt/venv`, PATH'in başında —
+   `pip install django` doğrudan çalışıyor; Debian PEP 668 engeli aşılmış oluyor),
+   `build-essential`, git, ripgrep, curl.
+2. **Agent denemeden biliyor:** runner her başlangıçta bu araçların sürümünü **ölçüp**
+   rol bağlamına yazıyor (`node --version` gibi). Elle yazılmış bir liste imajla kayardı;
+   ölçüm kayamaz. Eksik olan araç "ortamda YOK" diye yazılıyor, böylece agent olmayan bir
+   şeye uydurma yol aramak yerine neyin eksik olduğunu söylüyor.
+
+Not: bu imaj değişikliği **yeni odalar** için geçerli. Var olan bir oda container'ı eski
+imajdan yaratıldı; Python'ı görmesi için oda yeniden açılmalı (`npm run room:build` +
+yeni oda).
+
 Frontend agent, backend'in yazmakta olduğu koda **yazamaz**. Bu bir kısıt değil, mimarinin amacı: koordinasyon `contracts/` ve defter üzerinden yapılmak *zorunda* kalır. `mountPlan()` bu planı rol YAML'ından üretir ve test ediliyor — **uygulaması Hafta 7'de** (worktree yönetimi ve izinler). Bu hafta klasörler kuruluyor, izin zorlaması henüz yok.
 
 ## Kontrol düzlemi nasıl kuruluyor

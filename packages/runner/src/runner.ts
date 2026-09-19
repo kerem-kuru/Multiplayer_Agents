@@ -1,10 +1,12 @@
+import { spawnSync } from "node:child_process";
 import readline from "node:readline";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { NewRoomEvent } from "@agent-rooms/protocol";
 import {
   AgentConfig,
   PROTOCOL_VERSION,
-  appendMultiplayerNote,
+  ROOM_TOOLCHAIN_PROBES,
+  claudeSystemAppend,
   RunnerCommand,
   RunnerOutput,
   resolveSdkTools,
@@ -45,6 +47,29 @@ const sessionId = required("SESSION_ID");
 const agent = AgentConfig.parse(JSON.parse(required("ROOM_AGENT_CONFIG")));
 const tools = resolveSdkTools(agent);
 const allowed = new Set(tools.allow);
+
+/**
+ * Ortamda ne olduğunu ÖLÇ (ikizi runner-gemini'de).
+ *
+ * Elle yazılmış bir liste oda imajıyla kayar; `node --version` kayamaz. Agent
+ * "Python var mı" sorusunu deneyip öğrenmek zorunda kalmasın: ortamda olmayan
+ * bir şeyi istemek, agent'ın yarım iş yapıp durmasına yol açıyor (gerçekte
+ * oldu: Django görevinde Python yoktu).
+ */
+const probeToolchain = (): Array<{ label: string; version: string | null }> =>
+  ROOM_TOOLCHAIN_PROBES.map((probe) => {
+    try {
+      const res = spawnSync(probe.cmd, probe.args, { encoding: "utf8", timeout: 5_000 });
+      const out =
+        `${res.stdout ?? ""}${res.stderr ?? ""}`.trim().split(/\r?\n/)[0] ?? "";
+      return { label: probe.label, version: res.status === 0 && out.length > 0 ? out : null };
+    } catch {
+      return { label: probe.label, version: null };
+    }
+  });
+
+/** Bir kez ölçülür: agent'ın ömrü boyunca ortam değişmiyor. */
+const toolchain = probeToolchain();
 
 let sdkSessionId: string | null = process.env.RESUME_SESSION_ID || null;
 let busy = false;
@@ -88,7 +113,7 @@ async function runTurn(messageId: string, text: string, ac: AbortController): Pr
         systemPrompt: {
           type: "preset",
           preset: "claude_code",
-          append: appendMultiplayerNote(agent.systemPrompt),
+          append: claudeSystemAppend(agent.systemPrompt, toolchain),
         },
         // Host/container ayar dosyalarını yükleme — yetki sadece YAML'dan gelir.
         settingSources: [],
