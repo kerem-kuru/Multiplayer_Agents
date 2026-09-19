@@ -84,6 +84,37 @@ const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null;
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
+/**
+ * Yığın dökümünden EN ANLAMLI satırı çıkar.
+ *
+ * Gemini CLI hata verdiğinde stderr'e bundle içindeki dosya yollarıyla dolu
+ * bir yığın izi döküyor; asıl sebep (`code: 429`, `message: '... quota ...'`)
+ * o dökümün ORTASINDA kalıyor. Ekranda hata metninin ilk satırı görünüyor,
+ * yani kullanıcı "sync file:///opt/runner/gemini/.../bundle/gemini-XXX.js"
+ * okuyup hiçbir şey anlamıyordu — gerçekte oldu, kota dolduğunda.
+ *
+ * Bu yüzden sebep başa alınıyor: yığın izi payload'da kalır (hata ayıklama
+ * için gerekli), ama ilk satır insanın okuyacağı satırdır.
+ */
+export function summarizeGeminiError(text: string): string {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  // Sebep satırı: HTTP kodu, kota/oran sınırı veya bir `message:` alanı.
+  const cause = lines.find((l) =>
+    /(^|[^a-z])(code|status)\s*[:=]\s*\d{3}|quota|RESOURCE_EXHAUSTED|rate.?limit|message\s*:/i.test(l),
+  );
+  const pick = cause ?? lines[0] ?? "";
+
+  return pick
+    // Satır başındaki süsleri at: `message: '...'` → `...`
+    .replace(/^(cause|error|message|status|code)\s*[:=]\s*/i, "")
+    .replace(/^['"`]|['"`],?$/g, "")
+    .slice(0, 300);
+}
+
 export function mapStreamLine(line: unknown, ctx: MapContext): MapResult {
   if (!isRec(line)) return { events: [] };
 
@@ -208,10 +239,14 @@ export function mapStreamLine(line: unknown, ctx: MapContext): MapResult {
        * event log'a girmezse UI'da da olamaz — tek gerçek kaynak log.
        */
       if (!ok) {
-        const detail = [
-          str(line.error) || str(line.message) || str(line.detail),
-          (ctx.errorTail ?? "").trim(),
-        ]
+        const reported = str(line.error) || str(line.message) || str(line.detail);
+        const tail = (ctx.errorTail ?? "").trim();
+        /**
+         * SEBEP BAŞA: ekranda hata metninin başı görünüyor. Yığın izi arkada
+         * durur — atılmaz, çünkü hata ayıklamak için gerekli.
+         */
+        const summary = summarizeGeminiError(reported || tail);
+        const detail = [summary, tail && tail !== summary ? tail : ""]
           .filter((s) => s.length > 0)
           .join(" · ");
         events.push({

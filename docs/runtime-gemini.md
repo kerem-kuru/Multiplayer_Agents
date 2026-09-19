@@ -162,3 +162,35 @@ rolünü bilmez).
 
 İki yol birbirinin **yedeği**: Claude tarafında sistem prompt'u, Gemini tarafında bağlam
 dosyası. Anahtar beklemeden rol sistemi bu yolla doğrulanabiliyor.
+
+## Kota: turn değil İSTEK sayılıyor (19 Eylül'de ölçüldü)
+
+Ücretsiz katman sınırı `generate_content_free_tier_requests` — yani **model isteği**, turn
+değil. Tool çağrısı yapan tek bir agentic turn modele birkaç kez gidiyor: "Django ile blog
+sitesi yaz" isteği tek başına kalan kotayı bitirdi.
+
+Kota dolduğunda CLI şunu döküyor (event log'daki tam metin):
+
+```
+code: 429 — Quota exceeded for metric:
+generativelanguage.googleapis.com/generate_content_free_tier_requests,
+limit: 20, model: gemini-3.5-flash
+```
+
+Yani "günde 20 mesaj" DEĞİL, "günde 20 model isteği". Çok adımlı bir görev 5-10 istek
+harcayabilir. Model başına ayrı kota: biri dolarsa
+`AGENT_MODEL=gemini-3.1-flash-lite` ile devam edilebiliyor (`model: auto` bugün
+`gemini-3.5-flash`e çözülüyor).
+
+### Sebep başa alındı
+
+Bu hata ekranda şöyle görünüyordu:
+
+```
+● başarısız · sdk_error · gemini: error — sync file:///opt/runner/gemini/.../gemini-LUNNHKPJ.js:11868:26
+```
+
+Sebep (`code: 429` + kota metni) yığın izinin **ortasında** kalıyor, UI ise metnin başını
+gösteriyor — yani kullanıcı bundle dosya yolunu okuyup hiçbir şey anlamıyordu.
+`summarizeGeminiError` artık dökümden sebep satırını seçip başa alıyor; yığın izi
+payload'da kalıyor (hata ayıklamak için gerekli). İki birim test bunu ölçüyor.

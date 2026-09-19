@@ -7,6 +7,9 @@ import { mapStreamLine, resolveGeminiTools, type MapContext } from "../src/map-s
  * API çağrısı yok — anahtarsız koşar.
  */
 
+/** Satır sonu: test dosyasında kaçış dizisi yerine sabit. */
+const NEWLINE = String.fromCharCode(10);
+
 const base = {
   roomId: "11111111-1111-4111-8111-111111111111",
   sessionId: "22222222-2222-4222-8222-222222222222",
@@ -151,6 +154,40 @@ describe("Gemini stream-json → event", () => {
     if (e.type !== "turn.failed") throw new Error("turn.failed bekleniyordu");
     expect(e.payload.error).toContain("cancelled");
     assertWritable(r.events);
+  });
+
+  /**
+   * Gerçekte oldu: kota dolunca ekranda
+   * "sync file:///opt/runner/gemini/.../bundle/gemini-XXX.js:11868:26" yazdı.
+   * Sebep (429 + kota) yığın izinin ORTASINDAydı ve UI ilk satırı gösteriyor.
+   */
+  it("kota hatasında SEBEP başa geliyor, yığın izi arkada kalıyor", async () => {
+    const { summarizeGeminiError } = await import("../src/map-stream.js");
+    const tail = [
+      "sync file:///opt/runner/gemini/node_modules/@google/gemini-cli/bundle/gemini-LUNNHKPJ.js:11868:26",
+      "    at async main (file:///opt/runner/gemini/.../gemini-LUNNHKPJ.js:17295:5) {",
+      "  cause: {",
+      "    code: 429,",
+      "    message: 'You exceeded your current quota, please check your plan and billing details.'",
+      "  }",
+    ].join(NEWLINE);
+
+    expect(summarizeGeminiError(tail)).toContain("429");
+
+    const r = mapStreamLine({ type: "result", status: "error" }, { ...ctx(), errorTail: tail });
+    const e = r.events[0]!;
+    if (e.type !== "turn.failed") throw new Error("turn.failed bekleniyordu");
+    // Ekranda ilk 160 karakter görünüyor: sebep O ARALIKTA olmalı.
+    expect(e.payload.error.slice(0, 160)).toContain("429");
+    // Yığın izi atılmadı: hata ayıklamak için payload'da duruyor.
+    expect(e.payload.error).toContain("gemini-LUNNHKPJ.js");
+    assertWritable(r.events);
+  });
+
+  it("sebep satırı yoksa ilk satıra düşüyor", async () => {
+    const { summarizeGeminiError } = await import("../src/map-stream.js");
+    expect(summarizeGeminiError(`bir sey patladi${NEWLINE}ikinci satir`)).toBe("bir sey patladi");
+    expect(summarizeGeminiError("")).toBe("");
   });
 
   it("bilinmeyen satır tipi sessizce atlanır", () => {

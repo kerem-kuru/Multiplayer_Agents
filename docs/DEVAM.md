@@ -145,9 +145,12 @@ AUTH_DEV_MODE=true SPAWN_CONTAINER=0 AGENT_FAKE_RUNTIME=1 npm run api
 
 Sunucu açılışta `koşum ortamı SAHTE` yazar. `NODE_ENV=production` iken kurulmaz.
 
-**Gemini kotası** ücretsiz katmanda model başına günde 20 istek; Pasifik gece yarısı
-(≈ TSİ 10:00) sıfırlanıyor. 19 Eylül'de ~13 istek harcandı (agent kapıları + tarayıcı testi
-+ rol bağlamı ölçümü). `gate:w5:agent` koşum başına ÜÇ istek harcar.
+**Gemini kotası** ücretsiz katmanda model başına günde **20 MODEL İSTEĞİ** — turn değil.
+Tool çağrısı yapan tek bir agentic turn modele birkaç kez gidiyor: 19 Eylül akşamı "Django
+ile blog sitesi yaz" isteği tek başına kalan kotayı bitirdi ve dogfood yarıda kaldı.
+Pasifik gece yarısı (≈ TSİ 10:00) sıfırlanıyor. Model başına ayrı kota:
+`AGENT_MODEL=gemini-3.1-flash-lite` ile devam edilebiliyor (`model: auto` bugün
+`gemini-3.5-flash`e çözülüyor). `gate:w5:agent` koşum başına en az üç istek harcar.
 
 ## Tuzaklar
 
