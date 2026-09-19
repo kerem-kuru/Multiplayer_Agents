@@ -3,6 +3,7 @@ import { serve } from "@hono/node-server";
 import {
   AgentManager,
   AgentQueue,
+  FakeAgentRuntime,
   closePool,
   configureSnapshots,
   createRedactingLogger,
@@ -43,7 +44,17 @@ const provider = hasProviderBackend(process.env);
 // Claude anahtarı yokken Gemini agent'ları çalışmaya devam eder.
 const anyRuntime = Boolean(cfg.agent.apiKey) || provider || Boolean(cfg.agent.geminiApiKey);
 
-const manager = anyRuntime
+/**
+ * SAHTE koşum ortamı yalnızca kapı testleri için ve açıkça isteniyorsa
+ * (`AGENT_FAKE_RUNTIME=1`, üretimde asla). Ekranda da söylenir: sessizce
+ * sahte cevap veren bir sunucu, hiç cevap vermeyenden kötüdür.
+ */
+const manager = cfg.agent.fakeRuntime
+  ? new FakeAgentRuntime({
+      turnMs: cfg.agent.fakeTurnMs,
+      log: (level, msg) => console[level === "info" ? "log" : level](msg),
+    })
+  : anyRuntime
   ? new AgentManager({
       apiKey: cfg.agent.apiKey,
       geminiApiKey: cfg.agent.geminiApiKey,
@@ -106,7 +117,12 @@ const droppedDrivers = await sweepAbsentDrivers().catch(() => 0);
 if (droppedDrivers > 0) console.log(`sürücü mutabakatı: ${droppedDrivers} sürücülük bırakıldı`);
 
 // Sürücünün presence'ı 60 sn kayıpsa sürücülük düşer (bkz. DriverPresenceWatcher).
-getDriverWatcher({ log: (level, msg) => console[level === "info" ? "log" : level](msg) });
+getDriverWatcher({
+  // Varsayilan 60 sn. `DRIVER_GRACE_MS` yalnizca deneme/kapi icin kisaltir:
+  // sekme yenilemek suruculugu elinden almasin diye bir gecikme SART.
+  graceMs: process.env.DRIVER_GRACE_MS ? Number(process.env.DRIVER_GRACE_MS) : undefined,
+  log: (level, msg) => console[level === "info" ? "log" : level](msg),
+});
 
 const app = createApp(cfg, manager, queue);
 
@@ -121,10 +137,12 @@ const server = serve({ fetch: app.fetch, port: cfg.port }, (info) => {
         .map((k) => k.replace("CLAUDE_CODE_USE_", "").toLowerCase())
         .join(",") || "özel base URL"
     : "anthropic";
-  const runtimes = [
-    cfg.agent.apiKey || provider ? `claude(${backend})` : null,
-    cfg.agent.geminiApiKey ? "gemini" : null,
-  ].filter(Boolean);
+  const runtimes = cfg.agent.fakeRuntime
+    ? ["SAHTE (AGENT_FAKE_RUNTIME=1 — hiçbir modele istek gitmiyor)"]
+    : [
+        cfg.agent.apiKey || provider ? `claude(${backend})` : null,
+        cfg.agent.geminiApiKey ? "gemini" : null,
+      ].filter(Boolean);
   console.log(
     `  koşum ortamı   ${runtimes.length > 0 ? runtimes.join(" + ") : "YOK — hiçbir anahtar tanımlı değil"}`,
   );

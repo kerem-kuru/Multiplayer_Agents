@@ -7,6 +7,7 @@ import { SNAPSHOT_VERSION } from "@agent-rooms/view";
 import {
   AgentManager,
   AgentQueue,
+  FakeAgentRuntime,
   AgentNotFoundError,
   AgentStartError,
   appendEvent,
@@ -396,6 +397,25 @@ export function createApp(
    * Üretimde uç hiç tanımlanmaz — 404 döner.
    */
   if (process.env.NODE_ENV !== "production") {
+    /**
+     * SADECE SAHTE koşum ortamında: agent'ı `failed` durumuna düşür.
+     *
+     * Gerçekte buraya gelmek için runner'ın 3 kez çökmesi ve yeniden
+     * başlatma hakkının bitmesi gerekiyor. Kapı "agent failed olunca kuyruk
+     * temizleniyor" kontrolünü bunun üzerinden koşuyor; gerçek runner'la
+     * aynı yol `week5-agent-gate.sh` içinde üç kez öldürerek test edilir.
+     */
+    app.post("/rooms/:id/agents/:aid/fail", async (c) => {
+      await requireRoom(c, c.req.param("id"), "owner");
+      const mgr = requireManager();
+      if (!(mgr instanceof FakeAgentRuntime)) {
+        throw new HttpError(409, "bu uç yalnızca sahte koşum ortamında çalışır");
+      }
+      const { room } = await mustFindRoom(c.req.param("id"));
+      await mgr.forceFail(room.id, c.req.param("aid"), "kapı testi: agent düşürüldü");
+      return c.json({ agent: c.req.param("aid"), status: "failed" }, 202);
+    });
+
     app.post("/sessions/:sid/events", async (c) => {
       const sid = c.req.param("sid");
       if (!Uuid.safeParse(sid).success) throw new HttpError(400, "oturum kimliği UUID değil");

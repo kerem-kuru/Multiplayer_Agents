@@ -36,7 +36,9 @@
     "db:migrate": "node scripts/migrate.mjs",
     "db:reset": "docker compose down -v && docker compose up -d postgres redis",
     "runner:build": "node scripts/build-runner.mjs",
-    "rules:import": "node scripts/import-gitleaks.mjs"
+    "rules:import": "node scripts/import-gitleaks.mjs",
+    "gate:w5": "bash scripts/week5-gate.sh",
+    "gate:w5:agent": "bash scripts/week5-agent-gate.sh"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

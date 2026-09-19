@@ -6,9 +6,12 @@ Agent'lar birbirine mesaj atmaz. Ortak bir **oda defterine** yazar ve oradan oku
 
 > **Tez:** Gerçek birim agent değil, her agent'ın okuyup yazdığı tek paylaşılan bağlam deposudur.
 
-Durum: **Hafta 4 bitti** — odaya ikinci insan girebiliyor. Paylaşım linkine tıklayan kişi
-saniyeler içinde odayı canlı izliyor, hiçbir şey yazamıyor; agent'a bilerek `.env` okutulduğunda
-secret ne ekranda ne veritabanında görünüyor.
+Durum: **Hafta 5 bitti** — ürünün gerçek doğum haftası. İki kişi **aynı agent'a aynı anda**
+yazıyor, mesajlar sıraya giriyor ve iki mesaj asla paralel inference'a girmiyor; agent kime
+cevap verdiğini biliyor; sürücülük iki tıkta devrediliyor ve sürücü koşan turn'ü kesebiliyor.
+
+Hafta 4'ten devam: paylaşım linkine tıklayan kişi saniyeler içinde odayı canlı izliyor ve
+agent'a bilerek `.env` okutulduğunda secret ne ekranda ne veritabanında görünüyor.
 
 Hafta 3'ten devam: akış kapısı 11/11 (`gate:w3`) ve iki tarayıcı testi (`gate:w3:agent`) geçiyor.
 
@@ -52,7 +55,14 @@ npm run db:up        # postgres + redis
 npm run db:migrate   # şema
 npm run room:build   # oda imajı
 npm run gate         # Hafta 1 kapısı — 10 kontrol
+npm run gate:w5      # Hafta 5 kapısı — kuyruk, sürücü, kesme (agent gerektirmez)
 ```
+
+`gate:w5` sunucuyu `AGENT_FAKE_RUNTIME=1` ile kaldırır: hiçbir modele istek gitmez, turn'ü
+N ms sonra bitiren sahte bir koşum ortamı devreye girer. Ölçülen şey model çıktısı değil
+**sıralama**; sahte runner'la yarış penceresi gerçeğinden geniş olur. Gerçek agent'ın
+kanıtlaması gereken iki şey ayrı kapıda: `npm run gate:w5:agent` (modelin `[İsim]: `
+etiketini okuması ve gerçekten koşan bir işin ortasında kesilme).
 
 ## Giriş, paylaşım ve izleyici
 
@@ -79,9 +89,19 @@ curl -b "rooms_session=$TOKEN" http://localhost:8787/rooms
 
 **Paylaşım:** oda sahibi "Paylaş" → link üretir. Link **çok kullanımlıktır** (ekibe tek link
 atılır), sürelidir ve iptal edilebilir; magic link ise tek kullanımlıktır. Linke tıklayan kişi
-odaya `viewer` olarak katılır: okur, **yazamaz**. Yazma yetkisi, kuyruk ve sürücü devri
-Hafta 5'in işi — kuyruk olmadan iki kişinin aynı agent'a yazması iki mesajı paralel
-inference'a sokardı.
+odaya davetin rolüyle katılır.
+
+**Roller (Hafta 5):**
+
+| Rol | Yetki |
+| --- | --- |
+| `owner` | Her şey + davet üretme/iptal, agent start/stop, rol değiştirme |
+| `member` | Kuyruğa mesaj ekleme, kendi kaydını iptal, sürücülüğü alma/devretme, sürücüyken kesme |
+| `viewer` | Sadece izleme — kuyruğu görür, yazamaz |
+
+Davetin varsayılan rolü **`member`**: kuyruk geldiği için iki kişinin aynı agent'a yazması
+artık güvenli. "Sadece izlesin" istiyorsan paylaşım kutusunda `İzleyici` seç. Oda sahibi
+sonradan da değiştirebilir: `PATCH /rooms/:id/members/:userId` (son owner'ın rolü düşmez).
 
 Ham token hiçbir tabloda durmaz: `magic_links`, `auth_sessions` ve `room_invites` yalnızca
 `sha256` taşır.
@@ -135,7 +155,45 @@ curl  http://localhost:8787/rooms/<id>/agents            # durum: stopped/idle/b
 curl 'http://localhost:8787/rooms/<id>/events?since=0'   # her adım yapılandırılmış event
 ```
 
-Agent meşgulken gelen ikinci mesaj **409** alır — kuyruk Hafta 5'te.
+Agent meşgulken gelen mesaj **reddedilmez, kuyruğa girer** (Hafta 5). Yanıt
+`202 {messageId, position}`; `position` 1 ise sıradaki ilk, koşan bir mesaj varsa o 1'dir.
+
+```bash
+curl  http://localhost:8787/rooms/<id>/agents/backend/queue      # koşan + bekleyenler
+curl -X DELETE http://localhost:8787/rooms/<id>/queue/<messageId>  # kendi kaydını iptal
+curl -X POST http://localhost:8787/rooms/<id>/agents/backend/driver/claim
+curl -X POST http://localhost:8787/rooms/<id>/agents/backend/interrupt   # YALNIZCA sürücü
+```
+
+## Kuyruk, sürücü, kesme
+
+**Agent başına aynı anda en fazla bir mesaj inference'ta.** İki mesaj paralel girerse
+agent'ın context'i bozulur ve hata sessizce oluşur. Garanti üç katmanlı ve katmanlar
+birbirinin yedeği:
+
+1. bellekte agent başına promise zinciri — zamanlayıcı aynı anda iki kez koşmaz,
+2. `FOR UPDATE SKIP LOCKED` — iki seçici aynı satırı alamaz,
+3. `agent_queue_single_running` kısmi unique index — kodda bir yarış kalsa bile **DB**
+   ikinci `running` satırı reddeder.
+
+Kuyruk **DB'de** durur: sunucu yeniden başlayınca bekleyen mesajlar kaybolmaz ve kuyruk
+herkese aynı görünür. Sıra **FIFO**; sürücünün mesajı da sıraya girer. Mesajlar
+**birleştirilmez** — her mesaj kendi turn'ünü alır, yoksa agent kime cevap verdiğini
+kaybeder.
+
+Her mesaj agent'a `[İsim]: ...` olarak girer. Önek runner'a verilirken eklenir; event
+log'daki metin **öneksiz** durur (kullanıcının yazdığı neyse o).
+
+**Sürücülük bir rol, kilit değil.** Sürücü olmayan `member` yazmaya devam eder; sürücünün
+fazladan iki yetkisi var: koşan turn'ü kesmek ve başkasının kuyruk kaydını iptal etmek.
+Devir iki tık ("Devret" → kişi seç) ve `version` ile iyimser kilitli. Odaya ilk yönergeyi
+yazan kişi, sürücü boşsa otomatik sürücü olur. Sürücünün presence'ı **60 sn** kayıpsa
+sürücülük düşer; presence geri gelirse sayaç sıfırlanır.
+
+**Kesme anında olmayabilir.** `interrupt.requested` ile `interrupt.applied` iki ayrı
+event'tir; UI aradaki süreyi *"Kesme istendi — agent şu an bir komutu bitiriyor"* diye
+gösterir. 30 saniyede kapanmayan turn için sert kesme var (`mode: hard_kill`). Kesilen,
+iptal edilen veya sunucu yeniden başlatmasıyla düşen mesaj **asla yeniden koşmaz**.
 
 Docker'sız çalışmak için `SPAWN_CONTAINER=0` — oda kaydı ve klasörler kurulur, container açılmaz.
 
@@ -249,6 +307,26 @@ döndü, sol çubuk üçünü de çizdi). Kontrolden sonra geçici YAML silindi.
 ## Yol haritası
 
 12 haftalık plan `docs/roadmap.md` içinde. Hafta 8 sonundaki kapı gerçek bir durak noktasıdır: *backend agent bir mimari karar alır, deftere yazar, frontend agent turn'üne başlarken onu okur ve sözleşmeye uygun kodu yazar — aralarında hiç mesaj geçmeden.* Bu çalışmadan 3. ve 4. agent eklemek sadece hatayı büyütür.
+
+### Hafta 5
+
+| Karar | Gerekçe |
+| --- | --- |
+| Kuyruk DB'de, bellekte değil | Bellekteki bir dizi ikinci kullanıcıya görünmez ve çökmede uçar. Sunucu yeniden başlayınca bekleyen mesajlar kaybolmamalı ve kuyruk herkese aynı görünmeli. |
+| Tek koşan garantisi ÜÇ katman | Promise zinciri ve `SKIP LOCKED` kodun dikkatine dayanır; `agent_queue_single_running` kısmi unique index'i dayanmaz. İkisi birbirinin yedeği: biri kodda gözden kaçan yarışı, diğeri son hatayı yakalar. Testte bir kez ihlal denenip reddedildiği doğrulandı. |
+| FIFO `enqueued_at` DEĞİL artan sayaç (`ord`) | 10 paralel `enqueue` ile koşan birim test sırayı bozuk buldu: iki satır aynı mikrosaniyeye düşünce sıra rastgele UUID'ye kalıyordu. Elle yazan iki kişide bu yarış neredeyse hiç görünmez — tahminle yazılsa fark edilmezdi. |
+| Mesajlar birleştirilmiyor | A ve B arka arkaya yazdığında "ikisini tek prompt'ta gönderelim" cazip. Agent kime cevap verdiğini kaybeder ve iki yönerge tek turn'de karışır. Her mesaj kendi turn'ünü alır. |
+| Doğrudan `sendMessage` yolu kaldırıldı | İki giriş kapısı olsaydı "agent başına tek koşan mesaj" garantisi ikisinin arasından sızardı. Yazmanın tek kapısı kuyruk. |
+| `[İsim]: ` öneki runner'a verilirken ekleniyor | Event log kullanıcının YAZDIĞINI saklar. Öneki log'a yazmak, kullanıcının yazmadığı bir metni ona ait göstermek olurdu. |
+| Kesme `abortController` ile, streaming input'a geçilmedi | Görev tanımı bu yolu açıkça izin veriyor. Kuyruk + kesme + kapı aynı hafta değişirken bir de runner'ın çalışma modelini değiştirmek, düşen bir kontrolün sebebini iki değişiklik arasında aramak demekti. Davranış aynı, kesme yalnızca daha sert (`mode: "abort"`); `graceful` streaming input'a geçince gelir. |
+| Kesme iki event | `interrupt.requested` ile `interrupt.applied` arasındaki süre sıfır değil. Tek event yazmak "durdu" demek olurdu; agent uzun bir bash komutunun ortasında durmuyor ve UI o aralığı göstermek zorunda. |
+| `message.cancelled.by` nullable yapıldı | Görev tanımında zorunlu bir kullanıcıydı ama aynı event'in sebepleri arasında `server_restart` ve `agent_failed` var — o iptalleri bir insan yapmıyor. Kaydın sahibini "iptal eden" diye yazmak log'u yalancı yapardı. |
+| `driver.changed` ve `agent.interrupted` kaldırıldı | Hiç yazılmamış iki event, bu haftanın beş event'iyle örtüşüyordu. Üst üste binen event tipi, ileride yanlışını yazmak için duran bir tuzaktır. |
+| Sürücülük bir rol, kilit değil | Sürücülüğü kilit yapmak, odaya ikinci kişiyi sokmanın anlamını yok ederdi. Sürücü olmayan yazar, kuyruğa girer; sadece kesemez. |
+| Sürücülük presence kaybından 60 sn sonra düşüyor | Anında düşürmek her F5'te sürücülüğü elinden alırdı. Presence geri gelirse sayaç sıfırlanıyor. |
+| Kapı gerçek agent'sız koşuyor (`AGENT_FAKE_RUNTIME=1`) | Ölçülen şey model çıktısı değil SIRALAMA. Sahte runner'la yarış penceresi gerçeğinden geniş, kapı ücretsiz ve deterministik. Üretimde kurulamaz ve sunucu açılışta "koşum ortamı SAHTE" yazar: sessizce sahte cevap veren bir sunucu, hiç cevap vermeyenden kötüdür. Modelin etiketi okuması ve gerçekten koşan bir işin kesilmesi ayrı kapıda. |
+| Örnekleme Postgres'in içinde (`\watch`) | İlk hâl her örnek için yeni bir `docker compose exec` açıyordu: örnek başına ~1,5 sn, 3 saniyelik koşumda 3 örnek. "İki `running` satır yok" iddiasını 3 örnekle kanıtlamak ölçmemekle neredeyse aynı şey. |
+| Gemini'de çok kişili oda notu YOK | Gemini CLI'da sistem prompt'u veren bir bayrak yok; rol YAML'ındaki `system_prompt` de o yolda zaten uygulanmıyor. Gemini agent'ı kimin yazdığını yalnızca `[İsim]: ` önekinden anlar. Uydurma bir çözüm (prompt'a gizlice not eklemek) event log'da görünmeyen bir davranış yaratırdı. |
 
 ## Ölçülecek tek metrik
 
@@ -402,4 +480,5 @@ Hafta 1 görev tanımından bilinçli olarak ayrılan noktalar ve gerekçeleri.
 | Kapı script'leri auth'u ATLATMIYOR, kullanıyor | `scripts/dev-session.mjs` magic link akışının tamamını koşuyor. Bir bypass eklemek, kapının "oturumsuz istek 401 alır" kontrolünü anlamsız kılardı. |
 | Hafta 4 kapısı da agent'a bağlanmadı | Redaction'ın ölçtüğü şey GEÇİT: `appendEvent`. Event'i dev ucundan yazmak aynı geçitten geçiyor — gerçek DB, gerçek SSE, gerçek redaction, ama deterministik ve ücretsiz. Gerçek agent'ın dosya okumasıyla yapılan kontrol ayrı: `gate:w4:agent`. |
 | Uzak erişim için tünel seçimi mimari karar sayıldı | Cloudflare hızlı tüneli SSE'yi tamponluyor: izleyici odayı görüyor ama canlı akış hiç ulaşmıyor. Akışı geçirmeyen bir vekilin arkasında bu arayüz çalışmaz; ölçüm README "Hafta 4 dogfood notları"nda. |
+| Hafta 4 kapısındaki davetler artık rolü AÇIKÇA söylüyor | Hafta 5'te davetin varsayılanı `member` oldu ve kapının "izleyici yazamaz" kontrolü sessizce anlamını yitirdi (bir koşumda düştü, sebebi buydu). Varsayılana güvenen test, varsayılan değişince başka bir şeyi ölçmeye başlar. |
 | Magic link hız sınırı kapı e-postalarını da vurdu | Sabit e-postayla kapıyı 5 dakikada iki kez koşturmak sınırı tetikliyordu. Sınırı gevşetmek yerine kapılar her koşumda benzersiz e-posta üretiyor: koruma gerçek kalsın. |

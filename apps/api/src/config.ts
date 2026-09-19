@@ -46,6 +46,17 @@ export interface AgentSettings {
   maxTurns: number;
   maxBudgetUsd: number;
   heartbeatTimeoutMs: number;
+  /**
+   * SAHTE koşum ortamı (`AGENT_FAKE_RUNTIME=1`) — yalnızca kapı testleri.
+   *
+   * Hiçbir modele istek göndermez; turn'ü N ms sonra bitirir. Bu haftanın
+   * kanıtlaması gereken şey model çıktısı değil SIRALAMA olduğu için kuyruk
+   * kapısı bununla koşuyor: ücretsiz, deterministik ve yarış penceresi
+   * gerçeğinden geniş. `NODE_ENV=production` iken kurulmaz.
+   */
+  fakeRuntime: boolean;
+  /** Sahte ortamda normal turn süresi. */
+  fakeTurnMs: number;
 }
 
 export function loadApiConfig(): ApiConfig {
@@ -68,6 +79,8 @@ export function loadApiConfig(): ApiConfig {
       maxTurns: Number(process.env.AGENT_MAX_TURNS ?? 30),
       maxBudgetUsd: Number(process.env.AGENT_MAX_BUDGET_USD ?? 1),
       heartbeatTimeoutMs: Number(process.env.AGENT_HEARTBEAT_TIMEOUT_MS ?? 20_000),
+      fakeRuntime: process.env.AGENT_FAKE_RUNTIME === "1" && process.env.NODE_ENV !== "production",
+      fakeTurnMs: Number(process.env.AGENT_FAKE_TURN_MS ?? 400),
     },
   };
 }

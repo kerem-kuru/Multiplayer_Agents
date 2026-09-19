@@ -275,7 +275,11 @@ fi
 
 ###############################################################################
 step "13) Davet: B katılıyor ve snapshot alabiliyor"
-INV=$(acurl -X POST "$BASE/rooms/$ROOM/invites" -H 'content-type: application/json' -d '{"expiresInHours":2}')
+# ROL AÇIKÇA `viewer`: Hafta 5'te davetin varsayılanı `member` oldu. Bu
+# kapının ölçtüğü şey "izleyici yazamaz" olduğu için rolü burada açıkça
+# söylemek gerekiyor — varsayılana güvenmek testin ne ölçtüğünü sessizce
+# değiştirdi (bir kez düştü, sebebi buydu).
+INV=$(acurl -X POST "$BASE/rooms/$ROOM/invites" -H 'content-type: application/json' -d '{"expiresInHours":2,"role":"viewer"}')
 INV_URL=$(echo "$INV" | jget url)
 INV_TOKEN=$(node -e 'console.log(new URL(process.argv[1]).searchParams.get("token"))' "$INV_URL" 2>/dev/null)
 ACC=$(bcurl -X POST "$BASE/invites/accept" -H 'content-type: application/json' -d "{\"token\":\"$INV_TOKEN\"}" | jget role)
@@ -305,13 +309,13 @@ TOK=$(node -e 'console.log(new URL(process.argv[1]).searchParams.get("token"))' 
 U1=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE/auth/callback?token=$TOK")
 U2=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$BASE/auth/callback?token=$TOK")
 
-INV2=$(acurl -X POST "$BASE/rooms/$ROOM/invites" -H 'content-type: application/json' -d '{}')
+INV2=$(acurl -X POST "$BASE/rooms/$ROOM/invites" -H 'content-type: application/json' -d '{"role":"viewer"}')
 T2=$(node -e 'console.log(new URL(process.argv[1]).searchParams.get("token"))' "$(echo "$INV2" | jget url)")
 P2=$(echo "$INV2" | jget prefix)
 psql_q "UPDATE room_invites SET expires_at = now() - interval '1 hour' WHERE token_prefix='$P2'" >/dev/null
 E2=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -b "rooms_session=$B" -X POST "$BASE/invites/accept" -H 'content-type: application/json' -d "{\"token\":\"$T2\"}")
 
-INV3=$(acurl -X POST "$BASE/rooms/$ROOM/invites" -H 'content-type: application/json' -d '{}')
+INV3=$(acurl -X POST "$BASE/rooms/$ROOM/invites" -H 'content-type: application/json' -d '{"role":"viewer"}')
 T3=$(node -e 'console.log(new URL(process.argv[1]).searchParams.get("token"))' "$(echo "$INV3" | jget url)")
 P3=$(echo "$INV3" | jget prefix)
 acurl -o /dev/null -X DELETE "$BASE/rooms/$ROOM/invites/$P3"
