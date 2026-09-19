@@ -20,9 +20,19 @@ function Outcome({ turn }: { turn: TurnView }) {
     return <span style={{ color: "var(--run)" }}>● çalışıyor</span>;
   }
   if (o.kind === "failed") {
+    /**
+     * SEBEP EKRANDA YAZAR.
+     *
+     * Hafta 4 dogfood'unda `● bitti · error · 0 ms` görüldü ve nedeni
+     * (Gemini kotası 429) yalnızca sunucu logunda kaldı: ekrana bakan kişi
+     * ürünün bozuk olduğunu sandı. Hata metni artık event log'da taşınıyor,
+     * burada da gösteriliyor — uzunsa kırpılır, tamamı title'da durur.
+     * (HTML boşlukları zaten tek boşluğa indirir; ayrı temizlik gerekmez.)
+     */
     return (
       <span style={{ color: "var(--fail)" }} title={o.error}>
         ● başarısız · {o.reason}
+        {o.error ? ` · ${o.error.slice(0, 160)}` : ""}
       </span>
     );
   }

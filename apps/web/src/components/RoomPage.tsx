@@ -41,7 +41,7 @@ export function RoomPage({
   onBack: () => void;
   meId: string | null;
 }) {
-  const { view, connection, lastSeq, people, reconnect } = useEventStream(roomId);
+  const { view, connection, lastSeq, people, connectionId, reconnect } = useEventStream(roomId);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<"feed" | "terminal">("feed");
@@ -67,11 +67,18 @@ export function RoomPage({
     };
   }, [roomId]);
 
-  // Bakılan agent değişince odadakilere bildir. Presence event log'a yazılmaz.
+  /**
+   * Bakılan agent değişince odadakilere bildir. Presence event log'a yazılmaz.
+   *
+   * `connectionId` BU SEKMENİN kimliği (ilk SSE frame'inden gelir) ve
+   * gönderilmesi şart: yoksa sunucu kullanıcının tüm sekmelerini aynı agent'a
+   * bakıyor sanıyordu. Kimlik henüz gelmediyse bekle — bakış bilgisi bir
+   * sekme sonra doğru gitmesi, hemen yanlış gitmesinden iyi.
+   */
   useEffect(() => {
-    if (!selected) return;
-    void setPresence(roomId, selected).catch(() => undefined);
-  }, [roomId, selected]);
+    if (!selected || !connectionId) return;
+    void setPresence(roomId, selected, connectionId).catch(() => undefined);
+  }, [roomId, selected, connectionId]);
 
   // Agent listesi config'ten gelir; sayı hiçbir yerde sabit değil.
   useEffect(() => {

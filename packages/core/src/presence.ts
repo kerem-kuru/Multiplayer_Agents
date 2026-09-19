@@ -24,7 +24,14 @@ interface Connection {
   name: string;
   viewing: string | null;
   since: number;
-  /** Son güncelleme: aynı kullanıcının birden çok sekmesinde hangisi geçerli. */
+  /**
+   * Son güncelleme SIRASI (duvar saati değil): aynı kullanıcının birden çok
+   * sekmesinde hangisi geçerli.
+   *
+   * `Date.now()` kullanılıyordu ve aynı milisaniyede iki sekme bakış
+   * değiştirdiğinde eşitlik çıkıyor, eski sekme kazanıyordu. Sıra sorusunun
+   * cevabı artan bir sayaç; milisaniye çözünürlüğü değil.
+   */
   touched: number;
 }
 
@@ -34,6 +41,9 @@ export const PRESENCE_DEBOUNCE_MS = 250;
 type Listener = (people: PresencePerson[]) => void;
 
 const rooms = new Map<string, Map<string, Connection>>();
+/** Monoton sıra sayacı — `touched` alanının kaynağı. */
+let tick = 0;
+const touch = (): number => ++tick;
 const listeners = new Map<string, Set<Listener>>();
 const timers = new Map<string, NodeJS.Timeout>();
 
@@ -95,13 +105,12 @@ export function joinPresence(
   connectionId: string,
   user: { userId: string; name: string },
 ): void {
-  const now = Date.now();
   roomMap(roomId).set(connectionId, {
     userId: user.userId,
     name: user.name,
     viewing: null,
-    since: now,
-    touched: now,
+    since: Date.now(),
+    touched: touch(),
   });
   notify(roomId);
 }
@@ -114,20 +123,56 @@ export function leavePresence(roomId: string, connectionId: string): void {
 }
 
 /**
- * Kullanıcı agent sekmesi değiştirdi. Kimlik bağlantı değil KULLANICI
- * üzerinden: POST isteği hangi SSE bağlantısından geldiğini bilmiyor.
+ * Kullanıcı agent sekmesi değiştirdi.
+ *
+ * `connectionId` verilirse YALNIZCA o bağlantı güncellenir. Verilmezse
+ * kullanıcının tüm bağlantıları güncellenir — eski istemciler için geriye
+ * uyumlu yol, ama doğru olan bağlantı bazlı olanı.
+ *
+ * Neden: bağlantı kimliği yokken üç sekme açan kişi hepsinde aynı agent'a
+ * bakıyor görünüyordu; odadaki diğer kişiye "Ayşe backend'e bakıyor" derken
+ * Ayşe aslında frontend sekmesindeydi. Bağlantı kimliği ilk SSE frame'inde
+ * (`hello`) istemciye gidiyor, istemci onu `POST /presence` gövdesinde geri
+ * yolluyor.
+ *
+ * Başka kullanıcının bağlantı kimliği işe yaramaz: sahiplik kontrol edilir.
  */
-export function setViewing(roomId: string, userId: string, viewing: string | null): void {
+export function setViewing(
+  roomId: string,
+  userId: string,
+  viewing: string | null,
+  connectionId?: string | null,
+): void {
   const m = rooms.get(roomId);
   if (!m) return;
   let changed = false;
+
+  if (connectionId) {
+    const conn = m.get(connectionId);
+    // Sahiplik kontrolü: kimse başkasının sekmesinin bakışını değiştiremez.
+    if (!conn || conn.userId !== userId) return;
+    conn.viewing = viewing;
+    conn.touched = touch();
+    notify(roomId);
+    return;
+  }
+
   for (const conn of m.values()) {
     if (conn.userId !== userId) continue;
     conn.viewing = viewing;
-    conn.touched = Date.now();
+    conn.touched = touch();
     changed = true;
   }
   if (changed) notify(roomId);
+}
+
+/** Bağlantı hâlâ açık mı ve bu kullanıcıya mı ait. */
+export function connectionBelongsTo(
+  roomId: string,
+  connectionId: string,
+  userId: string,
+): boolean {
+  return rooms.get(roomId)?.get(connectionId)?.userId === userId;
 }
 
 export function subscribePresence(roomId: string, listener: Listener): () => void {

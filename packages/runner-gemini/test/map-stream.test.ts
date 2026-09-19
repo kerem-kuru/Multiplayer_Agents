@@ -126,6 +126,33 @@ describe("Gemini stream-json → event", () => {
     assertWritable(r.events);
   });
 
+  /**
+   * Hafta 4 borcu: başarısız turn `turn.completed · subtype:"error"` olarak
+   * yazılıyordu ve SEBEP hiçbir yerde durmuyordu. Ekranda `bitti · error`
+   * görünüyor, nedeni (kota 429) yalnızca sunucu logunda kalıyordu.
+   */
+  it("başarısız result → turn.failed ve sebep taşınır", () => {
+    const r = mapStreamLine(
+      { type: "result", status: "error", stats: { duration_ms: 12 } },
+      { ...ctx(), errorTail: "ApiError: 429 RESOURCE_EXHAUSTED quota exceeded" },
+    );
+    expect(r.finished).toEqual({ ok: false });
+    const e = r.events[0]!;
+    expect(e.type).toBe("turn.failed");
+    if (e.type !== "turn.failed") throw new Error("turn.failed bekleniyordu");
+    expect(e.payload.reason).toBe("sdk_error");
+    expect(e.payload.error).toContain("429");
+    assertWritable(r.events);
+  });
+
+  it("sebep bilinmiyorsa uydurulmaz, durum adı yazılır", () => {
+    const r = mapStreamLine({ type: "result", status: "cancelled" }, ctx());
+    const e = r.events[0]!;
+    if (e.type !== "turn.failed") throw new Error("turn.failed bekleniyordu");
+    expect(e.payload.error).toContain("cancelled");
+    assertWritable(r.events);
+  });
+
   it("bilinmeyen satır tipi sessizce atlanır", () => {
     for (const l of [{ type: "thought" }, {}, null, "metin"]) {
       expect(mapStreamLine(l, ctx()).events).toEqual([]);

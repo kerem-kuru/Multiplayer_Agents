@@ -65,7 +65,17 @@ const EventsQuery = z.object({
 
 const MessageBody = z.object({ text: z.string().min(1).max(100_000) }).strict();
 
-const PresenceBody = z.object({ viewing: z.string().min(1).max(120).nullable() }).strict();
+const PresenceBody = z
+  .object({
+    viewing: z.string().min(1).max(120).nullable(),
+    /**
+     * Hangi SEKME bakış değiştirdi. İstemci bunu ilk SSE frame'inden
+     * (`hello`) alır. Verilmezse kullanıcının tüm bağlantıları güncellenir —
+     * eski istemciler bozulmasın diye, ama doğru olan bunu göndermek.
+     */
+    connectionId: z.string().min(1).max(200).optional(),
+  })
+  .strict();
 
 /**
  * İsteği kimin yaptığı — Hafta 4'ten itibaren OTURUMDAN gelir, başlıktan
@@ -246,7 +256,7 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
     const { user } = await requireRoom(c, roomId);
     const body = PresenceBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) throw new HttpError(400, "viewing alanı geçersiz");
-    setViewing(roomId, user.id, body.data.viewing ?? null);
+    setViewing(roomId, user.id, body.data.viewing ?? null, body.data.connectionId ?? null);
     return c.json({ ok: true, people: listPresence(roomId) });
   });
 

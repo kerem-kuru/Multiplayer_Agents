@@ -24,6 +24,12 @@ export interface StreamState {
   view: RoomView;
   connection: Connection;
   lastSeq: number;
+  /**
+   * Bu SEKMENİN bağlantı kimliği — sunucunun ilk frame'inde (`hello`) gelir.
+   * Presence bildirimi bunu geri yollar; yoksa sunucu kullanıcının tüm
+   * sekmelerini aynı agent'a bakıyor sanır.
+   */
+  connectionId: string | null;
   /** Odadakiler — AYRI kanaldan gelir, event log'un parçası değildir. */
   people: Person[];
   reconnect: () => void;
@@ -36,6 +42,7 @@ export function useEventStream(roomId: string | null): StreamState {
   const [connection, setConnection] = useState<Connection>("loading");
   const [lastSeq, setLastSeq] = useState(0);
   const [people, setPeople] = useState<Person[]>([]);
+  const [connectionId, setConnectionId] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
 
   /** Snapshot sonrası event'ler seq -> event. Projeksiyon bunun üzerinden. */
@@ -57,6 +64,7 @@ export function useEventStream(roomId: string | null): StreamState {
     setView(EMPTY);
     setPeople([]);
     setLastSeq(0);
+    setConnectionId(null);
     setConnection("loading");
 
     const flush = (): void => {
@@ -136,6 +144,18 @@ export function useEventStream(roomId: string | null): StreamState {
         }
       });
 
+      /** İlk frame: "sen hangi bağlantısın". `id:` taşımaz, imleci ilerletmez. */
+      source.addEventListener("hello", (ev) => {
+        if (cancelled) return;
+        try {
+          const hello = JSON.parse((ev as MessageEvent<string>).data) as { connectionId?: string };
+          if (typeof hello.connectionId === "string") setConnectionId(hello.connectionId);
+        } catch {
+          // Bağlantı kimliği alınamazsa presence kullanıcı bazlı çalışır:
+          // eskisi gibi, bozuk değil ama sekme ayrımı olmadan.
+        }
+      });
+
       source.addEventListener("overflow", () => {
         // Sunucu bizi yavaş buldu ve kapattı; baştan bağlan.
         source?.close();
@@ -202,6 +222,7 @@ export function useEventStream(roomId: string | null): StreamState {
     connection,
     lastSeq,
     people,
+    connectionId,
     reconnect: () => {
       failures.current = 0;
       setNonce((n) => n + 1);

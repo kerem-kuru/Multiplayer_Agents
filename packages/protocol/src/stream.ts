@@ -34,6 +34,24 @@ export const SSE_EVENT_NAME = "events";
 export const SSE_PRESENCE_EVENT = "presence";
 export const SSE_OVERFLOW_EVENT = "overflow";
 
+/**
+ * İlk frame: "sen hangi bağlantısın".
+ *
+ * Presence bağlantı başına tutulur ama `POST /presence` isteği hangi SSE
+ * bağlantısından geldiğini bilmiyordu; sunucu kullanıcının TÜM bağlantılarını
+ * güncelliyordu ve üç sekme açan kişi hepsinde aynı agent'a bakıyor
+ * görünüyordu. İstemci bu kimliği alır ve bakış bildirirken geri yollar.
+ *
+ * `id:` ALANI TAŞIMAZ — presence frame'iyle aynı gerekçe.
+ */
+export const SSE_HELLO_EVENT = "hello";
+
+export const SseHelloPayload = z.object({
+  connectionId: z.string().min(1),
+  userId: z.string().uuid(),
+});
+export type SseHelloPayload = z.infer<typeof SseHelloPayload>;
+
 /** Frame başına üst sınır; fazlası sonraki frame'e kalır. */
 export const SSE_MAX_EVENTS_PER_FRAME = 200;
 /** Tamponlama penceresi — "ham byte akıtma yok" kuralının sunucu tarafı. */

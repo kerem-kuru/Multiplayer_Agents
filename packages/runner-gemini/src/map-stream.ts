@@ -59,6 +59,16 @@ export interface MapContext {
   messageId: string;
   /** Rol YAML'ından çözülmüş izinli Gemini tool adları. */
   allowedTools: ReadonlySet<string>;
+  /**
+   * Gemini'nin son stderr satırları — turn hata ile bittiğinde SEBEBİ burada
+   * yazıyor (kota 429, 503, geçersiz anahtar). Runner her satırda güncel
+   * hâlini geçirir.
+   *
+   * Bunu taşımamak Hafta 4'te gerçek bir borç yarattı: ekranda
+   * `● bitti · error · 0 ms` yazıyordu, nedeni yalnızca sunucu logunda
+   * kalıyordu — çünkü event log'da da yoktu.
+   */
+  errorTail?: string;
 }
 
 export interface MapResult {
@@ -187,14 +197,46 @@ export function mapStreamLine(line: unknown, ctx: MapContext): MapResult {
 
     case "result": {
       const stats = isRec(line.stats) ? line.stats : {};
-      const ok = str(line.status) === "success";
+      const status = str(line.status);
+      const ok = status === "success";
+
+      /**
+       * Başarısız turn `turn.completed` DEĞİL `turn.failed` yazar.
+       *
+       * Eskiden subtype="error" ile tamamlanmış sayılıyordu: ekranda
+       * "bitti · error" görünüyor, sebebi hiçbir yerde yazmıyordu. Sebep
+       * event log'a girmezse UI'da da olamaz — tek gerçek kaynak log.
+       */
+      if (!ok) {
+        const detail = [
+          str(line.error) || str(line.message) || str(line.detail),
+          (ctx.errorTail ?? "").trim(),
+        ]
+          .filter((s) => s.length > 0)
+          .join(" · ");
+        events.push({
+          ...envelope,
+          actor,
+          type: "turn.failed",
+          payload: {
+            ...turn,
+            reason: "sdk_error",
+            error: truncate(
+              detail.length > 0 ? `gemini: ${status || "bilinmeyen durum"} — ${detail}` : `gemini turn'ü "${status || "bilinmeyen"}" ile bitti`,
+              2000,
+            ).text,
+          },
+        } as NewRoomEvent);
+        return { events, finished: { ok } };
+      }
+
       events.push({
         ...envelope,
         actor,
         type: "turn.completed",
         payload: {
           ...turn,
-          subtype: str(line.status),
+          subtype: status,
           // Gemini turn sayısı vermiyor; bir prompt = bir turn.
           numTurns: 1,
           durationMs: num(stats.duration_ms),

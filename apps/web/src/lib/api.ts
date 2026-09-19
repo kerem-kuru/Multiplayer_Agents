@@ -173,5 +173,17 @@ export interface Person {
   since: number;
 }
 
-export const setPresence = (roomId: string, viewing: string | null): Promise<unknown> =>
-  json(`/rooms/${roomId}/presence`, { method: "POST", body: JSON.stringify({ viewing }) });
+/**
+ * Bakış bildirimi. `connectionId` İLK SSE frame'inden (`hello`) gelir ve
+ * geri yollanır: yoksa sunucu kullanıcının TÜM sekmelerinin bakışını
+ * değiştirir ve üç sekme açan kişi hepsinde aynı agent'a bakıyor görünür.
+ */
+export const setPresence = (
+  roomId: string,
+  viewing: string | null,
+  connectionId?: string | null,
+): Promise<unknown> =>
+  json(`/rooms/${roomId}/presence`, {
+    method: "POST",
+    body: JSON.stringify(connectionId ? { viewing, connectionId } : { viewing }),
+  });

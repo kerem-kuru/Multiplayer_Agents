@@ -117,6 +117,14 @@ function runTurn(messageId: string, text: string): Promise<void> {
      * event'i" kuralı (validate-events bunu denetliyor).
      */
     let sawTerminal = false;
+    /**
+     * Gemini'nin son stderr satırları. Turn hata ile bitince SEBEP burada
+     * yazıyor (kota 429, 503, geçersiz anahtar) ve `turn.failed` event'inin
+     * `error` alanına giriyor — sunucu logunda kalması yetmiyor, ekranda
+     * neden bittiği görünmüyordu.
+     */
+    let stderrTail = "";
+    const STDERR_TAIL_MAX = 800;
     /** Gemini asistan metnini `delta:true` parçalarıyla yolluyor; birleştir. */
     let textParts: string[] = [];
 
@@ -149,7 +157,11 @@ function runTurn(messageId: string, text: string): Promise<void> {
           payload: {
             ...turnRef(messageId),
             reason: sawAnything ? "sdk_error" : "crash",
-            error: "gemini süreci turn'ü tamamlamadan çıktı",
+            // Sebebi taşı: "tamamlamadan çıktı" tek başına hiçbir şey anlatmıyor.
+            error: ["gemini süreci turn'ü tamamlamadan çıktı", stderrTail.trim()]
+              .filter((s) => s.length > 0)
+              .join(" · ")
+              .slice(0, 2000),
           },
         } as NewRoomEvent);
       }
@@ -182,7 +194,7 @@ function runTurn(messageId: string, text: string): Promise<void> {
       }
       flushText();
 
-      const mapped = mapStreamLine(parsed, ctx);
+      const mapped = mapStreamLine(parsed, { ...ctx, errorTail: stderrTail });
       if (mapped.sdkSessionId) geminiSessionId = mapped.sdkSessionId;
       for (const event of mapped.events) emit(event);
       if (mapped.finished) {
@@ -198,7 +210,12 @@ function runTurn(messageId: string, text: string): Promise<void> {
     // heartbeat'ler o selin arkasına sıraya giriyor, 20 sn'yi aşıyor ve host
     // runner'ı ölmüş sanıp öldürüyordu. Dış dünyanın sınırsız çıktısı protokol
     // kanalına sokulmaz — exec katmanı stderr'i zaten sunucu loguna taşıyor.
-    child.stderr!.pipe(process.stderr);
+    child.stderr!.on("data", (chunk: Buffer) => {
+      // Kendi stderr'imize aynen akar (sunucu logu onu redaction'dan geçirir).
+      process.stderr.write(chunk);
+      // Son N karakteri sakla: hata sebebi genelde en sondadır.
+      stderrTail = (stderrTail + chunk.toString("utf8")).slice(-STDERR_TAIL_MAX);
+    });
 
     child.on("error", (err) => {
       out({ kind: "log", level: "error", msg: `gemini başlatılamadı: ${String(err)}` });

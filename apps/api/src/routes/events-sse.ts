@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
 import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { StoredEvent } from "@agent-rooms/protocol";
 import {
   SSE_EVENT_NAME,
   SSE_FLUSH_MS,
+  SSE_HELLO_EVENT,
   SSE_MAX_EVENTS_PER_FRAME,
   SSE_MAX_PENDING_BYTES,
   SSE_OVERFLOW_EVENT,
@@ -83,7 +85,7 @@ export function streamSession(c: Context, opts: StreamOptions) {
      * BAĞLANTI = VARLIK. Bu bağlantı açıkken kişi odada görünür.
      * Presence event log'a YAZILMAZ; bellekte durur ve ayrı frame'le akar.
      */
-    const connectionId = `${opts.sessionId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+    const connectionId = `${opts.sessionId}:${Date.now()}:${randomUUID().slice(0, 12)}`;
     joinPresence(opts.roomId, connectionId, opts.user);
     /** Yazımlar tek yerden sırayla gitsin diye kuyruğa alınır. */
     let pendingPresence: PresencePerson[] | null = listPresence(opts.roomId);
@@ -140,6 +142,17 @@ export function streamSession(c: Context, opts: StreamOptions) {
       await stream.writeSSE({ data: "", event: "open" });
       // İstemciye yeniden bağlanma gecikmesi önerisi.
       await stream.write(`retry: ${SSE_RETRY_MS}\n\n`);
+
+      /**
+       * "Sen hangi bağlantısın" — `id:` TAŞIMAZ (presence frame'iyle aynı
+       * gerekçe). İstemci bunu `POST /presence` gövdesinde geri yollar;
+       * yoksa sunucu kullanıcının TÜM sekmelerinin bakışını değiştirir ve üç
+       * sekme açan kişi hepsinde aynı agent'a bakıyor görünür.
+       */
+      await stream.writeSSE({
+        event: SSE_HELLO_EVENT,
+        data: JSON.stringify({ connectionId, userId: opts.user.userId }),
+      });
 
       // Odaya girerken kimlerin olduğunu HEMEN gör: geçmiş replay'i uzun
       // sürebilir, presence onu beklemesin.

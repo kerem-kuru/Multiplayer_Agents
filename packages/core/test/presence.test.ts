@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   PRESENCE_DEBOUNCE_MS,
+  connectionBelongsTo,
   joinPresence,
   leavePresence,
   listPresence,
@@ -96,5 +97,43 @@ describe("presence", () => {
 
   it("olmayan bağlantıyı bırakmak sessiz", () => {
     expect(() => leavePresence(ROOM, "yok")).not.toThrow();
+  });
+
+  /**
+   * Hafta 4 borcu: `connectionId` yokken üç sekme açan kişi hepsinde aynı
+   * agent'a bakıyor görünüyordu. Bakış SEKMEYE ait.
+   */
+  it("connectionId verilirse yalnızca O sekmenin bakışı değişir", () => {
+    joinPresence(ROOM, "c1", { userId: "u1", name: "kerem" });
+    joinPresence(ROOM, "c2", { userId: "u1", name: "kerem" });
+
+    setViewing(ROOM, "u1", "backend", "c1");
+    expect(listPresence(ROOM)[0]!.viewing).toBe("backend");
+
+    // İkinci sekme frontend'e geçti: kullanıcının aktif sekmesi bu.
+    setViewing(ROOM, "u1", "frontend", "c2");
+    expect(listPresence(ROOM)[0]!.viewing).toBe("frontend");
+
+    // İlk sekme HÂLÂ backend'de: ikinci sekme onu değiştirmedi.
+    setViewing(ROOM, "u1", null, "c2");
+    expect(listPresence(ROOM)[0]!.viewing).toBe(null);
+    setViewing(ROOM, "u1", "x", "c1");
+    expect(listPresence(ROOM)[0]!.viewing).toBe("x");
+  });
+
+  it("başkasının bağlantı kimliğiyle bakış değiştirilemez", () => {
+    joinPresence(ROOM, "c1", { userId: "u1", name: "kerem" });
+    joinPresence(ROOM, "c2", { userId: "u2", name: "ayse" });
+
+    setViewing(ROOM, "u2", "backend", "c1"); // c1 kerem'in
+    expect(listPresence(ROOM).find((p) => p.userId === "u1")!.viewing).toBe(null);
+    expect(connectionBelongsTo(ROOM, "c1", "u2")).toBe(false);
+    expect(connectionBelongsTo(ROOM, "c1", "u1")).toBe(true);
+  });
+
+  it("olmayan bağlantı kimliği sessizce yok sayılır", () => {
+    joinPresence(ROOM, "c1", { userId: "u1", name: "kerem" });
+    expect(() => setViewing(ROOM, "u1", "backend", "yok")).not.toThrow();
+    expect(listPresence(ROOM)[0]!.viewing).toBe(null);
   });
 });
