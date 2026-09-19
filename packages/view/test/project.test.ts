@@ -164,6 +164,90 @@ describe("projeksiyon", () => {
     expect(Object.keys(v.agents).sort()).toEqual(["backend", "frontend", "security"]);
   });
 
+  // --- Hafta 5: kuyruk, sürücü, kesme -------------------------------------
+
+  const AYSE = { kind: "human", id: "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa", name: "Ayse" };
+  const ALI = { kind: "human", id: "bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb", name: "Ali" };
+  const M2 = "44444444-4444-4444-8444-444444444444";
+
+  it("kuyruk: queued sırayla girer, received kuyruktan çıkarır", () => {
+    reset();
+    const v = project([
+      ev("message.queued", { agent: "backend", messageId: MID, text: "bir", user: { id: AYSE.id, name: AYSE.name } }, AYSE),
+      ev("message.queued", { agent: "backend", messageId: M2, text: "iki", user: { id: ALI.id, name: ALI.name } }, ALI),
+    ]);
+    const a = v.agents.backend!;
+    expect(a.queue.map((q) => q.user.name)).toEqual(["Ayse", "Ali"]);
+    expect(a.running).toBe(null);
+
+    const v2 = project([
+      ev("message.received", { agent: "backend", messageId: MID, text: "bir" }, AYSE),
+    ], v);
+    const b = v2.agents.backend!;
+    // Kuyruktan çıktı ve koşuyor: kim yazdıysa o görünüyor.
+    expect(b.queue.map((q) => q.messageId)).toEqual([M2]);
+    expect(b.running).toEqual({ messageId: MID, user: { id: AYSE.id, name: "Ayse" } });
+  });
+
+  it("iptal edilen mesaj kuyruktan çıkar ve running olmaz", () => {
+    reset();
+    const v = project([
+      ev("message.queued", { agent: "backend", messageId: MID, text: "bir", user: { id: AYSE.id, name: AYSE.name } }, AYSE),
+      ev("message.cancelled", { agent: "backend", messageId: MID, by: { id: AYSE.id, name: AYSE.name }, reason: "user" }, AYSE),
+    ]);
+    expect(v.agents.backend!.queue).toHaveLength(0);
+    expect(v.agents.backend!.running).toBe(null);
+  });
+
+  it("aynı queued event iki kez gelirse kuyruk iki satır olmaz", () => {
+    reset();
+    const one = ev("message.queued", { agent: "backend", messageId: MID, text: "bir", user: { id: AYSE.id, name: AYSE.name } }, AYSE);
+    expect(project([one, { ...one }]).agents.backend!.queue).toHaveLength(1);
+  });
+
+  it("sürücü: claim → handoff → release", () => {
+    reset();
+    const claimed = project([
+      ev("driver.claimed", { agent: "backend", user: { id: AYSE.id, name: AYSE.name } }, AYSE),
+    ]);
+    expect(claimed.agents.backend!.driver?.name).toBe("Ayse");
+
+    const handed = project([
+      ev("driver.handed_off", { agent: "backend", from: { id: AYSE.id, name: AYSE.name }, to: { id: ALI.id, name: ALI.name } }, AYSE),
+    ], claimed);
+    expect(handed.agents.backend!.driver?.name).toBe("Ali");
+
+    const released = project([
+      ev("driver.released", { agent: "backend", user: { id: ALI.id, name: ALI.name }, reason: "manual" }, ALI),
+    ], handed);
+    expect(released.agents.backend!.driver).toBe(null);
+  });
+
+  it("kesme: requested dolu, applied temizler", () => {
+    reset();
+    const requested = project([
+      ev("message.received", { agent: "backend", messageId: MID, text: "uzun is" }, AYSE),
+      ev("interrupt.requested", { agent: "backend", messageId: MID, by: { id: AYSE.id, name: AYSE.name } }, AYSE),
+    ]);
+    // "Kesme kuyruğa alındı" durumu: istek var, uygulanma yok.
+    expect(requested.agents.backend!.interrupt?.requestedBy.name).toBe("Ayse");
+
+    const applied = project([
+      ev("interrupt.applied", { agent: "backend", messageId: MID, mode: "abort" }, { kind: "system" }),
+    ], requested);
+    expect(applied.agents.backend!.interrupt).toBe(null);
+  });
+
+  it("turn kapanınca running boşalır", () => {
+    reset();
+    const v = project([
+      ev("message.received", { agent: "backend", messageId: MID, text: "is" }, AYSE),
+      ev("turn.failed", { agent: "backend", messageId: MID, reason: "interrupted", error: "kesildi" }, { kind: "system" }),
+    ]);
+    expect(v.agents.backend!.running).toBe(null);
+    expect(v.agents.backend!.turns[0]!.outcome).toMatchObject({ reason: "interrupted" });
+  });
+
   it("çökme durumu willRestart'a göre ayrışır", () => {
     reset();
     const crashed = project([

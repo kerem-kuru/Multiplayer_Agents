@@ -26,6 +26,14 @@ let ayse: QueueUser;
 let ali: QueueUser;
 
 /**
+ * Sahte runner'ların bekleyen zamanlayıcıları. Test bitince temizlenir:
+ * yoksa pool kapandıktan sonra ateşlenen bir `finishRunning` "Cannot use a
+ * pool after calling end" hatası veriyor ve bu, YEŞİL bir koşumda kırmızı
+ * gürültü yapıyor.
+ */
+const pendingTimers: NodeJS.Timeout[] = [];
+
+/**
  * Sahte runner. Turn'ü `turnMs` sonra bitirir ve o an kuyruğa "bitti" der —
  * gerçek AgentManager'ın `turn_end` satırında yaptığı şey.
  *
@@ -56,10 +64,12 @@ class FakeRunner implements QueueDeliverer {
     // `[İsim]: ` önekini manager koyuyor; burada ham metin gelir.
     this.delivered.push({ messageId: msg.messageId, text: msg.text });
 
-    setTimeout(() => {
-      this.running -= 1;
-      void this.queue?.finishRunning(roomId, agentName, msg.messageId);
-    }, this.turnMs);
+    pendingTimers.push(
+      setTimeout(() => {
+        this.running -= 1;
+        void this.queue?.finishRunning(roomId, agentName, msg.messageId);
+      }, this.turnMs),
+    );
   }
 
   async requestInterrupt(
@@ -137,6 +147,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  for (const t of pendingTimers) clearTimeout(t);
   if (!alive) return;
   // Kuyruk satırları silinebilir (event log DEĞİL, güncel durum).
   await getPool().query(`DELETE FROM agent_queue WHERE room_id = $1`, [roomId]);

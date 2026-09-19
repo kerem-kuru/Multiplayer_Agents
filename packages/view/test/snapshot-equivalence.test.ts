@@ -25,14 +25,45 @@ const ev = (type: string, payload: Record<string, unknown>): StoredEvent =>
     payload,
   }) as unknown as StoredEvent;
 
-/** Üç turn'lük gerçekçi bir akış: turn'ler sınırın iki yanına düşsün. */
+const AYSE = { id: "aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa", name: "Ayse" };
+const ALI = { id: "bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb", name: "Ali" };
+
+/**
+ * Üç turn'lük gerçekçi bir akış: turn'ler sınırın iki yanına düşsün.
+ *
+ * Hafta 5'te akışa kuyruk, sürücü ve kesme event'leri de girdi — snapshot
+ * doğruluğu YENİ ALANLARLA da geçmeli. Kuyruk ve sürücü "anlık durum"
+ * tuttuğu için sınırın iki yanına düşmesi en riskli yer burası.
+ */
 function buildEvents(): StoredEvent[] {
   seq = 0;
   const out: StoredEvent[] = [];
   for (const [i, mid] of ["m-1", "m-2", "m-3"].entries()) {
     if (i === 0) out.push(ev("agent.starting", { agent: "backend" }));
     if (i === 0) out.push(ev("agent.ready", { agent: "backend", runnerPid: 8 }));
+    if (i === 0) out.push(ev("driver.claimed", { agent: "backend", user: AYSE }));
+    if (i === 1) {
+      // Devir ve bir de iptal edilen kayıt: ikisi de anlık durumu değiştiriyor.
+      out.push(ev("driver.handed_off", { agent: "backend", from: AYSE, to: ALI }));
+      out.push(ev("message.queued", { agent: "backend", messageId: "m-iptal", text: "vazgeçildi", user: ALI }));
+      out.push(ev("message.cancelled", { agent: "backend", messageId: "m-iptal", by: ALI, reason: "user" }));
+    }
+    if (i === 2) {
+      out.push(ev("message.queued", { agent: "backend", messageId: "m-bekleyen", text: "sırada", user: AYSE }));
+    }
+    out.push(
+      ev("message.queued", {
+        agent: "backend",
+        messageId: mid,
+        text: `görev ${i}`,
+        user: i % 2 === 0 ? AYSE : ALI,
+      }),
+    );
     out.push(ev("message.received", { agent: "backend", messageId: mid, text: `görev ${i}` }));
+    if (i === 2) {
+      out.push(ev("interrupt.requested", { agent: "backend", messageId: mid, by: ALI }));
+      out.push(ev("interrupt.applied", { agent: "backend", messageId: mid, mode: "abort" }));
+    }
     out.push(ev("turn.started", { agent: "backend", messageId: mid, sdkSessionId: `sdk-${i}` }));
     out.push(
       ev("tool.call", {

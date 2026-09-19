@@ -14,6 +14,8 @@ import { TerminalView } from "./TerminalView.js";
 import { Composer } from "./Composer.js";
 import { PresenceBar } from "./PresenceBar.js";
 import { ShareDialog } from "./ShareDialog.js";
+import { QueueList } from "./QueueList.js";
+import { DriverBadge } from "./DriverBadge.js";
 
 /** Renk tek başına bilgi taşımaz — her durumun yanında kelimesi yazar. */
 const STATUS_COLOR: Record<string, string> = {
@@ -49,11 +51,17 @@ export function RoomPage({
    * Rol SUNUCUDAN gelir. UI'ın düğme gizlemesi yetki değildir — sunucu zaten
    * 403 döner; buradaki amaç kullanıcıyı boşuna denemekten kurtarmak.
    */
-  const [role, setRole] = useState<"owner" | "viewer" | null>(null);
+  const [role, setRole] = useState<"owner" | "member" | "viewer" | null>(null);
   const [sharing, setSharing] = useState(false);
   /** Başlatma/durdurma hatası — sessizce yutulursa agent "starting"de asılı görünür. */
   const [actionError, setActionError] = useState<string | null>(null);
-  const canWrite = role === "owner";
+  /**
+   * Hafta 5: yazmak artık `owner` işi değil. `member` de kuyruğa mesaj ekler,
+   * sürücülüğü alır ve sürücüyken keser. `owner`'a özel kalan şeyler: agent
+   * start/stop, davet üretme, rol değiştirme.
+   */
+  const canWrite = role === "owner" || role === "member";
+  const isOwner = role === "owner";
 
   useEffect(() => {
     let alive = true;
@@ -125,7 +133,7 @@ export function RoomPage({
         <span style={{ color: "var(--ink-soft)", fontSize: 12 }}>
           seq {lastSeq} · {CONNECTION_LABEL[connection]}
         </span>
-        {canWrite && <button onClick={() => setSharing((v) => !v)}>Paylaş</button>}
+        {isOwner && <button onClick={() => setSharing((v) => !v)}>Paylaş</button>}
         {connection === "offline" && <button onClick={reconnect}>Yeniden bağlan</button>}
       </header>
 
@@ -176,7 +184,7 @@ export function RoomPage({
               </button>
             );
           })}
-          {selected && canWrite && (
+          {selected && isOwner && (
             <div style={{ marginTop: 10 }}>
               <div style={{ display: "flex", gap: 4 }}>
                 <button
@@ -210,6 +218,31 @@ export function RoomPage({
         </nav>
 
         <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+          {/* Agent başlığı: sürücü, kesme ve kuyruk durumu burada. */}
+          {selected && (
+            <div
+              style={{
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+                padding: "8px 14px 0",
+                flexWrap: "wrap",
+              }}
+            >
+              <strong>{selected}</strong>
+              <span style={{ fontSize: 12, color: STATUS_COLOR[status] ?? "var(--ink-soft)" }}>
+                ● {status}
+              </span>
+              <DriverBadge
+                roomId={roomId}
+                agent={selected}
+                agentView={agentView}
+                meId={meId}
+                canDrive={canWrite}
+              />
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: 4, padding: "6px 14px 0" }}>
             {(["feed", "terminal"] as const).map((t) => (
               <button
@@ -233,10 +266,27 @@ export function RoomPage({
             </div>
           </div>
 
-          {selected && canWrite && <Composer roomId={roomId} agent={selected} status={status} />}
+          {/* Kuyruk Composer'ın ÜSTÜNDE: sıradaki yerini yazarken görsün. */}
+          {selected && (
+            <QueueList
+              roomId={roomId}
+              agentView={agentView}
+              meId={meId}
+              canCancelOthers={isOwner || agentView?.driver?.id === meId}
+            />
+          )}
+          {selected && canWrite && (
+            <Composer
+              roomId={roomId}
+              agent={selected}
+              status={status}
+              agentView={agentView}
+              meId={meId}
+            />
+          )}
           {selected && role === "viewer" && (
             /* Gizlemek değil, YERİNE koymak: boşluk bırakmak "bozuk mu?"
-               sorusunu doğurur. Yazma yetkisi Hafta 5'in işi. */
+               sorusunu doğurur. Ne olduğunu VE nasıl değişeceğini söyle. */
             <div
               style={{
                 borderTop: "1px solid var(--rule)",
@@ -246,7 +296,9 @@ export function RoomPage({
                 fontSize: 13,
               }}
             >
-              Bu odayı izliyorsun. Görev vermek için oda sahibinden yetki iste.
+              Bu odayı izliyorsun: kuyruğu ve akışı görüyorsun, yazamıyorsun. Oda sahibi seni
+              <strong> katılımcı </strong>yaparsa (veya katılımcı linkiyle davet ederse) aynı
+              agent'lara görev yazabilirsin.
             </div>
           )}
         </main>

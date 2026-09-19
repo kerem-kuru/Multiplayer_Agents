@@ -85,15 +85,59 @@ export const startAgent = (roomId: string, agent: string): Promise<unknown> =>
 export const stopAgent = (roomId: string, agent: string): Promise<unknown> =>
   json(`/rooms/${roomId}/agents/${agent}/stop`, { method: "POST" });
 
+/**
+ * Mesajı KUYRUĞA ekler. Hafta 5'ten itibaren `409 busy` yok: mesaj her zaman
+ * kabul edilir ve sıraya girer. `position` 1 = sıradaki ilk.
+ */
 export const sendMessage = (
   roomId: string,
   agent: string,
   text: string,
-): Promise<{ messageId: string }> =>
-  json<{ messageId: string }>(`/rooms/${roomId}/agents/${agent}/message`, {
+): Promise<{ messageId: string; position: number }> =>
+  json<{ messageId: string; position: number }>(`/rooms/${roomId}/agents/${agent}/message`, {
     method: "POST",
     body: JSON.stringify({ text }),
   });
+
+// --- Hafta 5: kuyruk, sürücü, kesme -----------------------------------------
+
+/** Kuyruk kaydını iptal et. Koşan mesaj için `409` döner — o kesmedir. */
+export const cancelQueued = (roomId: string, messageId: string): Promise<unknown> =>
+  json(`/rooms/${roomId}/queue/${messageId}`, { method: "DELETE" });
+
+export interface DriverInfo {
+  driver: { id: string; name: string } | null;
+  since: string | null;
+  /** İyimser kilit: devirde geri yollanır. */
+  version: number;
+  youAreDriver: boolean;
+  /** Devredilebilecek kişiler — listeyi SUNUCU süzüyor (viewer olamaz). */
+  candidates: Array<{ userId: string; name: string; role: string }>;
+}
+
+export const fetchDriver = (roomId: string, agent: string): Promise<DriverInfo> =>
+  json<DriverInfo>(`/rooms/${roomId}/agents/${agent}/driver`);
+
+export const claimDriver = (roomId: string, agent: string): Promise<unknown> =>
+  json(`/rooms/${roomId}/agents/${agent}/driver/claim`, { method: "POST" });
+
+export const releaseDriver = (roomId: string, agent: string): Promise<unknown> =>
+  json(`/rooms/${roomId}/agents/${agent}/driver/release`, { method: "POST" });
+
+export const handoffDriver = (
+  roomId: string,
+  agent: string,
+  toUserId: string,
+  version: number,
+): Promise<unknown> =>
+  json(`/rooms/${roomId}/agents/${agent}/driver/handoff`, {
+    method: "POST",
+    body: JSON.stringify({ toUserId, version }),
+  });
+
+/** Kesme isteği. Anında durma sözü YOK: `interrupt.applied` ile gelir. */
+export const interruptAgent = (roomId: string, agent: string): Promise<unknown> =>
+  json(`/rooms/${roomId}/agents/${agent}/interrupt`, { method: "POST" });
 
 export const sseUrl = (roomId: string, since: number): string =>
   `${BASE}/rooms/${roomId}/events?since=${since}`;
@@ -132,9 +176,12 @@ export async function consumeLoginToken(token: string): Promise<void> {
 
 export const logout = (): Promise<unknown> => json("/auth/logout", { method: "POST" });
 
+/** Hafta 5: araya `member` girdi — kuyruğa yazar, keser (sürücüyse), iptal eder. */
+export type RoomRole = "owner" | "member" | "viewer";
+
 export interface RoomDetail {
   room: { id: string; name: string };
-  role: "owner" | "viewer";
+  role: RoomRole;
 }
 
 export const fetchRoom = (roomId: string): Promise<RoomDetail> =>
@@ -142,6 +189,7 @@ export const fetchRoom = (roomId: string): Promise<RoomDetail> =>
 
 export interface Invite {
   prefix: string;
+  role: "member" | "viewer";
   createdAt: string;
   expiresAt: string;
   revokedAt: string | null;
@@ -151,10 +199,11 @@ export interface Invite {
 export const createInvite = (
   roomId: string,
   expiresInHours?: number,
-): Promise<{ url: string; prefix: string; expiresAt: string }> =>
+  role: "member" | "viewer" = "member",
+): Promise<{ url: string; prefix: string; role: string; expiresAt: string }> =>
   json(`/rooms/${roomId}/invites`, {
     method: "POST",
-    body: JSON.stringify(expiresInHours ? { expiresInHours } : {}),
+    body: JSON.stringify({ ...(expiresInHours ? { expiresInHours } : {}), role }),
   });
 
 export const listInvites = (roomId: string): Promise<Invite[]> =>

@@ -10,7 +10,11 @@ import { createInvite, listInvites, revokeInvite, type Invite } from "../lib/api
  */
 export function ShareDialog({ roomId, onClose }: { roomId: string; onClose: () => void }) {
   const [invites, setInvites] = useState<Invite[]>([]);
-  const [fresh, setFresh] = useState<{ url: string; expiresAt: string } | null>(null);
+  /** Davet rolü. Varsayılan `member`: kuyruk geldi, ikinci kişi artık yazabilir. */
+  const [role, setRole] = useState<"member" | "viewer">("member");
+  const [fresh, setFresh] = useState<{ url: string; expiresAt: string; role: string } | null>(
+    null,
+  );
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,8 +27,8 @@ export function ShareDialog({ roomId, onClose }: { roomId: string; onClose: () =
 
   const create = async (): Promise<void> => {
     try {
-      const inv = await createInvite(roomId);
-      setFresh({ url: inv.url, expiresAt: inv.expiresAt });
+      const inv = await createInvite(roomId, undefined, role);
+      setFresh({ url: inv.url, expiresAt: inv.expiresAt, role: inv.role });
       setCopied(false);
       load();
     } catch (err) {
@@ -64,9 +68,26 @@ export function ShareDialog({ roomId, onClose }: { roomId: string; onClose: () =
         </button>
       </div>
 
-      <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: "0 0 8px" }}>
-        Linke tıklayan kişi odayı <strong>izler</strong>. Yazma yetkisi yok.
-      </p>
+      {/* Rol seçimi: iki radyo, iki cümle. Renk tek başına bilgi taşımaz. */}
+      <div style={{ fontSize: 12, margin: "0 0 8px" }}>
+        {(
+          [
+            ["member", "Katılımcı", "Agent'lara görev yazabilir, kuyruğa girer, sürücülüğü alabilir."],
+            ["viewer", "İzleyici", "Sadece izler. Kuyruğu görür ama yazamaz."],
+          ] as const
+        ).map(([value, label, hint]) => (
+          <label key={value} style={{ display: "block", padding: "2px 0" }}>
+            <input
+              type="radio"
+              name="invite-role"
+              checked={role === value}
+              onChange={() => setRole(value)}
+            />{" "}
+            <strong>{label}</strong>{" "}
+            <span style={{ color: "var(--ink-soft)" }}>— {hint}</span>
+          </label>
+        ))}
+      </div>
 
       {fresh ? (
         <div style={{ marginBottom: 10 }}>
@@ -88,6 +109,7 @@ export function ShareDialog({ roomId, onClose }: { roomId: string; onClose: () =
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
             <button onClick={() => void copy()}>{copied ? "Kopyalandı" : "Kopyala"}</button>
             <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+              {fresh.role === "viewer" ? "izleyici" : "katılımcı"} ·{" "}
               {new Date(fresh.expiresAt).toLocaleString("tr-TR")} tarihine kadar geçerli
             </span>
           </div>
@@ -107,6 +129,9 @@ export function ShareDialog({ roomId, onClose }: { roomId: string; onClose: () =
               style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 12, padding: "3px 0" }}
             >
               <span className="mono">{inv.prefix}…</span>
+              <span style={{ color: "var(--ink-soft)" }}>
+                {inv.role === "viewer" ? "izleyici" : "katılımcı"}
+              </span>
               <span style={{ color: inv.active ? "var(--run)" : "var(--idle)" }}>
                 {inv.revokedAt ? "iptal edildi" : inv.active ? "aktif" : "süresi doldu"}
               </span>
