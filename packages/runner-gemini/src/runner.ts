@@ -70,6 +70,27 @@ let interrupting = false;
 /** Kibar sinyalden sonra süreç ölmezse ne kadar beklenir. */
 const SIGKILL_AFTER_MS = 5_000;
 
+/**
+ * Süreci VE çocuklarını durdur.
+ *
+ * `child.kill()` yalnızca Gemini CLI'yı vurur; onun başlattığı kabuk komutu
+ * (ör. `sleep 120`) yaşamaya devam eder ve turn kapanmaz. Sinyal GRUBA
+ * gönderilir — süreç `detached: true` ile kendi grubunda başlatılıyor.
+ */
+const killTree = (proc: ChildProcess, signal: "SIGTERM" | "SIGKILL"): void => {
+  if (proc.pid === undefined) return;
+  try {
+    process.kill(-proc.pid, signal);
+  } catch {
+    // Grup yoksa (platform/izin) tek sürece düş: hiç denememekten iyi.
+    try {
+      proc.kill(signal);
+    } catch {
+      // Süreç zaten ölmüş.
+    }
+  }
+};
+
 const out = (o: RunnerOutput): void => {
   process.stdout.write(JSON.stringify(RunnerOutput.parse(o)) + "\n");
 };
@@ -137,10 +158,23 @@ function runTurn(messageId: string, text: string): Promise<void> {
     /** Gemini asistan metnini `delta:true` parçalarıyla yolluyor; birleştir. */
     let textParts: string[] = [];
 
+    /**
+     * `detached: true` — süreç KENDİ grubunda başlar.
+     *
+     * Neden: kesme ölçüldü ve 32 saniye sürdü. Sebebi şu: Gemini CLI'ya
+     * SIGTERM göndermek onun başlattığı `sleep 120` çocuğunu durdurmuyor;
+     * turn kapanmıyor ve host 30 saniye sonra runner'ı sert kesiyordu
+     * (`mode: hard_kill`). Kendi grubunda başlayan sürece sinyali GRUBA
+     * göndererek (`kill(-pid)`) çocuk kabuk komutu da durur.
+     *
+     * Grup her yolda öldürülüyor (kesme, shutdown, çıkış), yani sahipsiz
+     * süreç kalmıyor.
+     */
     child = spawn(geminiBin, args, {
       cwd: process.cwd(),
       env: { ...process.env, GEMINI_CLI_TRUST_WORKSPACE: "true" },
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
 
     /** Biriken metin parçalarını TEK `agent.text` olarak yaz. */
@@ -263,7 +297,7 @@ out({ kind: "ready", pid: process.pid, protocolVersion: PROTOCOL_VERSION });
 setInterval(() => out({ kind: "heartbeat", busy }), 5_000);
 
 const shutdown = (): void => {
-  child?.kill("SIGTERM");
+  if (child) killTree(child, "SIGTERM");
   setTimeout(() => process.exit(0), 3_000);
 };
 
@@ -294,11 +328,11 @@ rl.on("line", (line: string) => {
     }
     interrupting = true;
     const target = child;
-    target.kill("SIGTERM");
+    killTree(target, "SIGTERM");
     // Kibar sinyale cevap vermezse sert dur: "kesildi" demek ve durmamak
     // kullanıcıya yalan söylemek olur.
     setTimeout(() => {
-      if (target.exitCode === null && target.signalCode === null) target.kill("SIGKILL");
+      if (target.exitCode === null && target.signalCode === null) killTree(target, "SIGKILL");
     }, SIGKILL_AFTER_MS).unref?.();
     return;
   }

@@ -195,6 +195,11 @@ event'tir; UI aradaki süreyi *"Kesme istendi — agent şu an bir komutu bitiri
 gösterir. 30 saniyede kapanmayan turn için sert kesme var (`mode: hard_kill`). Kesilen,
 iptal edilen veya sunucu yeniden başlatmasıyla düşen mesaj **asla yeniden koşmaz**.
 
+Ölçüm (Gemini, `sleep 120` koşarken): kesme ilk hâlde **32 saniye** sürüyor ve `hard_kill`
+ile bitiyordu — SIGTERM, CLI'nın başlattığı kabuk komutunu durdurmuyor. Süreç artık kendi
+grubunda başlatılıyor ve sinyal gruba gidiyor; aynı ölçüm **1 saniyenin altında**
+(`mode: abort`).
+
 Docker'sız çalışmak için `SPAWN_CONTAINER=0` — oda kaydı ve klasörler kurulur, container açılmaz.
 
 ## Yapı
@@ -423,6 +428,25 @@ Yani sunucu doğru gönderiyordu, tünel tamponluyordu. **Olay akışı tabanlı
 yanıtı tamponlayan hiçbir vekilin arkasında çalışmaz** — ve bu, kapı testleriyle
 görülemeyecek bir şeydi: kapılar hep aynı makinede koşuyor. Uzak erişim gerektiğinde
 akışı geçiren bir tünel (ngrok gibi) ya da doğrudan ağ yolu kullanılmalı.
+
+## Hafta 5 dogfood notları
+
+> ⏳ **Henüz yapılmadı** — iki kişi gerekiyor. Denenecek senaryo: biri görev verir, diğeri
+> agent yanlış yola girdiğinde keser ve düzeltir, sonra sürücülüğü devreder.
+
+Cevaplanacak dört soru:
+
+1. Kesmek istediğinde kaç saniye bekledin ve bu sinir bozucu muydu?
+2. Kuyrukta beklerken ne bilmek istedin de ekranda yoktu?
+3. Agent iki kişiye birden cevap verirken karıştı mı? Karıştıysa hangi durumda?
+4. Sürücülüğü devretmek gerçekten 2 tık mıydı?
+
+Birinci sorunun **ölçülmüş** bir kısmı şimdiden var: `gate:w5:agent` ilk koşumda kesmenin
+`sleep 120` koşan bir Gemini agent'ında **32 saniye** sürdüğünü ve `hard_kill` ile
+bittiğini gösterdi — SIGTERM, CLI'nın başlattığı kabuk komutunu durdurmuyordu. Süreç artık
+kendi grubunda başlatılıyor ve sinyal gruba gidiyor; aynı ölçüm **1 saniyenin altına**
+indi (`mode: abort`). Sahte koşum ortamıyla bulunamayacak bir hataydı: sahte runner'ın
+çocuk süreci yok.
 
 ## Karar notları
 

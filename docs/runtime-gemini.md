@@ -116,3 +116,31 @@ durum: idle · restart: 0
 - `--session-id` ile çökme sonrası devam etme
 
 Bunlar `packages/runner-gemini` yazılırken ölçülecek.
+
+## Kesme (Hafta 5'te ölçüldü)
+
+Gemini CLI'ya `SIGTERM` göndermek **onun başlattığı kabuk komutunu durdurmuyor.**
+`sleep 120` koşarken kesme istendiğinde CLI kapanmıyor, turn kapanmıyor ve host 30 saniye
+sonra runner'ı sert kesiyor:
+
+```
+mode = hard_kill · 32 sn
+```
+
+Runner artık Gemini sürecini `detached: true` ile **kendi süreç grubunda** başlatıyor ve
+sinyali gruba gönderiyor (`process.kill(-pid, "SIGTERM")`, 5 sn sonra `SIGKILL`). Aynı ölçüm:
+
+```
+mode = abort · 1 saniyenin altında
+```
+
+Grup her yolda öldürülüyor (kesme, `shutdown`, çıkış), yani container içinde sahipsiz süreç
+kalmıyor.
+
+**Sistem prompt'u yok.** Gemini CLI'da sistem prompt'u veren bir bayrak bulunmuyor
+(`--help` çıktısında yok) ve rol YAML'ındaki `system_prompt` bu koşum ortamında
+uygulanmıyor. Hafta 5'in çok kişili oda notu (`MULTIPLAYER_PROMPT_NOTE`) da bu yüzden
+Gemini agent'ına ulaşmıyor: Gemini agent'ı kimin yazdığını yalnızca mesajın başındaki
+`[İsim]: ` önekinden anlar. Kapı ölçümü bunun yeterli olduğunu gösteriyor (agent "Ayse"
+diye cevap verdi), ama çelişen iki yönerge durumunda davranışı Claude yolundan farklı
+olabilir.

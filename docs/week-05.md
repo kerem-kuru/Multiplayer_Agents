@@ -21,7 +21,7 @@ inference'a girerse agent'ın context'i bozulur ve hata **sessizce** oluşur.
 | 8 | API | ✅ mesaj/kuyruk/sürücü/kesme uçları |
 | 9 | Projeksiyon | ✅ `SNAPSHOT_VERSION` 2, snapshot doğruluğu yeni alanlarla geçiyor |
 | 10 | UI | ✅ Composer her zaman açık, QueueList, DriverBadge, kesme düğmesi |
-| 11 | Kapı script'i | ✅ `gate:w5` (sahte koşum ortamı) + `gate:w5:agent` |
+| 11 | Kapı script'i | ✅ `gate:w5` 25/25 · `gate:w5:agent` 5/5 (Gemini) |
 | 12 | Cuma dogfood | ⏳ iki kişi gerekiyor |
 | 13 | README | ✅ |
 
@@ -63,6 +63,29 @@ turn.failed           → reason: "interrupted"
 UI aradaki süreyi **"Kesme istendi — agent şu an bir komutu bitiriyor"** olarak gösterir.
 Uzun bir bash komutunun ortasında anlık durdurma sözü verilmiyor; 30 saniyede kapanmayan
 turn için sert kesme var (`mode: hard_kill`) ve turn `interrupted` ile kapanır.
+
+### Ölçüm: kesme 32 saniyeden 1 saniyenin altına indi
+
+Gerçek agent kapısı (`gate:w5:agent`, Gemini, `sleep 120` koşarken) ilk koşumda şunu
+ölçtü:
+
+```
+mode = hard_kill · 32 sn
+```
+
+Sebep: Gemini CLI'ya SIGTERM göndermek onun başlattığı `sleep 120` çocuğunu durdurmuyordu.
+Turn kapanmıyor, host 30 saniye sonra runner'ı sert kesiyordu. Yani ürün "kestim" diyordu
+ama kullanıcı yarım dakika bekliyordu.
+
+Düzeltme: Gemini süreci `detached: true` ile **kendi süreç grubunda** başlatılıyor ve sinyal
+gruba gönderiliyor (`process.kill(-pid)`). Aynı kapı şimdi şunu ölçüyor:
+
+```
+mode = abort · 0 sn (bir saniyenin altında)
+```
+
+Bu, sahte koşum ortamıyla asla bulunamayacak bir hataydı: sahte runner'ın çocuk süreci yok.
+Gerçek agent kapısının iki kontrol için ayrı tutulmasının gerekçesi de bu.
 
 Kesilen mesaj **yeniden koşmaz**. İptal edilen, sunucu yeniden başlatmasıyla düşen mesaj da
 koşmaz — Hafta 2'den gelen kural: agent işin yarısını yapmış olabilir.
@@ -116,6 +139,46 @@ Görev tanımı `message.cancelled.by` alanını zorunlu bir kullanıcı olarak 
 aynı event'in sebep listesinde `server_restart` ve `agent_failed` var — o iptalleri bir insan
 yapmıyor. Alan `nullable` yapıldı; kaydın sahibini "iptal eden" diye yazmak log'u yalancı
 yapardı.
+
+## Kapı çıktısı (19 Eylül 2026)
+
+| Kontrol | Sonuç |
+| --- | --- |
+| İki kişi aynı anda yazıyor | ikisi de `202`, `position` 1 ve 2 |
+| Koşum boyunca iki `running` satır | **139 örneklemede en yüksek 1** |
+| Event sırası | `queued → received → started`; ikinci turn birincinin bitişinden sonra |
+| 5 paralel mesaj | 5 turn, sıra enqueue sırasıyla aynı, hiçbiri kayıp değil |
+| Kuyruk sınırı | 11. mesaj `429` |
+| İptal | kendi `200` · başkasının `403` · owner `200` · iptal edilen mesaj hiç çalışmadı |
+| Aktör etiketi | `agent.text` içinde `Ayse` (16 kez) |
+| Ham metin | 22 `message.queued` event, hiçbirinde önek yok |
+| Sürücü | ikinci claim `409` + mevcut sürücü · devir yazıldı · eski sürücünün kesmesi `403` |
+| Devir kontrolleri | eski `version` `409` · üye olmayan `400` · izleyici hedefi `400` |
+| Kesme | `requested` hemen · `applied` + `turn.failed(interrupted)` 2 sn içinde · agent `idle` |
+| Kesme sonrası | sıradaki mesaj kendiliğinden başladı |
+| Kesme yetkisi | sürücü değil `403` · koşan turn yok `409` · izleyici `403` |
+| Sunucu yeniden başlatma | koşan satır `cancelled(server_restart)`, bekleyenler korundu ve aktı, kesilen tekrar koşmadı |
+| Agent `failed` | bekleyen 2 kayıt `cancelled(agent_failed)`, kuyruk boş |
+| İzleyici | mesaj `403` · sürücülük `403` · kuyruk `200` |
+| Sürücülük düşmesi | presence kaybından **61 sn** sonra (`driver.released · left_room`) |
+| Regresyon | 226 birim test · Hafta 1, 3, 4 kapıları |
+
+**Geçen: 25 · Kalan: 0.** Gerçek agent kapısı (Gemini): **5/5**.
+
+Kapının kendisi üç koşumda oturdu ve üçü de kapı hatasıydı, ürün hatası değil:
+
+1. **Çıplak `wait`** — hayatta kalan örnekleyici alt kabuğunu bekledi, kapı 10 dakika asılı
+   kaldı. Bu tuzak devir notunda **yazıyordu** ve yine düşüldü; artık yalnızca kapının kendi
+   başlattığı PID'ler bekleniyor.
+2. **Örnek başına bir `docker compose exec`** — örnek başına ~1,5 sn, 3 saniyelik koşumda
+   3 örnek. "İki `running` satır yok" iddiasını 3 örnekle kanıtlamak, ölçmemekle neredeyse
+   aynı şey. Örnekleme Postgres'in içine taşındı (`\watch 0.1`) → 139 örnek.
+3. **İptal kontrolü boş kuyrukta koşuyordu** — mesaj anında `running` olduğu için iptal
+   `409` alıyordu. Ürün doğru davranıyordu; senaryo yanlıştı (önce agent meşgul edilmeli).
+
+Ayrıca Hafta 4 kapısı düştü ve sebebi gerçek bir regresyon riskiydi: davetin varsayılan rolü
+`member` olunca "izleyici yazamaz" kontrolü sessizce başka bir şeyi ölçmeye başladı. Kapı
+artık rolü açıkça `viewer` veriyor.
 
 ## Kalan iş
 
