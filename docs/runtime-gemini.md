@@ -137,10 +137,28 @@ mode = abort · 1 saniyenin altında
 Grup her yolda öldürülüyor (kesme, `shutdown`, çıkış), yani container içinde sahipsiz süreç
 kalmıyor.
 
-**Sistem prompt'u yok.** Gemini CLI'da sistem prompt'u veren bir bayrak bulunmuyor
-(`--help` çıktısında yok) ve rol YAML'ındaki `system_prompt` bu koşum ortamında
-uygulanmıyor. Hafta 5'in çok kişili oda notu (`MULTIPLAYER_PROMPT_NOTE`) da bu yüzden
-Gemini agent'ına ulaşmıyor: Gemini agent'ı kimin yazdığını yalnızca mesajın başındaki
-`[İsim]: ` önekinden anlar. Kapı ölçümü bunun yeterli olduğunu gösteriyor (agent "Ayse"
-diye cevap verdi), ama çelişen iki yönerge durumunda davranışı Claude yolundan farklı
-olabilir.
+## Rol bağlamı: sistem prompt'u yerine `GEMINI.md`
+
+Gemini CLI'da sistem prompt'u veren bir bayrak **yok** (`--help` çıktısında yok), yani rol
+YAML'ındaki `systemPrompt` bu koşum ortamına uzun süre hiç ulaşmadı.
+
+Çözüm: runner her başlangıçta agent'ın çalışma alanına `GEMINI.md` yazıyor — CLI çalışma
+alanındaki bu dosyayı bağlam olarak okuyor. Dosyanın içinde üç şey var:
+
+1. rol YAML'ındaki `systemPrompt`,
+2. çok kişili oda notu (`MULTIPLAYER_PROMPT_NOTE` — Claude yolunda `systemPrompt.append`
+   ile giden aynı sabit),
+3. **kurulum doğrulama satırı**: "oda kurulumu dogru mu" sorusuna `ODA-KURULUMU-OK <rol>`
+   cevabı.
+
+Üçüncüsü ölçüm için: "model rolünü biliyor mu" sorusunu serbest metinden okumak güvenilmez,
+cevabı dosyadan mı mesajdan mı çıkardığı belirsiz kalır. Bu satırın tek kaynağı dosyadır.
+`gate:w5:agent` hem dosyanın diskte olduğunu hem modelin o satırı yazdığını doğruluyor —
+ölçüldü, geçti.
+
+Dosya her başlangıçta **üzerine yazılır**: tek kaynak rol YAML'ı, dosyanın elle düzenlenmiş
+hâli değil. Yazılamazsa turn engellenmez, `log` ile söylenir (rolsüz agent çalışır ama
+rolünü bilmez).
+
+İki yol birbirinin **yedeği**: Claude tarafında sistem prompt'u, Gemini tarafında bağlam
+dosyası. Anahtar beklemeden rol sistemi bu yolla doğrulanabiliyor.

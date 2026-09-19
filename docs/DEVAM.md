@@ -25,10 +25,10 @@ Kurulum sayısı değil, star sayısı değil.
 | 2 | Tek agent, headless koşum | ⏳ kod tamam, `gate:w2` **koşulmadı** (Claude anahtarı yok) |
 | 3 | Stream ve terminal görünümü | ✅ `gate:w3` 11/11 · `gate:w3:agent` 2/2 |
 | 4 | Redaction ve ikinci izleyici | ✅ `gate:w4` 22/22 · `gate:w4:agent` 5/5 · dogfood ✅ |
-| 5 | **Yazma yetkisi, kuyruk, kesme** | ✅ `gate:w5` 25/25 · `gate:w5:agent` 5/5 · ⏳ **dogfood yapılmadı** |
+| 5 | **Yazma yetkisi, kuyruk, kesme** | ✅ `gate:w5` 25/25 · `gate:w5:agent` 7/7 · ⏳ **dogfood yapılmadı** |
 | 6 | Diff görünümü ve satır yorumu | ⬜ sırada |
 
-**226 test.** Paketler: `protocol`, `redact`, `view`, `core`, `runner`, `runner-gemini`.
+**228 test.** Paketler: `protocol`, `redact`, `view`, `core`, `runner`, `runner-gemini`.
 Hafta 5'te 26 test eklendi: 12 kuyruk + 8 sürücü (gerçek DB + sahte runner) + 6 projeksiyon.
 
 ## Yarın ilk üç iş
@@ -53,12 +53,7 @@ README "Hafta 5 dogfood notları" başlığına yazılacak — başlık hazır, 
 3. Agent iki kişiye birden cevap verirken karıştı mı? Karıştıysa hangi durumda?
 4. Sürücülüğü devretmek gerçekten 2 tık mıydı?
 
-### 2. Push
-
-Hafta 5'in tüm commit'leri yerelde duruyor; **push edilmedi**. Hafta sonu tanımının son
-maddesi bu.
-
-### 3. Hafta 6'ya başla
+### 2. Hafta 6'ya başla
 
 Görev tanımı: `C:\Users\KEREM\Downloads\HAFTA-6-GOREV.md` (Kerem verecek).
 Yol haritasındaki hedef: *satıra "bunu böl" yazılıyor, agent 30 sn'de düzeltiyor, ikinci
@@ -68,6 +63,29 @@ Hafta 6'ya taşınan borç: **izleyiciye "yetki iste" eylemi yok.** İzleyici sa
 olduğunu VE nasıl değişeceğini söylüyor ("oda sahibi seni katılımcı yaparsa…") ama izleyicinin
 tek tıkla yetki isteyebileceği bir yol yok. Hafta 5 kapsamında talep akışı YOKTU (görev
 tanımı açıkça kapsam dışı bıraktı), bu yüzden metin düzeltildi, akış eklenmedi.
+
+## Elle test ederken çıkan dört şey (kapılardan SONRA)
+
+Kapılar yeşilken arayüz elle denendi ve dördü de gerçek sorundu:
+
+1. **Giriş ekranı yalan söylüyordu.** `AUTH_DEV_MODE` olmadan `/auth/request` `{ ok: true }`
+   dönüyor, ekran "bağlantı gönderdik" yazıyordu; e-posta gönderimi Faz 3'te, yani giriş
+   imkânsızdı. Uç artık `503` + ne yapılacağını söylüyor. `.env`'e `AUTH_DEV_MODE=true`,
+   `APP_BASE_URL`, `COOKIE_SECURE=false` eklendi — `npm run dev:all` ile de geçerli.
+2. **Hafta 5'ten önce açılmış odalarda sürücü satırı yoktu** → sürücü uçları "agent
+   bulunamadı" (`404`). `005_driver_backfill.sql` + kodda kendini onarma.
+3. **Gemini rol bağlamı yoktu** → `GEMINI.md`: runner her başlangıçta rol YAML'ını çalışma
+   alanına yazıyor (rol prompt'u + çok kişili not + kurulum doğrulama satırı). Kapı hem
+   dosyayı hem modelin o satırı yazdığını ölçüyor. **Claude anahtarı beklemeden rol sistemi
+   doğrulanabiliyor**; Claude'un `systemPrompt.append`'i ile birbirinin yedeği.
+4. **4xx'ler artık sunucu logunda** (üretim dışında): `403 GET /rooms/... — sebep`. "403
+   alıyorum" demek hangi uç olduğunu söylemiyordu.
+
+**Açık kalan tek gözlem:** elle testte bir `403` görüldü ama hangi uçtan geldiği
+bilinmiyordu. En olası iki sebep: (a) tarayıcı adresinde `?room=<id>` üye olunmayan bir odayı
+gösteriyor (kapı koşumlarının açtığı odalar gibi) → `GET /rooms/:id` `403` verir ve SSE
+bağlanmaz; (b) oturum başka bir e-postaya ait. Tekrarlarsa sunucu logundaki satır tam yolu
+söyleyecek.
 
 ## Hafta 5'te ne yapıldı
 
@@ -128,7 +146,8 @@ AUTH_DEV_MODE=true SPAWN_CONTAINER=0 AGENT_FAKE_RUNTIME=1 npm run api
 Sunucu açılışta `koşum ortamı SAHTE` yazar. `NODE_ENV=production` iken kurulmaz.
 
 **Gemini kotası** ücretsiz katmanda model başına günde 20 istek; Pasifik gece yarısı
-(≈ TSİ 10:00) sıfırlanıyor. Bugün ~8 istek harcandı (agent kapıları + tarayıcı testi).
+(≈ TSİ 10:00) sıfırlanıyor. 19 Eylül'de ~13 istek harcandı (agent kapıları + tarayıcı testi
++ rol bağlamı ölçümü). `gate:w5:agent` koşum başına ÜÇ istek harcar.
 
 ## Tuzaklar
 

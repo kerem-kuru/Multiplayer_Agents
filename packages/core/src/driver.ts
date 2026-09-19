@@ -2,7 +2,7 @@ import type pg from "pg";
 import type { NewRoomEvent } from "@agent-rooms/protocol";
 import { appendEvent } from "./db/eventStore.js";
 import { getPool } from "./db/pool.js";
-import { latestSession } from "./room/rooms.js";
+import { getRoomConfig, latestSession } from "./room/rooms.js";
 import { listPresence, subscribePresence } from "./presence.js";
 
 /**
@@ -105,7 +105,38 @@ export async function getDriver(
     [roomId, agentName],
   );
   const row = res.rows[0];
-  return row ? toRecord(row) : null;
+  if (row) return toRecord(row);
+  // Satır yoksa kendini onar (aşağıdaki gerekçe).
+  return (await healDriverRow(roomId, agentName, pool))
+    ? getDriver(roomId, agentName, pool)
+    : null;
+}
+
+/**
+ * Satırı olmayan bir agent için sürücü satırını SONRADAN yaz.
+ *
+ * Neden gerekiyor: sürücü satırları Hafta 5'te geldi ve daha önce açılmış
+ * odalarda yoktu. Migration 005 mevcut odaları dolduruyor, ama migration'ı
+ * koşturmayı unutan bir kurulumda sürücü uçları `404` dönüyor ve ekranda
+ * "agent bulunamadı" yazıyor — oysa agent orada. Eksik bir PROJEKSİYON
+ * satırını tamir etmek, kullanıcıya olmayan bir sorun göstermekten iyidir.
+ *
+ * YAML'da olmayan bir agent adı için satır yazılmaz: 404 o durumda doğru
+ * cevap.
+ */
+async function healDriverRow(
+  roomId: string,
+  agentName: string,
+  pool: pg.Pool,
+): Promise<boolean> {
+  const config = await getRoomConfig(roomId, pool).catch(() => null);
+  if (!config?.agents.some((a) => a.name === agentName)) return false;
+  await ensureDriverRows(
+    roomId,
+    config.agents.map((a) => a.name),
+    pool,
+  );
+  return true;
 }
 
 export async function isDriver(
@@ -146,6 +177,10 @@ export async function claimDriver(
     const row = cur.rows[0];
     if (!row) {
       await client.query("ROLLBACK");
+      // Eksik satırı tamir edip BİR kez yeniden dene; hâlâ yoksa agent gerçekten yok.
+      if (await healDriverRow(roomId, agentName, pool)) {
+        return claimDriver(roomId, agentName, user, opts, pool);
+      }
       throw new DriverError(404, `agent bulunamadı: ${agentName}`);
     }
 

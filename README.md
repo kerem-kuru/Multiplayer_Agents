@@ -76,6 +76,11 @@ AUTH_DEV_MODE=true                   # SADECE geliştirme: bağlantıyı yanıtt
 COOKIE_SECURE=false                  # HTTPS ardındaysan true
 ```
 
+**E-posta gönderimi henüz yok (Faz 3).** Bu yüzden `AUTH_DEV_MODE=true` olmadan giriş
+yapılamaz ve uç bunu açıkça söyler (`503`): eskiden `{ ok: true }` dönüp ekranda "bağlantı
+gönderdik" yazıyordu — hiçbir bağlantı gitmediği hâlde. `.env` dosyasında durması
+`npm run dev:all` ile de geçerli olmasını sağlar.
+
 **`AUTH_DEV_MODE` yetkilendirmeyi ETKİLEMEZ.** Açıkken de her uç üyelik ve rol kontrolü
 yapar; tek yaptığı, e-posta gönderimi olmadığı için giriş bağlantısını yanıtta göstermek.
 Üretimde kapalı olmalı.
@@ -287,6 +292,7 @@ Katalog zaten sağlayıcı-bağımsız: `tool.call`, `tool.result`, `turn.comple
 | Yapılandırılmış akış | ✅ stream-json | ✅ stream-json |
 | Tool kapısı | ✅ `PreToolUse` hook'u **engeller** | ⚠️ `--allowed-tools` kısıtlar; ihlal **saptanır**, engellenmez |
 | Oturum sürekliliği | ✅ `resume` | ✅ `--session-id` / `--resume` |
+| Rol prompt'u | ✅ `systemPrompt.append` | ✅ çalışma alanına yazılan `GEMINI.md` (CLI'da bayrak yok) |
 | Tool çıktısının metni | ✅ | ❌ sadece `status` |
 | USD maliyet | ✅ | ❌ sadece token sayısı |
 | SDK tool listesi | ✅ `turn.started.tools` | ❌ boş |
@@ -294,6 +300,17 @@ Katalog zaten sağlayıcı-bağımsız: `tool.call`, `tool.result`, `turn.comple
 Ölçüm ayrıntıları ve entegrasyonda çıkan hatalar: `docs/runtime-gemini.md`.
 
 Anahtarlar bağımsız: `ANTHROPIC_API_KEY` yokken Gemini agent'ları çalışır, tersi de geçerli. Her koşum ortamı yalnızca kendi anahtarını görür.
+
+**Rol bağlamı iki yoldan gidiyor ve ikisi birbirinin yedeği.** Claude tarafında rol
+YAML'ındaki `systemPrompt` + çok kişili oda notu SDK'nın sistem prompt'una eklenir. Gemini
+CLI'da sistem prompt'u veren bir bayrak yok; runner her başlangıçta agent'ın çalışma alanına
+`GEMINI.md` yazar (rol prompt'u + aynı çok kişili not + bir kurulum doğrulama satırı) ve CLI
+onu bağlam olarak okur. Dosya her başlangıçta üzerine yazılır: tek kaynak rol YAML'ı.
+
+Doğrulama tahmine bırakılmadı: dosyada *"oda kurulumu dogru mu"* sorusuna
+`ODA-KURULUMU-OK <rol>` cevabı bağlı ve `gate:w5:agent` hem dosyanın diskte olduğunu hem
+modelin o satırı yazdığını ölçüyor. Bu sayede **Claude anahtarı beklemeden rol sistemi
+doğrulanabiliyor**.
 
 ## Event log
 
@@ -331,7 +348,11 @@ döndü, sol çubuk üçünü de çizdi). Kontrolden sonra geçici YAML silindi.
 | Sürücülük presence kaybından 60 sn sonra düşüyor | Anında düşürmek her F5'te sürücülüğü elinden alırdı. Presence geri gelirse sayaç sıfırlanıyor. |
 | Kapı gerçek agent'sız koşuyor (`AGENT_FAKE_RUNTIME=1`) | Ölçülen şey model çıktısı değil SIRALAMA. Sahte runner'la yarış penceresi gerçeğinden geniş, kapı ücretsiz ve deterministik. Üretimde kurulamaz ve sunucu açılışta "koşum ortamı SAHTE" yazar: sessizce sahte cevap veren bir sunucu, hiç cevap vermeyenden kötüdür. Modelin etiketi okuması ve gerçekten koşan bir işin kesilmesi ayrı kapıda. |
 | Örnekleme Postgres'in içinde (`\watch`) | İlk hâl her örnek için yeni bir `docker compose exec` açıyordu: örnek başına ~1,5 sn, 3 saniyelik koşumda 3 örnek. "İki `running` satır yok" iddiasını 3 örnekle kanıtlamak ölçmemekle neredeyse aynı şey. |
-| Gemini'de çok kişili oda notu YOK | Gemini CLI'da sistem prompt'u veren bir bayrak yok; rol YAML'ındaki `system_prompt` de o yolda zaten uygulanmıyor. Gemini agent'ı kimin yazdığını yalnızca `[İsim]: ` önekinden anlar. Uydurma bir çözüm (prompt'a gizlice not eklemek) event log'da görünmeyen bir davranış yaratırdı. |
+| Gemini'de rol bağlamı `GEMINI.md` ile gidiyor | CLI'da sistem prompt'u bayrağı yok. Kullanıcı mesajının içine gizlice not eklemek event log'da görünmeyen bir davranış yaratırdı; bağlam dosyası diskte duruyor, okunabiliyor ve kapı hem dosyayı hem modelin onu okuduğunu ölçüyor. Rol sistemi böylece Claude anahtarı beklemeden doğrulanıyor. |
+| Kurulum doğrulaması serbest metinle değil SABİT bir satırla | "Model rolünü biliyor mu" sorusunu cevabın üslubundan okumak güvenilmez: bilgiyi dosyadan mı mesajdan mı aldığı belirsiz kalır. Dosyada belirli bir soruya belirli bir cevap bağlı ve o cevabın tek kaynağı dosya. |
+| E-posta gönderimi yokken `/auth/request` artık `503` | Eskiden `{ ok: true }` dönüyordu ve ekran "bağlantı gönderdik" yazıyordu: gönderici hiç kurulmadığı için giriş imkânsızdı ve arayüz kullanıcıya yalan söylüyordu (elle test ederken gerçekten oldu). "Yapamıyorum" demek doğrusu. |
+| Eksik sürücü satırı kendini onarıyor | Hafta 5'ten önce açılmış odalarda `agent_driver` satırı yok ve sürücü uçları "agent bulunamadı" diyordu — oysa agent orada. Migration mevcut odaları dolduruyor; kod eksik satırı rol YAML'ından yeniden yazıyor. Eksik bir projeksiyon satırı, kullanıcıya olmayan bir sorun göstermemeli. |
+| 4xx'ler sunucu loguna yazılıyor (üretim dışında) | "403 alıyorum" hangi uç olduğunu söylemiyor. Sunucunun bildiği bir şeyi kullanıcıya tarayıcı ağ sekmesinde aratmak yanlış. |
 
 ## Ölçülecek tek metrik
 

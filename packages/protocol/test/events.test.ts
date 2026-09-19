@@ -130,6 +130,36 @@ describe("sağlayıcı bağımsızlığı", () => {
     expect(hasProviderBackend({})).toBe(false);
   });
 
+  /**
+   * Gemini'de sistem prompt'u veren bayrak yok; rol prompt'u `GEMINI.md`
+   * üzerinden gidiyor. Bu testin ölçtüğü şey dosyanın İÇERİĞİ: rol prompt'u,
+   * çok kişili oda notu ve kurulum doğrulama satırı üçü birden orada mı.
+   */
+  it("GEMINI.md rol prompt'unu, çok kişili notu ve doğrulama satırını taşır", async () => {
+    const { geminiContextFile, MULTIPLAYER_PROMPT_NOTE, SETUP_PROBE_ANSWER, SETUP_PROBE_QUESTION } =
+      await import("../src/prompts.js");
+    const text = geminiContextFile({
+      name: "backend",
+      systemPrompt: "Sen bu odanin backend gelistiricisisin.",
+    });
+    expect(text).toContain("Sen bu odanin backend gelistiricisisin.");
+    expect(text).toContain(MULTIPLAYER_PROMPT_NOTE);
+    expect(text).toContain(SETUP_PROBE_QUESTION);
+    expect(text).toContain(`${SETUP_PROBE_ANSWER} backend`);
+    // Üretilmiş dosya olduğu dosyanın kendisinde yazıyor: elle düzenleyen
+    // kişi değişikliğinin kalıcı olmadığını görmeli.
+    expect(text).toContain("ÜRETİLMİŞ DOSYA");
+  });
+
+  it("çok kişili oda notu Claude yolunda rol prompt'unun YANINA ekleniyor", async () => {
+    const { appendMultiplayerNote, MULTIPLAYER_PROMPT_NOTE } = await import("../src/prompts.js");
+    const merged = appendMultiplayerNote("Rol metni.");
+    expect(merged.startsWith("Rol metni.")).toBe(true);
+    expect(merged).toContain(MULTIPLAYER_PROMPT_NOTE);
+    // Rol prompt'u boşsa yalnızca not kalır; boş satırlarla başlamaz.
+    expect(appendMultiplayerNote("   ")).toBe(MULTIPLAYER_PROMPT_NOTE);
+  });
+
   it("rol YAML'ı koşum ortamını taşır, varsayılanı claude", async () => {
     const { AgentConfig } = await import("../src/room-config.js");
     const a = AgentConfig.parse({

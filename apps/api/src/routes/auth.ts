@@ -5,7 +5,6 @@ import {
   consumeMagicLink,
   findOrCreateUser,
   issueMagicLink,
-  MAGIC_LINK_TTL_MINUTES,
 } from "../auth/magic-link.js";
 import {
   clearSessionCookie,
@@ -37,14 +36,30 @@ export function authRoutes(cfg: ApiConfig) {
     const body = RequestBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) throw new HttpError(400, "geçerli bir e-posta gerekli");
 
-    const link = await issueMagicLink(body.data.email, cfg.appBaseUrl, body.data.next);
-
-    if (cfg.authDevMode) {
-      // Geliştirme kolaylığı: linki hem loga hem yanıta koy.
-      console.log(`giriş bağlantısı (${body.data.email}): ${link.url}`);
-      return c.json({ ok: true, devLink: link.url, expiresAt: link.expiresAt });
+    /**
+     * E-POSTA GÖNDERİMİ HENÜZ YOK (Faz 3).
+     *
+     * `AUTH_DEV_MODE` kapalıyken bu uç eskiden `{ ok: true }` dönüyordu ve
+     * ekranda "adresine bir bağlantı gönderdik" yazıyordu — hiçbir bağlantı
+     * gitmediği için giriş imkânsızdı ve arayüz kullanıcıya YALAN söylüyordu.
+     * Gerçekte oldu: `npm run dev:all` bu değişkeni geçirmiyor, elle test
+     * eden kişi bekleyen bir e-posta sandı.
+     *
+     * Gönderici kurulduğunda bu dal gerçek gönderime bağlanır; o güne kadar
+     * "yapamıyorum" demek doğrusu.
+     */
+    if (!cfg.authDevMode) {
+      throw new HttpError(
+        503,
+        "e-posta gönderimi henüz kurulmadı: sunucuyu AUTH_DEV_MODE=true ile koş " +
+          "(giriş bağlantısı ekranda ve sunucu logunda görünür)",
+      );
     }
-    return c.json({ ok: true, expiresInMinutes: MAGIC_LINK_TTL_MINUTES });
+
+    const link = await issueMagicLink(body.data.email, cfg.appBaseUrl, body.data.next);
+    // Geliştirme kolaylığı: linki hem loga hem yanıta koy.
+    console.log(`giriş bağlantısı (${body.data.email}): ${link.url}`);
+    return c.json({ ok: true, devLink: link.url, expiresAt: link.expiresAt });
   });
 
   app.get("/auth/callback", async (c) => {

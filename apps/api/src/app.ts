@@ -449,6 +449,16 @@ export function createApp(
 
   app.onError((err, c) => {
     if (err instanceof HttpError) {
+      /**
+       * 4xx'i SUNUCU LOGUNA yaz (üretim dışında).
+       *
+       * Elle test ederken "403 alıyorum" demek yetmiyor: hangi uç olduğu
+       * görünmeden hata aranamıyor. Tarayıcı ağ sekmesine bakmak zorunda
+       * kalmak, sunucunun bildiği bir şeyi kullanıcıya aratmaktır.
+       */
+      if (process.env.NODE_ENV !== "production" && err.status >= 400) {
+        console.warn(`${err.status} ${c.req.method} ${new URL(c.req.url).pathname} — ${err.message}`);
+      }
       return c.json({ error: err.message, issues: err.issues ?? [] }, err.status);
     }
     // Beklenmeyen hata: mesajı geç, yığını geçme.

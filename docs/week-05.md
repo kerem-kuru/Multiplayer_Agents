@@ -17,7 +17,7 @@ inference'a girerse agent'ın context'i bozulur ve hata **sessizce** oluşur.
 | 4 | Kuyruk ve zamanlayıcı | ✅ 12 birim test, gerçek DB + sahte runner |
 | 5 | Sürücü | ✅ 8 birim test |
 | 6 | Kesme (runner tarafı) | ✅ `abort` yolu; streaming input'a geçilmedi (karar notu) |
-| 7 | Sistem prompt'u: odada birden fazla insan | ✅ Claude yolunda; Gemini'de sistem prompt'u yok (bilinen sınır) |
+| 7 | Sistem prompt'u: odada birden fazla insan | ✅ Claude'da `systemPrompt.append`, Gemini'de `GEMINI.md` — ikisi birbirinin yedeği |
 | 8 | API | ✅ mesaj/kuyruk/sürücü/kesme uçları |
 | 9 | Projeksiyon | ✅ `SNAPSHOT_VERSION` 2, snapshot doğruluğu yeni alanlarla geçiyor |
 | 10 | UI | ✅ Composer her zaman açık, QueueList, DriverBadge, kesme düğmesi |
@@ -180,13 +180,33 @@ Ayrıca Hafta 4 kapısı düştü ve sebebi gerçek bir regresyon riskiydi: dave
 `member` olunca "izleyici yazamaz" kontrolü sessizce başka bir şeyi ölçmeye başladı. Kapı
 artık rolü açıkça `viewer` veriyor.
 
+## Kapı sonrası gelen dört düzeltme (elle test)
+
+Kapılar geçtikten sonra arayüz elle denendi ve dört şey çıktı:
+
+1. **Giriş ekranı yalan söylüyordu.** `AUTH_DEV_MODE` kapalıyken `/auth/request`
+   `{ ok: true }` dönüyor, ekran "adresine bir bağlantı gönderdik" yazıyordu — oysa
+   e-posta gönderimi henüz kurulmadı (Faz 3), yani giriş imkânsızdı. `npm run dev:all` bu
+   değişkeni geçirmiyor ve elle test eden kişi bekleyen bir e-posta sandı. Uç artık `503` ve
+   ne yapılacağını söylüyor: *"sunucuyu AUTH_DEV_MODE=true ile koş"*. `.env`'e de eklendi ki
+   `dev:all` ile de geçerli olsun.
+2. **Hafta 5'ten önce açılmış odalarda sürücü satırı yoktu** ve sürücü uçları `404`
+   dönüyordu ("agent bulunamadı" — oysa agent orada). `005_driver_backfill.sql` mevcut
+   odaları odanın AÇILDIĞI ANDAKİ konfigürasyonundan dolduruyor; ayrıca
+   `getDriver`/`claimDriver` eksik satırı rol YAML'ından **kendi kendine tamir ediyor**
+   (migration'ı koşturmayı unutan kurulum için).
+3. **4xx'ler artık sunucu logunda.** "403 alıyorum" demek hangi uç olduğunu söylemiyor;
+   sunucunun bildiği bir şeyi kullanıcıya aratmak yanlış. Üretim dışında her `HttpError`
+   `403 GET /rooms/... — sebep` olarak loglanıyor.
+4. **Gemini rol bağlamı** (`GEMINI.md`) — yukarıdaki Adım 7 satırı.
+
 ## Kalan iş
 
 - **Streaming input'a geçilmedi.** Kesme `abortController` ile yapılıyor (`mode: "abort"`).
   Görev tanımı bu yolu açıkça izin veriyor; gerekçe karar notlarında.
-- **Gemini'de sistem prompt'u yok**: rol YAML'ındaki `system_prompt` ve çok kişili oda notu
-  Gemini agent'ına ulaşmıyor (CLI'da karşılık gelen bir bayrak yok, `GEMINI.md` yolu
-  kurulmadı). Gemini agent'ı kimin yazdığını yalnızca mesajın başındaki `[İsim]: `
-  önekinden anlar.
+- ~~Gemini'de sistem prompt'u yok~~ → **kapandı:** rol bağlamı `GEMINI.md` ile gidiyor.
+  Gemini CLI'da sistem prompt'u bayrağı hâlâ yok; runner rol YAML'ını çalışma alanındaki
+  bağlam dosyasına yazıyor ve kapı bunun modele ULAŞTIĞINI ölçüyor (agent doğrulama
+  satırını yazdı). Claude yolundaki `systemPrompt.append` ile birbirinin yedeği.
 - **`gate:w2` hâlâ koşulmadı** (Claude anahtarı yok) — Hafta 2'den kalan boşluk.
 - Hafta 5 dogfood iki kişi gerektiriyor.

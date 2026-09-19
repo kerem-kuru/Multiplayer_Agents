@@ -1,8 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import path from "node:path";
 import readline from "node:readline";
 import type { NewRoomEvent } from "@agent-rooms/protocol";
-import { AgentConfig, PROTOCOL_VERSION, RunnerCommand, RunnerOutput } from "@agent-rooms/protocol";
+import {
+  AgentConfig,
+  PROTOCOL_VERSION,
+  RunnerCommand,
+  RunnerOutput,
+  geminiContextFile,
+} from "@agent-rooms/protocol";
 import { mapStreamLine, resolveGeminiTools } from "./map-stream.js";
 
 /**
@@ -28,6 +36,13 @@ import { mapStreamLine, resolveGeminiTools } from "./map-stream.js";
  *
  * 3. `--approval-mode yolo` KULLANILMAZ. Gemini'nin kendi kapısını tamamen
  *    kapatır. Bunun yerine auto_edit + --allowed-tools kullanılır.
+ *
+ * 4. SİSTEM PROMPT'U YERİNE `GEMINI.md`. Gemini CLI'da sistem prompt'u veren
+ *    bir bayrak yok; rol YAML'ındaki `systemPrompt` bu koşum ortamına hiç
+ *    ulaşmıyordu. CLI çalışma alanındaki `GEMINI.md`'yi bağlam olarak okuyor,
+ *    runner da onu her başlangıçta rol YAML'ından yazıyor. Claude yolundaki
+ *    `systemPrompt.append` ile birbirinin yedeği: biri olmasa diğeri rolü
+ *    taşır.
  */
 
 const toStderr = (...args: unknown[]): void => {
@@ -292,6 +307,29 @@ const turnRef = (messageId: string): { agent: string; messageId: string } => ({
   agent: agent.name,
   messageId,
 });
+
+/**
+ * Rol bağlamını çalışma alanına yaz. ÜZERİNE YAZAR: tek kaynak rol YAML'ı,
+ * dosyanın elle düzenlenmiş hâli değil.
+ *
+ * Yazamamak turn'ü engellemez — rol bağlamı olmadan da agent çalışır, sadece
+ * rolünü bilmez. Sessizce geçmek yerine söylenir.
+ */
+const writeContextFile = (): void => {
+  const target = path.join(process.cwd(), "GEMINI.md");
+  try {
+    writeFileSync(target, geminiContextFile(agent), "utf8");
+    out({ kind: "log", level: "info", msg: `rol baglami yazildi: ${target}` });
+  } catch (err) {
+    out({
+      kind: "log",
+      level: "warn",
+      msg: `rol baglami yazilamadi (${target}): ${String(err)} — agent rolunu bilmeyecek`,
+    });
+  }
+};
+
+writeContextFile();
 
 out({ kind: "ready", pid: process.pid, protocolVersion: PROTOCOL_VERSION });
 setInterval(() => out({ kind: "heartbeat", busy }), 5_000);

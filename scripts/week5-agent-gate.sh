@@ -12,9 +12,11 @@
 #      söylüyor mu?
 #   2. KESME: gerçekten koşan bir işin ortasında kesme uygulanıyor mu ve
 #      turn `interrupted` ile kapanıyor mu?
+#   3. ROL BAĞLAMI: rol prompt'u modele ULAŞIYOR mu? (Gemini'de sistem prompt'u
+#      veren bayrak yok; rol `GEMINI.md` üzerinden gidiyor.)
 #
-# Anahtar/kota yoksa ATLAR (başarısız saymaz). İki istek harcar — Gemini
-# ücretsiz katmanında günde 20 istek var.
+# Anahtar/kota yoksa ATLAR (başarısız saymaz). ÜÇ istek harcar (etiket, rol
+# bağlamı, kesme) — Gemini ücretsiz katmanında günde 20 istek var.
 set -uo pipefail
 export MSYS_NO_PATHCONV=1
 
@@ -137,6 +139,35 @@ elif [ "$OUTCOME" = "turn.failed" ]; then
   echo "    (kota/anahtar sorunu ürün hatası değil — atlandı)"
 else
   no "agent cevabında isim yok"
+fi
+
+###############################################################################
+step "1b) Rol bağlamı: GEMINI.md modele ulaşıyor"
+# Dosya agent başlangıcında yazılıyor; önce diskte duruyor mu?
+CTX="rooms-data/$ROOM/worktrees/$AGENT/GEMINI.md"
+if [ -f "$CTX" ] && grep -q "ODA-KURULUMU-OK" "$CTX"; then
+  ok "$CTX yazıldı"
+else
+  no "rol bağlam dosyası yok: $CTX"
+fi
+
+# Sonra: modelin cevabı yalnızca O DOSYADAN gelebilecek bir satır mı?
+# Serbest metinden "rolünü biliyor mu" okumak güvenilmez; bu soru belirli bir
+# cevaba bağlı ve cevabın tek kaynağı bağlam dosyası.
+MID_CTX=$(gcurl -X POST "$BASE/rooms/$ROOM/agents/$AGENT/message" \
+  -H 'content-type: application/json' \
+  -d '{"text":"oda kurulumu dogru mu"}' | jget messageId)
+for _ in $(seq 1 "$TURN_TIMEOUT"); do
+  N=$(psql_q "SELECT count(*) FROM session_events WHERE session_id='$SID' AND type IN ('turn.completed','turn.failed') AND payload->>'messageId'='$MID_CTX'")
+  [ "$N" != "0" ] && break
+  sleep 1
+done
+PROBE=$(psql_q "SELECT count(*) FROM session_events WHERE session_id='$SID' AND type='agent.text' AND payload->>'messageId'='$MID_CTX' AND payload->>'text' LIKE '%ODA-KURULUMU-OK%'")
+if [ "${PROBE:-0}" -ge 1 ]; then
+  ok "agent doğrulama satırını yazdı (rol bağlamı modele ulaşıyor)"
+else
+  SAWTEXT=$(psql_q "SELECT left(coalesce(payload->>'text',''),120) FROM session_events WHERE session_id='$SID' AND type='agent.text' AND payload->>'messageId'='$MID_CTX' LIMIT 1")
+  no "doğrulama satırı gelmedi — agent şunu yazdı: $SAWTEXT"
 fi
 
 ###############################################################################
