@@ -1,4 +1,4 @@
-# Kaldığımız yer — 19 Eylül 2026 akşamı
+# Kaldığımız yer — 19 Eylül 2026, gece
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
 
@@ -28,32 +28,74 @@ Kurulum sayısı değil, star sayısı değil.
 | 5 | **Yazma yetkisi, kuyruk, kesme** | ✅ `gate:w5` 25/25 · `gate:w5:agent` 7/7 · ⏳ **dogfood yapılmadı** |
 | 6 | Diff görünümü ve satır yorumu | ⬜ sırada |
 
-**228 test.** Paketler: `protocol`, `redact`, `view`, `core`, `runner`, `runner-gemini`.
-Hafta 5'te 26 test eklendi: 12 kuyruk + 8 sürücü (gerçek DB + sahte runner) + 6 projeksiyon.
+**233 test.** Paketler: `protocol`, `redact`, `view`, `core`, `runner`, `runner-gemini`.
+Hafta 5'te 31 test eklendi: 12 kuyruk + 8 sürücü (gerçek DB + sahte runner) + 6 projeksiyon
++ 5 rol bağlamı / hata özeti.
 
-## Yarın ilk üç iş
+**Kod durumu:** her şey commit'li ve push'lu, çalışma ağacı temiz. Oda imajı Python'lu
+hâliyle yeniden derlendi.
 
-### 1. Hafta 5 dogfood (Adım 12) — TEK EKSİK İŞ
+**Makinede ne açık kaldı:** `postgres` + `redis` ayakta (yarın gerekli). API (8787) ve arayüz
+(5173) kapatıldı. Dünkü elle testten **üç oda container'ı ayakta** (eski, Python'suz imajdan):
+duruyorlar, zarar vermiyorlar. İstersen tek tek silinebilir —
+`docker rm -f agent-rooms-room-<kısa-id>` — ama o odalar kurtarılamaz; toplu silme yapma
+(canlı odaları öldürür, 5. tuzak).
 
-İki kişi, aynı agent, aynı anda, gerçek bir görev. Senaryo: biri görev verir, diğeri agent
-yanlış yola girdiğinde **keser** ve düzeltir, sonra **sürücülüğü devreder**.
+## Yarın ilk iş: ELLE TEST (yarım kaldı)
+
+Dün akşam gerçek ortam kurulmuş, ilk gerçek görev denenmiş ve iki şey çıkmıştı (aşağıda);
+ikisi de düzeltildi ama **elle test tamamlanmadı**. Yarın buradan devam:
 
 ```bash
 npm run db:up
-AUTH_DEV_MODE=true APP_BASE_URL="http://<lan-ip>:5173" \
-  ROOM_CONFIG=config/room.gemini.yaml npm run api
-WEB_HOST=1 WEB_ALLOWED_HOSTS="<lan-ip>,localhost" npm run dev:web
+
+# LAN IP'yi doğrula, değişmiş olabilir (dün 192.168.1.114 idi):
+#   PowerShell: Get-NetIPAddress -AddressFamily IPv4 | ? { $_.InterfaceAlias -like "Wi-Fi*" }
+IP=192.168.1.114
+
+AUTH_DEV_MODE=true APP_BASE_URL="http://$IP:5173" \
+  ROOM_CONFIG=config/room.gemini.yaml AGENT_MODEL=gemini-3.1-flash-lite \
+  node apps/api/dist/index.js          # (önce npm run build)
+
+WEB_HOST=1 WEB_ALLOWED_HOSTS="$IP,localhost" npm run dev:web
 ```
 
-İkinci kişiye **katılımcı** linki ver (paylaşım kutusunda varsayılan bu). Dört sorunun cevabı
-README "Hafta 5 dogfood notları" başlığına yazılacak — başlık hazır, cevaplar boş:
+Sonra `http://<IP>:5173` → e-posta yaz → **giriş bağlantısı ekranda çıkar** (`AUTH_DEV_MODE`
+artık `.env`'de, `dev:all` ile de çalışır).
+
+**ÜÇ ŞEYE DİKKAT:**
+
+1. **YENİ ODA AÇ.** Dünkü oda container'ı Python'suz eski imajdan yaratıldı. Python'lu imajı
+   yalnızca yeni odalar görür.
+2. **Model:** `AGENT_MODEL=gemini-3.1-flash-lite` — `model: auto` `gemini-3.5-flash`e çözülüyor
+   ve onun günlük kotası dün doldu. Kotalar model başına ayrı.
+3. **Kota istek başına sayılıyor, turn başına değil.** Tek adımlık görevler ver ("models.py'a
+   Post modeli ekle"), "komple blog sitesi yaz" tek hamlede kotayı yiyor.
+
+Doğrulanacak ilk üç şey (hepsi ölçüldü ama ELLE görülmedi):
+
+- Agent'a `oda kurulumu dogru mu` → `ODA-KURULUMU-OK backend` demeli (rol bağlamı ulaşıyor).
+- Agent'a "ortamda python var mı" → sürüm söylemeli, denemeden bilmeli.
+- `pip install django` + tek adımlık Django işi → gerçekten çalışmalı.
+
+### 2. Hafta 5 dogfood (Adım 12) — hafta sonu tanımının tek eksik maddesi
+
+İki kişi, aynı agent, aynı anda. Senaryo: biri görev verir, diğeri agent yanlış yola girdiğinde
+**keser** ve düzeltir, sonra **sürücülüğü devreder**. İkinci kişiye **katılımcı** linki ver
+(paylaşım kutusunda varsayılan bu).
+
+Dört sorunun cevabı README "Hafta 5 dogfood notları" başlığına yazılacak — başlık hazır,
+cevaplar boş:
 
 1. Kesmek istediğinde kaç saniye bekledin ve bu sinir bozucu muydu?
 2. Kuyrukta beklerken ne bilmek istedin de ekranda yoktu?
 3. Agent iki kişiye birden cevap verirken karıştı mı? Karıştıysa hangi durumda?
 4. Sürücülüğü devretmek gerçekten 2 tık mıydı?
 
-### 2. Hafta 6'ya başla
+Birinci sorunun ölçülmüş kısmı var: kesme kapıda **1 saniyenin altında** uygulanıyor
+(`mode: abort`). Gerçek kullanımda ne olduğunu görmek lazım.
+
+### 3. Hafta 6'ya başla
 
 Görev tanımı: `C:\Users\KEREM\Downloads\HAFTA-6-GOREV.md` (Kerem verecek).
 Yol haritasındaki hedef: *satıra "bunu böl" yazılıyor, agent 30 sn'de düzeltiyor, ikinci
@@ -150,6 +192,10 @@ npm run gate:w3:agent / gate:w4:agent / gate:w5:agent   # agent gerektirenler
 **`gate:w5` yaklaşık 8 dakika sürer**: içinde 60 saniyelik gerçek sürücülük düşme ölçümü ve
 Hafta 1/3/4 kapılarının regresyonu var.
 
+**Oda imajı değiştiyse** (`rooms/Dockerfile` veya `packages/runner*`) → `npm run room:build`
+ve **yeni oda aç**: var olan container eski imajdan yaratılmıştır. 19 Eylül'de imaja Python
+girdi, yani dünden kalan odalar Python görmez.
+
 **Sahte koşum ortamı** elle denemek için de kullanılabilir (modelsiz, ücretsiz):
 
 ```bash
@@ -190,6 +236,10 @@ Pasifik gece yarısı (≈ TSİ 10:00) sıfırlanıyor. Model başına ayrı kot
   önekinden anlar — kapı bunun yeterli olduğunu ölçtü, ama çelişen iki yönergede davranışı
   Claude yolundan farklı olabilir.
 - **Gemini tool çıktısının metnini vermiyor**, sadece `status`.
+- **Oda imajında ne varsa o var**: agent sistem paketi kuramaz (root değil). Bugün imajda
+  Node 22, Python 3 + hazır venv (`/opt/venv`), build-essential, git, ripgrep, curl var.
+  Başka bir dil gerekirse `rooms/Dockerfile`a girmesi ve imajın yeniden derlenmesi gerekir;
+  runner ortamı ölçüp agent'a söylüyor, yani liste ile gerçek arasında kayma olmaz.
 - **Tek sunucu örneği varsayımı** — `AgentManager`, presence ve sürücü izleyicisi bellekte.
   Kuyruk kodu çok sunucuya hazır yazıldı (satır kilidi) ama ikinci sunucu çalıştırılmadı.
 - **`npm audit`** dev bağımlılıklarında zafiyet bildiriyor.
