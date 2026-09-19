@@ -13,13 +13,15 @@ import type { ApiConfig } from "../config.js";
  * ve iptal edilebilir. Token DB'de yalnızca hash olarak durur; tam link
  * sadece oluşturma yanıtında bir kez görünür.
  *
- * Bu haftanın daveti sadece `viewer` üretir — izleyicinin yazma yetkisi
- * Hafta 5'in işi ve kuyruk olmadan verilirse iki mesaj paralel inference'a
- * girer.
+ * Hafta 5'ten itibaren davet İKİ ROL üretebilir ve varsayılan `member`:
+ * kuyruk geldi, artık iki kişinin aynı agent'a yazması güvenli. `viewer`
+ * hâlâ mümkün — sadece izlemesi istenen kişi için.
  */
 
 const CreateBody = z.object({
   expiresInHours: z.number().int().positive().max(24 * 30).optional(),
+  /** Varsayılan `member`: odaya giren kişi ilk saniyede yazabilsin. */
+  role: z.enum(["member", "viewer"]).optional(),
 });
 
 const AcceptBody = z.object({ token: z.string().min(10).max(200) });
@@ -37,18 +39,19 @@ export function inviteRoutes(cfg: ApiConfig) {
     if (!body.success) throw new HttpError(400, "expiresInHours geçersiz");
     const hours = body.data.expiresInHours ?? DEFAULT_HOURS;
 
+    const role = body.data.role ?? "member";
     const token = newToken();
     const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000);
     await getPool().query(
       `INSERT INTO room_invites (token_hash, token_prefix, room_id, role, created_by, expires_at)
-       VALUES ($1, $2, $3, 'viewer', $4, $5)`,
-      [hashToken(token), tokenPrefix(token), roomId, user.id, expiresAt],
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [hashToken(token), tokenPrefix(token), roomId, role, user.id, expiresAt],
     );
 
     const url = new URL("/join", cfg.appBaseUrl);
     url.searchParams.set("token", token);
     // Token YALNIZCA bu yanıtta görünür; DB'de hash'i var.
-    return c.json({ url: url.toString(), prefix: tokenPrefix(token), expiresAt }, 201);
+    return c.json({ url: url.toString(), prefix: tokenPrefix(token), role, expiresAt }, 201);
   });
 
   app.get("/rooms/:id/invites", async (c) => {
@@ -57,11 +60,12 @@ export function inviteRoutes(cfg: ApiConfig) {
 
     const res = await getPool().query<{
       token_prefix: string;
+      role: "member" | "viewer";
       created_at: Date;
       expires_at: Date;
       revoked_at: Date | null;
     }>(
-      `SELECT token_prefix, created_at, expires_at, revoked_at
+      `SELECT token_prefix, role, created_at, expires_at, revoked_at
          FROM room_invites WHERE room_id = $1 ORDER BY created_at DESC`,
       [roomId],
     );
@@ -69,6 +73,7 @@ export function inviteRoutes(cfg: ApiConfig) {
     return c.json({
       invites: res.rows.map((r) => ({
         prefix: r.token_prefix,
+        role: r.role,
         createdAt: r.created_at.toISOString(),
         expiresAt: r.expires_at.toISOString(),
         revokedAt: r.revoked_at?.toISOString() ?? null,
@@ -99,7 +104,7 @@ export function inviteRoutes(cfg: ApiConfig) {
     const body = AcceptBody.safeParse(await c.req.json().catch(() => ({})));
     if (!body.success) throw new HttpError(400, "token gerekli");
 
-    const res = await getPool().query<{ room_id: string; role: "viewer" }>(
+    const res = await getPool().query<{ room_id: string; role: "member" | "viewer" }>(
       `SELECT room_id, role FROM room_invites
         WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()`,
       [hashToken(body.data.token)],

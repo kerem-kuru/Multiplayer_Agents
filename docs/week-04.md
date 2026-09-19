@@ -155,7 +155,19 @@ Dogfood sırasında çıkan iki ürün hatası (ikisi de düzeltildi):
 
 ## Kalan iş
 
-- `gate:w2` hâlâ koşulmadı (`ANTHROPIC_API_KEY` yok) — Hafta 2'den kalan boşluk.
-- `gate:w4:agent` gerçek agent'la `.env` okutur; Gemini günlük kotası dolduğu gün koşulamaz.
-- Turn sonucunda **sebep alanı yok**: ekranda `bitti · error` görünüyor, nedeni sunucu
-  logunda kalıyor. Hafta 5/6'nın UI işi.
+- `gate:w2` hâlâ koşulmadı (`ANTHROPIC_API_KEY` yok) — Hafta 2'den kalan boşluk. Anahtar
+  gelene kadar Claude yolunun kapısı açılamaz; Gemini yolunun çalışması onu kanıtlamaz
+  (SDK event şekilleri farklı).
+
+## Kapanan işler (19 Eylül 2026, Hafta 5'in ilk günü)
+
+- `npm run gate:w4:agent` **5/5 geçti** (Gemini): gerçek agent gerçek bir `.env` okudu, üç
+  sahte secret'ın hiçbiri `session_events`'e girmedi, üç bulgu kaydı yazıldı.
+- **Turn sonucunda sebep alanı** geldi: Gemini yolunda başarısız turn artık
+  `turn.completed subtype:"error"` değil `turn.failed` yazıyor ve son stderr satırlarını
+  (`429 RESOURCE_EXHAUSTED` gibi) `error` alanında taşıyor. Ekranda da yazıyor —
+  sebep event log'a girmezse UI'da olamaz.
+- **Presence bakışı sekme bazlı**: `hello` frame'i bağlantı kimliğini istemciye veriyor,
+  istemci `POST /presence` gövdesinde geri yolluyor. Üç sekme açan kişi artık hepsinde aynı
+  agent'a bakıyor görünmüyor. Bu yolda `touched` alanının `Date.now()` olması yüzünden aynı
+  milisaniyedeki iki değişiklikte eski sekmenin kazandığı da düzeldi (monoton sayaç).

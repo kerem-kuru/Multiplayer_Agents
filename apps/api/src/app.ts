@@ -33,7 +33,14 @@ import {
 } from "@agent-rooms/core";
 import { loadApiConfig, resolveConfigPath, type ApiConfig } from "./config.js";
 import { HttpError } from "./http-error.js";
-import { addMember, requireRoom, requireUser } from "./auth/guard.js";
+import {
+  addMember,
+  listMembers,
+  requireRoom,
+  requireUser,
+  setMemberRole,
+  type Role,
+} from "./auth/guard.js";
 import { authRoutes } from "./routes/auth.js";
 import { inviteRoutes } from "./routes/invites.js";
 import { resolveSince, streamSession, wantsSse } from "./routes/events-sse.js";
@@ -64,6 +71,8 @@ const EventsQuery = z.object({
 });
 
 const MessageBody = z.object({ text: z.string().min(1).max(100_000) }).strict();
+
+const MemberRoleBody = z.object({ role: z.enum(["owner", "member", "viewer"]) }).strict();
 
 const PresenceBody = z
   .object({
@@ -264,6 +273,33 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
     const roomId = c.req.param("id");
     await requireRoom(c, roomId);
     return c.json({ people: listPresence(roomId) });
+  });
+
+  /**
+   * Odanın üyeleri ve rolleri. Sürücü devri bunu kullanır: "Devret → kişi
+   * seç" iki tık olacaksa istemci kime devredebileceğini bir istekte görmeli.
+   */
+  app.get("/rooms/:id/members", async (c) => {
+    await requireRoom(c, c.req.param("id"));
+    return c.json({ members: await listMembers(c.req.param("id")) });
+  });
+
+  /** Rol değiştirme yalnızca oda sahibinin işi: izleyiciyi katılımcı yapmak. */
+  app.patch("/rooms/:id/members/:userId", async (c) => {
+    await requireRoom(c, c.req.param("id"), "owner");
+    const body = MemberRoleBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) throw new HttpError(400, "role alanı geçersiz (owner|member|viewer)");
+
+    const userId = c.req.param("userId");
+    if (!Uuid.safeParse(userId).success) throw new HttpError(400, "kullanıcı kimliği UUID değil");
+
+    const res = await setMemberRole(c.req.param("id"), userId, body.data.role as Role);
+    if (!res.changed) {
+      if (res.reason === "not_member") throw new HttpError(404, "bu kişi odanın üyesi değil");
+      // Odayı sahipsiz bırakmak bir ayar değil, bir kaza olurdu.
+      throw new HttpError(409, "odanın son sahibinin rolü düşürülemez");
+    }
+    return c.json({ userId, role: body.data.role });
   });
 
   app.get("/rooms/:id/journal", async (c) => {
