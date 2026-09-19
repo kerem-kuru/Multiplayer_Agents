@@ -37,6 +37,10 @@ CREATE TABLE IF NOT EXISTS agent_queue (
   -- Kullanıcının yazdığı HAM metin. `[Ayse]: ` öneki burada DEĞİL, runner'a
   -- verilirken eklenir.
   text        TEXT NOT NULL,
+  -- FIFO sırası. `enqueued_at` ile sıralamak YETMEZ: paralel iki INSERT aynı
+  -- mikrosaniyeye düşebiliyor ve sıra rastgele UUID'ye kalıyor — ölçüldü, 10
+  -- paralel mesajda sıra bozuldu. Artan sayaç eşitliği imkânsız kılıyor.
+  ord         BIGSERIAL NOT NULL,
   status      TEXT NOT NULL DEFAULT 'queued'
               CHECK (status IN ('queued','running','done','cancelled')),
   enqueued_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -44,9 +48,9 @@ CREATE TABLE IF NOT EXISTS agent_queue (
   finished_at TIMESTAMPTZ
 );
 
--- Sıradaki mesajı seçen sorgunun index'i. FIFO: (enqueued_at, id).
+-- Sıradaki mesajı seçen sorgunun index'i. FIFO: `ord`.
 CREATE INDEX IF NOT EXISTS agent_queue_pick
-  ON agent_queue (room_id, agent_name, status, enqueued_at, id);
+  ON agent_queue (room_id, agent_name, status, ord);
 
 -- BU HAFTANIN EN ÖNEMLİ SATIRI.
 -- Aynı agent'ta aynı anda yalnızca bir 'running' satır olabilir. Kodda bir

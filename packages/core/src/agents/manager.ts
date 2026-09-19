@@ -66,6 +66,14 @@ interface AgentHandle {
   restartTimes: number[];
   readyResolve: (() => void) | null;
   readyReject: ((err: Error) => void) | null;
+  /**
+   * Kesme istenen mesaj. İki iş yapar: çıkış işlenirken `turn.failed`
+   * sebebinin `interrupted` olması ve sert kesme sayacının doğru turn'e
+   * bakması.
+   */
+  interruptedMessageId: string | null;
+  /** Sert kesme sayacı: 30 sn'de kapanmayan turn için. */
+  hardKillTimer: NodeJS.Timeout | null;
 }
 
 export class AgentNotFoundError extends Error {}
@@ -83,13 +91,31 @@ export class AgentBusyError extends Error {
   }
 }
 
+/**
+ * Kesme isteğinden sonra runner'a tanınan süre. Bitmezse sert kesme:
+ * "kestim" deyip durmamak kullanıcıya yalan söylemektir.
+ */
+const HARD_KILL_AFTER_MS = 30_000;
+
 const RESTART_WINDOW_MS = 10 * 60 * 1000;
 const MAX_RESTARTS = 3;
 const RESTART_BACKOFF_MS = [1_000, 4_000, 15_000];
 const MAX_PROTOCOL_ERRORS = 10;
 
+/**
+ * Kuyruğun manager'a bakan yüzü. `AgentQueue` bunu uygular.
+ *
+ * Manager kuyruğu tanımaz; yalnızca "bu turn bitti" ve "bu agent kurtarılamadı"
+ * der. Sıralama kararı tek yerde (kuyrukta) kalsın diye.
+ */
+export interface TurnSink {
+  finishRunning(roomId: string, agentName: string, messageId: string): Promise<void>;
+  agentFailed(roomId: string, agentName: string): Promise<number>;
+}
+
 export class AgentManager {
   private readonly handles = new Map<string, AgentHandle>();
+  private sink: TurnSink | null = null;
   private readonly pool: pg.Pool;
   private readonly opts: Required<
     Omit<AgentManagerOptions, "pool" | "modelOverride" | "providerEnv" | "geminiApiKey">
@@ -117,6 +143,17 @@ export class AgentManager {
 
   private key(roomId: string, agentName: string): string {
     return `${roomId}:${agentName}`;
+  }
+
+  /** Kuyruğu bağla. Bağlanmazsa turn bitişleri kimseye haber verilmez. */
+  attachSink(sink: TurnSink): void {
+    this.sink = sink;
+  }
+
+  private notifyFinished(roomId: string, agentName: string, messageId: string): void {
+    void this.sink
+      ?.finishRunning(roomId, agentName, messageId)
+      .catch((err) => this.opts.log("error", `kuyruk bilgilendirilemedi: ${String(err)}`));
   }
 
   /** Sağlık kontrolü: heartbeat susan runner ölmüş sayılır. */
@@ -278,6 +315,8 @@ export class AgentManager {
       restartTimes: [],
       readyResolve: null,
       readyReject: null,
+      interruptedMessageId: null,
+      hardKillTimer: null,
     };
     // Önceki çökme sayacını taşı.
     handle.restartTimes = this.previousRestarts.get(this.key(roomId, agentName)) ?? [];
@@ -396,6 +435,17 @@ export class AgentManager {
             this.pool,
           );
         }
+        // Kesme kapandı: sert kesme sayacı artık gereksiz.
+        if (handle.interruptedMessageId === output.messageId) {
+          this.clearHardKill(handle);
+          handle.interruptedMessageId = null;
+        }
+        /**
+         * Kuyruk akmaya DEVAM EDER — turn başarısız bittiyse de. Başarısız
+         * bir turn'ün kuyruğu durdurması, bekleyen herkesi sessizce
+         * beklemeye mahkûm ederdi.
+         */
+        this.notifyFinished(handle.roomId, handle.agent.name, output.messageId);
         return;
       }
       case "log":
@@ -406,12 +456,21 @@ export class AgentManager {
 
   // --- mesaj --------------------------------------------------------------
 
-  async sendMessage(
+  /**
+   * Kuyruktan çıkan mesajı agent'a ver. TEK GİRİŞ KAPISI bu.
+   *
+   * Hafta 2'deki doğrudan `sendMessage` yolu KALDIRILDI: iki giriş kapısı
+   * olsaydı "agent başına tek koşan mesaj" garantisi ikisinin arasında
+   * kaybolurdu. Sıralama kuyruğun işi; burası yalnızca teslim eder.
+   *
+   * `[İsim]: ` önekini KOYAN BURASI. Event log'daki ham metin öneksiz durur:
+   * kullanıcının yazdığı şey neyse o.
+   */
+  async deliverQueued(
     roomId: string,
     agentName: string,
-    actor: Actor,
-    text: string,
-  ): Promise<string> {
+    msg: { messageId: string; text: string; user: { id: string; name: string } },
+  ): Promise<void> {
     let rt = await getRuntime(roomId, agentName, this.pool);
     if (!rt) {
       const { config } = await this.resolveAgent(roomId, agentName);
@@ -420,6 +479,10 @@ export class AgentManager {
     }
     if (!rt) throw new AgentNotFoundError(agentName);
 
+    /**
+     * Agent kapalıysa başlat ve `ready` bekle: kuyrukta bekleyen mesaj
+     * "agent kapalıydı" diye düşmez, sırası gelince agent ayağa kalkar.
+     */
     if (rt.status === "stopped" || rt.status === "failed") {
       await this.start(roomId, agentName);
       rt = await getRuntime(roomId, agentName, this.pool);
@@ -429,21 +492,100 @@ export class AgentManager {
     const handle = this.handles.get(this.key(roomId, agentName));
     if (!handle) throw new AgentNotFoundError(`runner ayakta değil: ${agentName}`);
 
-    const messageId = randomUUID();
     await appendEvent(
       {
         roomId: handle.roomId,
         sessionId: handle.sessionId,
-        actor,
+        /**
+         * Actor mesajı YAZAN insan. "Bu turn kimin isteğiyle başladı"
+         * sorusunun cevabı kuyruk tablosunda değil event log'unda durmalı;
+         * projeksiyon turn'ün sahibini buradan okuyor.
+         */
+        actor: { kind: "human", id: msg.user.id, name: msg.user.name },
         type: "message.received",
-        payload: { agent: agentName, messageId, text },
+        payload: { agent: agentName, messageId: msg.messageId, text: msg.text },
       } satisfies NewRoomEvent,
       this.pool,
     );
-    await transition(roomId, agentName, "busy", { currentMessageId: messageId }, this.pool);
+    await transition(roomId, agentName, "busy", { currentMessageId: msg.messageId }, this.pool);
 
-    handle.exec.send({ kind: "run", messageId, text });
-    return messageId;
+    handle.exec.send({
+      kind: "run",
+      messageId: msg.messageId,
+      text: `[${msg.user.name}]: ${msg.text}`,
+    });
+  }
+
+  // --- kesme --------------------------------------------------------------
+
+  /**
+   * Koşan turn'ü kes. Yetki (yalnızca sürücü) API katmanında kontrol edilir.
+   *
+   * KESME İKİ AŞAMALI ve arası sıfır değil:
+   *   `interrupt.requested` (hemen) → runner'a sinyal → `interrupt.applied`
+   *
+   * Uzun bir bash komutunun ortasında anlık durdurma sözü verilmiyor. 30 sn
+   * sonunda turn hâlâ kapanmadıysa runner SERT kesilir — "kestim" deyip
+   * durmamak kullanıcıya yalan söylemektir.
+   */
+  async requestInterrupt(
+    roomId: string,
+    agentName: string,
+    msg: { messageId: string; by: { id: string; name: string } },
+  ): Promise<void> {
+    const handle = this.handles.get(this.key(roomId, agentName));
+    if (!handle) throw new AgentNotFoundError(`runner ayakta değil: ${agentName}`);
+
+    await appendEvent(
+      {
+        roomId: handle.roomId,
+        sessionId: handle.sessionId,
+        actor: { kind: "human", id: msg.by.id, name: msg.by.name },
+        type: "interrupt.requested",
+        payload: { agent: agentName, messageId: msg.messageId, by: msg.by },
+      } satisfies NewRoomEvent,
+      this.pool,
+    );
+
+    handle.interruptedMessageId = msg.messageId;
+    handle.exec.send({ kind: "interrupt", messageId: msg.messageId });
+
+    this.clearHardKill(handle);
+    handle.hardKillTimer = setTimeout(() => {
+      void this.hardKillAfterInterrupt(roomId, agentName, msg.messageId);
+    }, HARD_KILL_AFTER_MS);
+    handle.hardKillTimer.unref?.();
+  }
+
+  private clearHardKill(handle: AgentHandle): void {
+    if (handle.hardKillTimer) clearTimeout(handle.hardKillTimer);
+    handle.hardKillTimer = null;
+  }
+
+  private async hardKillAfterInterrupt(
+    roomId: string,
+    agentName: string,
+    messageId: string,
+  ): Promise<void> {
+    const handle = this.handles.get(this.key(roomId, agentName));
+    if (!handle || handle.interruptedMessageId !== messageId) return;
+
+    const rt = await getRuntime(roomId, agentName, this.pool);
+    if (rt?.status !== "busy" || rt.currentMessageId !== messageId) return;
+
+    this.opts.log("warn", `kesme 30 sn icinde uygulanmadi, runner olduruluyor: ${agentName}`);
+    await appendEvent(
+      {
+        roomId: handle.roomId,
+        sessionId: handle.sessionId,
+        actor: { kind: "system" },
+        type: "interrupt.applied",
+        payload: { agent: agentName, messageId, mode: "hard_kill" },
+      } satisfies NewRoomEvent,
+      this.pool,
+    );
+    // Çıkış akışı `turn.failed` (reason: interrupted) yazacak ve kuyruk akacak.
+    if (handle.pid) await handle.exec.hardKill(handle.pid).catch(() => undefined);
   }
 
   // --- durdurma ve çökme --------------------------------------------------
@@ -478,6 +620,9 @@ export class AgentManager {
     const rt = await getRuntime(handle.roomId, handle.agent.name, this.pool);
     const wasBusy = rt?.status === "busy";
     const messageId = rt?.currentMessageId ?? null;
+    /** Bu çıkış bir kesmenin sonucu mu — sebep "crash" değil "interrupted". */
+    const wasInterrupted = messageId !== null && handle.interruptedMessageId === messageId;
+    this.clearHardKill(handle);
 
     if (handle.stopping) {
       if (wasBusy && messageId) {
@@ -511,6 +656,11 @@ export class AgentManager {
         { currentMessageId: null, lastExitCode: code },
         this.pool,
       );
+      // Kuyruk satırı kapanmalı: yoksa agent durdurulunca kuyruk sonsuza
+      // kadar "koşuyor" der ve sıradaki mesaj hiç başlamaz.
+      if (wasBusy && messageId) {
+        this.notifyFinished(handle.roomId, handle.agent.name, messageId);
+      }
       return;
     }
 
@@ -525,10 +675,16 @@ export class AgentManager {
         payload: {
           agent: handle.agent.name,
           messageId,
-          reason: "crash",
-          error: `runner çıktı (kod ${code})`,
+          // Sert kesme bir çökme değil: sebep karıştırılırsa "neden durdu"
+          // sorusunun cevabı log'da yanlış durur.
+          reason: wasInterrupted ? "interrupted" : "crash",
+          error: wasInterrupted
+            ? `kesme uygulandı (runner öldürüldü, kod ${code})`
+            : `runner çıktı (kod ${code})`,
         },
       } satisfies NewRoomEvent);
+      handle.interruptedMessageId = null;
+      this.notifyFinished(handle.roomId, handle.agent.name, messageId);
     }
 
     const now = Date.now();
@@ -568,6 +724,14 @@ export class AgentManager {
         { lastError: "yeniden başlatma hakkı bitti" },
         this.pool,
       );
+      /**
+       * Agent kurtarılamadı: kuyrukta bekleyen her şey iptal edilir.
+       * Sessizce bekleyen bir kuyruk kullanıcıya yalan söyler — "sıradasın"
+       * yazan ekran, hiç çalışmayacak bir mesajı gösteriyor olurdu.
+       */
+      void this.sink
+        ?.agentFailed(handle.roomId, handle.agent.name)
+        .catch((err) => this.opts.log("error", `kuyruk temizlenemedi: ${String(err)}`));
       return;
     }
 

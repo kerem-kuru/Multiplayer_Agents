@@ -60,6 +60,15 @@ const geminiBin =
 let geminiSessionId: string | null = process.env.RESUME_SESSION_ID || null;
 let busy = false;
 let child: ChildProcess | null = null;
+/** Koşan turn'ün mesajı — geç gelen kesme komutu bir sonraki turn'ü vurmasın. */
+let currentMessageId: string | null = null;
+/**
+ * Bu turn KESİLİYOR. Kesilme ile "süreç kendi kendine öldü" aynı şey değil;
+ * `turn.failed` sebebini bu bayrak belirliyor.
+ */
+let interrupting = false;
+/** Kibar sinyalden sonra süreç ölmezse ne kadar beklenir. */
+const SIGKILL_AFTER_MS = 5_000;
 
 const out = (o: RunnerOutput): void => {
   process.stdout.write(JSON.stringify(RunnerOutput.parse(o)) + "\n");
@@ -156,7 +165,9 @@ function runTurn(messageId: string, text: string): Promise<void> {
           type: "turn.failed",
           payload: {
             ...turnRef(messageId),
-            reason: sawAnything ? "sdk_error" : "crash",
+            // Kesildiyse sebep "interrupted": kullanıcı durdurdu, süreç
+            // kendi kendine ölmedi.
+            reason: interrupting ? "interrupted" : sawAnything ? "sdk_error" : "crash",
             // Sebebi taşı: "tamamlamadan çıktı" tek başına hiçbir şey anlatmıyor.
             error: ["gemini süreci turn'ü tamamlamadan çıktı", stderrTail.trim()]
               .filter((s) => s.length > 0)
@@ -164,6 +175,21 @@ function runTurn(messageId: string, text: string): Promise<void> {
               .slice(0, 2000),
           },
         } as NewRoomEvent);
+      }
+      /**
+       * Kesme GERÇEKTEN uygulandı. İstek ile uygulama arası sıfır değil —
+       * uzun bir kabuk komutu bitmeden süreç kapanmıyor. `mode: "abort"`:
+       * Gemini CLI'da kibar bir "interrupt" yolu yok, süreç sinyalle
+       * durduruluyor (README "Karar notları").
+       */
+      if (interrupting) {
+        emit({
+          ...envelope,
+          actor: agentActor,
+          type: "interrupt.applied",
+          payload: { ...turnRef(messageId), mode: "abort" },
+        } as NewRoomEvent);
+        interrupting = false;
       }
       out({ kind: "turn_end", messageId, sdkSessionId: geminiSessionId, ok });
       child = null;
@@ -256,14 +282,38 @@ rl.on("line", (line: string) => {
     shutdown();
     return;
   }
+
+  /**
+   * Kesme. Yetki host tarafında (yalnızca sürücü); burada tek kontrol "hangi
+   * turn": geç kalmış bir kesme komutu bir sonraki mesajı öldürmesin.
+   */
+  if (cmd.kind === "interrupt") {
+    if (!busy || cmd.messageId !== currentMessageId || !child) {
+      out({ kind: "log", level: "warn", msg: `kesilecek turn yok: ${cmd.messageId}` });
+      return;
+    }
+    interrupting = true;
+    const target = child;
+    target.kill("SIGTERM");
+    // Kibar sinyale cevap vermezse sert dur: "kesildi" demek ve durmamak
+    // kullanıcıya yalan söylemek olur.
+    setTimeout(() => {
+      if (target.exitCode === null && target.signalCode === null) target.kill("SIGKILL");
+    }, SIGKILL_AFTER_MS).unref?.();
+    return;
+  }
+
   if (busy) {
     out({ kind: "log", level: "warn", msg: `meşgul, reddedildi: ${cmd.messageId}` });
     return;
   }
 
   busy = true;
+  currentMessageId = cmd.messageId;
   void runTurn(cmd.messageId, cmd.text).finally(() => {
     busy = false;
+    currentMessageId = null;
+    interrupting = false;
   });
 });
 

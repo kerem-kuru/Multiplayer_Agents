@@ -5,8 +5,8 @@ import type { Actor } from "@agent-rooms/protocol";
 import { NewRoomEvent, PROTOCOL_VERSION } from "@agent-rooms/protocol";
 import { SNAPSHOT_VERSION } from "@agent-rooms/view";
 import {
-  AgentBusyError,
   AgentManager,
+  AgentQueue,
   AgentNotFoundError,
   AgentStartError,
   appendEvent,
@@ -43,6 +43,9 @@ import {
 } from "./auth/guard.js";
 import { authRoutes } from "./routes/auth.js";
 import { inviteRoutes } from "./routes/invites.js";
+import { messageRoutes } from "./routes/messages.js";
+import { driverRoutes } from "./routes/driver.js";
+import { interruptRoutes } from "./routes/interrupt.js";
 import { resolveSince, streamSession, wantsSse } from "./routes/events-sse.js";
 
 /**
@@ -70,8 +73,6 @@ const EventsQuery = z.object({
   limit: z.coerce.number().int().positive().max(1000).default(500),
 });
 
-const MessageBody = z.object({ text: z.string().min(1).max(100_000) }).strict();
-
 const MemberRoleBody = z.object({ role: z.enum(["owner", "member", "viewer"]) }).strict();
 
 const PresenceBody = z
@@ -95,8 +96,23 @@ function actorOf(user: { id: string; name: string }): Actor {
   return { kind: "human", id: user.id, name: user.name };
 }
 
-export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManager) {
+export function createApp(
+  cfg: ApiConfig = loadApiConfig(),
+  manager?: AgentManager,
+  queue?: AgentQueue,
+) {
   const app = new Hono();
+
+  /**
+   * Kuyruk yoksa yazma uçları hiç tanımlanmaz: 404 yerine 503 dönmek için
+   * aşağıda açıkça söylenir. Sessizce kabul edip hiçbir şey yapmamak en kötü
+   * seçenek olurdu.
+   */
+  if (queue) {
+    app.route("/", messageRoutes(queue));
+    app.route("/", interruptRoutes(queue));
+  }
+  app.route("/", driverRoutes());
 
   /** Anahtar yoksa agent uçları kapalı — sessizce boş cevap vermek yerine söyle. */
   const requireManager = (): AgentManager => {
@@ -353,34 +369,19 @@ export function createApp(cfg: ApiConfig = loadApiConfig(), manager?: AgentManag
     return c.json({ agent: agentName, status: "stopped" }, 202);
   });
 
-  app.post("/rooms/:id/agents/:aid/message", async (c) => {
-    // İzleyici YAZAMAZ: yazma yetkisi Hafta 5'in işi (kuyruk, sürücü, kesme).
-    const { user } = await requireRoom(c, c.req.param("id"), "owner");
-    const { room } = await mustFindRoom(c.req.param("id"));
-    const agentName = c.req.param("aid");
-    const parsed = MessageBody.safeParse(await c.req.json().catch(() => ({})));
-    if (!parsed.success) {
-      throw new HttpError(
-        400,
-        "istek gövdesi geçersiz",
-        parsed.error.issues.map((i) => `${i.path.join(".") || "<kök>"}: ${i.message}`),
-      );
-    }
-
-    const mgr = requireManager();
-    try {
-      const messageId = await mgr.sendMessage(room.id, agentName, actorOf(user), parsed.data.text);
-      // Turn'ün bitmesi BEKLENMEZ — ilerleme event log'dan izlenir.
-      return c.json({ messageId, agent: agentName }, 202);
-    } catch (err) {
-      if (err instanceof AgentBusyError) {
-        // Kuyruk Hafta 5'te; bu hafta meşgul agent yeni iş almaz.
-        return c.json({ error: "agent meşgul", status: err.status }, 409);
-      }
-      if (err instanceof AgentNotFoundError) throw new HttpError(404, err.message);
-      throw err;
-    }
-  });
+  /**
+   * Mesaj, kuyruk, sürücü ve kesme uçları `routes/messages.ts`,
+   * `routes/driver.ts` ve `routes/interrupt.ts` içinde (Hafta 5).
+   *
+   * Hafta 2'deki doğrudan "mesaj gönder" yolu buradan KALDIRILDI: iki giriş
+   * kapısı olsaydı "agent başına tek koşan mesaj" garantisi ikisinin
+   * arasından sızardı. Tek kapı kuyruk.
+   */
+  if (!queue) {
+    app.post("/rooms/:id/agents/:aid/message", () => {
+      throw new HttpError(503, "agent koşumu kapalı — hiçbir koşum ortamı tanımlı değil");
+    });
+  }
 
   app.post("/rooms/:id/stop", async (c) => {
     const { user } = await requireRoom(c, c.req.param("id"), "owner");

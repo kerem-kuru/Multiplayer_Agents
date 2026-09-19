@@ -4,6 +4,7 @@ import type { NewRoomEvent } from "@agent-rooms/protocol";
 import {
   AgentConfig,
   PROTOCOL_VERSION,
+  appendMultiplayerNote,
   RunnerCommand,
   RunnerOutput,
   resolveSdkTools,
@@ -48,6 +49,13 @@ const allowed = new Set(tools.allow);
 let sdkSessionId: string | null = process.env.RESUME_SESSION_ID || null;
 let busy = false;
 let abort: AbortController | null = null;
+/** Koşan turn'ün mesajı — geç gelen bir kesme komutu yanlış turn'ü vurmasın. */
+let currentMessageId: string | null = null;
+/**
+ * Bu turn KESİLİYOR. `turn.failed` sebebini ve `interrupt.applied` event'ini
+ * bu bayrak belirler: kapanma ile kesilme aynı şey değil.
+ */
+let interrupting = false;
 
 const out = (o: RunnerOutput): void => {
   process.stdout.write(JSON.stringify(RunnerOutput.parse(o)) + "\n");
@@ -61,6 +69,12 @@ async function runTurn(messageId: string, text: string, ac: AbortController): Pr
   const ctx = { roomId, sessionId, agent: agent.name, messageId };
   const turn = { agent: agent.name, messageId };
   let ok = false;
+  /**
+   * Bitiş event'i yazıldı mı. "Her messageId için TAM OLARAK BİR bitiş
+   * event'i" kuralı: SDK `result` verdiyse turn.completed yazılmıştır ve
+   * üstüne turn.failed yazmak log'u yalancı yapar.
+   */
+  let sawTerminal = false;
 
   try {
     const q = query({
@@ -69,7 +83,13 @@ async function runTurn(messageId: string, text: string, ac: AbortController): Pr
         cwd: process.cwd(),
         model: process.env.AGENT_MODEL,
         resume: sdkSessionId ?? undefined,
-        systemPrompt: { type: "preset", preset: "claude_code", append: agent.systemPrompt },
+        // Odada birden fazla insan var: her mesaj `[İsim]: ` ile geliyor.
+        // Not tek bir sabitten geliyor ve her agent için aynı.
+        systemPrompt: {
+          type: "preset",
+          preset: "claude_code",
+          append: appendMultiplayerNote(agent.systemPrompt),
+        },
         // Host/container ayar dosyalarını yükleme — yetki sadece YAML'dan gelir.
         settingSources: [],
         tools: tools.allow, // katman (a): agent sadece bunları görür
@@ -134,21 +154,46 @@ async function runTurn(messageId: string, text: string, ac: AbortController): Pr
       if (mapped.sdkSessionId) sdkSessionId = mapped.sdkSessionId;
       for (const event of mapped.events) emit(event);
       const m = msg as { type?: string; subtype?: string };
-      if (m.type === "result") ok = m.subtype === "success";
+      if (m.type === "result") {
+        ok = m.subtype === "success";
+        sawTerminal = true;
+      }
     }
   } catch (err) {
-    emit({
-      ...envelope,
-      actor: agentActor,
-      type: "turn.failed",
-      payload: {
-        ...turn,
-        reason: ac.signal.aborted ? "aborted" : "sdk_error",
-        error: String(err).slice(0, 2000),
-      },
-    } as NewRoomEvent);
+    if (!sawTerminal) {
+      emit({
+        ...envelope,
+        actor: agentActor,
+        type: "turn.failed",
+        payload: {
+          ...turn,
+          // Kesilme ile kapanma ayrı sebepler: "neden durdu" sorusunun
+          // cevabı log'da durmalı.
+          reason: interrupting ? "interrupted" : ac.signal.aborted ? "aborted" : "sdk_error",
+          error: String(err).slice(0, 2000),
+        },
+      } as NewRoomEvent);
+      sawTerminal = true;
+    }
     ok = false;
   } finally {
+    /**
+     * Kesme GERÇEKTEN uygulandı. `interrupt.requested` ile arasındaki süre
+     * sıfır değil — UI o aralığı "kesme kuyruğa alındı" diye gösteriyor.
+     *
+     * `mode: "abort"`: kurulu SDK'da mesaj başına `query()` + `resume` yapısı
+     * kullanıldığı için kesme abortController ile yapılıyor (README "Karar
+     * notları"). Streaming input'a geçilince `graceful` de mümkün olacak.
+     */
+    if (interrupting) {
+      emit({
+        ...envelope,
+        actor: agentActor,
+        type: "interrupt.applied",
+        payload: { ...turn, mode: "abort" },
+      } as NewRoomEvent);
+      interrupting = false;
+    }
     // Her durumda gönderilir — host bunu görmeden agent'ı idle'a almaz.
     out({ kind: "turn_end", messageId, sdkSessionId, ok });
   }
@@ -178,7 +223,26 @@ rl.on("line", (line: string) => {
     return;
   }
 
-  // Kuyruk Hafta 5'te; bu hafta meşguldeyken gelen iş reddedilir.
+  /**
+   * Kesme. Yetki host tarafında (yalnızca sürücü); burada tek kontrol
+   * "hangi turn": geç kalmış bir kesme komutu bir sonraki mesajı öldürmesin.
+   */
+  if (cmd.kind === "interrupt") {
+    if (!busy || cmd.messageId !== currentMessageId) {
+      out({ kind: "log", level: "warn", msg: `kesilecek turn yok: ${cmd.messageId}` });
+      return;
+    }
+    interrupting = true;
+    abort?.abort();
+    return;
+  }
+
+  /**
+   * Sıralama artık SUNUCUNUN işi: kuyruk agent başına tek koşan mesaj
+   * garantisi veriyor (`agent_queue_single_running`). Yine de burada bir
+   * emniyet kalıyor — runner'a iki `run` gelirse ikincisi sessizce kabul
+   * edilip context'i bozmasın.
+   */
   if (busy) {
     out({ kind: "log", level: "warn", msg: `meşgul, reddedildi: ${cmd.messageId}` });
     return;
@@ -187,9 +251,12 @@ rl.on("line", (line: string) => {
   busy = true;
   const ac = new AbortController();
   abort = ac;
+  currentMessageId = cmd.messageId;
   void runTurn(cmd.messageId, cmd.text, ac).finally(() => {
     busy = false;
     abort = null;
+    currentMessageId = null;
+    interrupting = false;
   });
 });
 

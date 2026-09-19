@@ -10,6 +10,7 @@ import {
   stopRoomContainer,
 } from "../docker/container.js";
 import { ensureRuntimeRows } from "../agents/runtime.js";
+import { ensureDriverRows } from "../driver.js";
 import { setRoomAllowPatterns } from "../redaction.js";
 import { scaffoldRoomLayout } from "./layout.js";
 import {
@@ -80,6 +81,14 @@ export async function openRoom(input: OpenRoomInput): Promise<OpenRoomResult> {
   const dirs = await scaffoldRoomLayout(roomRoot, config);
   // YAML'daki her agent için bir çalışma durumu satırı — hepsi 'stopped'.
   await ensureRuntimeRows(room.id, config.agents.map((a) => a.name), pool);
+  /**
+   * Ve bir sürücü satırı — `user_id = NULL`, yani "sürücü yok".
+   *
+   * Satır önceden var olmalı: sürücülüğü almak bir UPDATE, INSERT değil.
+   * Böylece iki kişi aynı anda sürücülük isterse satır kilidi ikinciyi
+   * bekletir ve o `409` görür.
+   */
+  await ensureDriverRows(room.id, config.agents.map((a) => a.name), pool);
   const events: RoomEvent[] = [];
 
   const base = { roomId: room.id, sessionId: session.id, actor } as const;

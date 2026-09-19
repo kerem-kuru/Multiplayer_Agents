@@ -23,6 +23,18 @@ export const RunnerCommand = z.discriminatedUnion("kind", [
     messageId: z.string().uuid(),
     text: z.string().min(1),
   }),
+  /**
+   * Koşan turn'ü kes. Yalnızca SÜRÜCÜ tetikler (yetki host tarafında).
+   *
+   * `messageId` hangi turn'ün kesildiğini söyler: runner kendi koştuğu turn
+   * değilse komutu yok sayar — geç kalmış bir kesme bir sonraki mesajı
+   * öldürmesin.
+   *
+   * ANLIK DEĞİL: uzun bir bash komutunun ortasında SDK hemen durmaz. Runner
+   * önce kibar yolu dener, olmazsa abort eder; host 30 sn'de kapanmazsa
+   * runner'ı öldürür.
+   */
+  z.object({ kind: z.literal("interrupt"), messageId: z.string().uuid() }),
   z.object({ kind: z.literal("shutdown") }),
 ]);
 export type RunnerCommand = z.infer<typeof RunnerCommand>;

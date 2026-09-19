@@ -2,9 +2,12 @@ import path from "node:path";
 import { serve } from "@hono/node-server";
 import {
   AgentManager,
+  AgentQueue,
   closePool,
   configureSnapshots,
   createRedactingLogger,
+  getDriverWatcher,
+  sweepAbsentDrivers,
 } from "@agent-rooms/core";
 import { collectProviderEnv, hasProviderBackend } from "@agent-rooms/protocol";
 import { createApp } from "./app.js";
@@ -57,17 +60,55 @@ const manager = anyRuntime
     })
   : undefined;
 
-if (manager) {
+/**
+ * Kuyruk, manager'ın olduğu her yerde vardır: yazmanın tek kapısı o.
+ * Manager yoksa (hiç koşum ortamı yok) kuyruk da kurulmaz ve yazma uçları
+ * `503` döner — sessizce kabul edip hiçbir şey yapmamaktan iyi.
+ */
+const queueLog = createRedactingLogger((level, msg) =>
+  console[level === "info" ? "log" : level](msg),
+);
+
+const queue = manager ? new AgentQueue({ deliverer: manager, log: queueLog }) : undefined;
+
+if (manager && queue) {
+  manager.attachSink(queue);
+
   // Sunucu çöküp kalktıysa DB "busy" diyor olabilir; gerçeği yaz.
   const settled = await manager.reconcileOnBoot().catch((err) => {
     console.error("açılış mutabakatı başarısız:", err);
     return 0;
   });
   if (settled > 0) console.log(`açılış mutabakatı: ${settled} agent stopped'a çekildi`);
+
+  /**
+   * Kuyruk mutabakatı: `running` kalmış satırlar iptal (yeniden koşturma YOK),
+   * `queued` satırlar KORUNUR ve akmaya devam eder. Kuyruğun DB'de olmasının
+   * bütün sebebi bu.
+   */
+  const q = await queue.reconcileOnBoot().catch((err) => {
+    console.error("kuyruk mutabakatı başarısız:", err);
+    return { cancelled: 0, resumed: 0 };
+  });
+  if (q.cancelled > 0 || q.resumed > 0) {
+    console.log(`kuyruk mutabakatı: ${q.cancelled} iptal, ${q.resumed} agent kuyruğu akıyor`);
+  }
+
   manager.startHealthChecks();
 }
 
-const app = createApp(cfg, manager);
+/**
+ * Sürücü mutabakatı: presence bellekte olduğu için açılışta oda boş. DB'de
+ * sürücü yazıyorsa bırakılır — yoksa yeniden bağlanan kullanıcı kendi
+ * sürücülüğünü geri alamaz ve `409` görür.
+ */
+const droppedDrivers = await sweepAbsentDrivers().catch(() => 0);
+if (droppedDrivers > 0) console.log(`sürücü mutabakatı: ${droppedDrivers} sürücülük bırakıldı`);
+
+// Sürücünün presence'ı 60 sn kayıpsa sürücülük düşer (bkz. DriverPresenceWatcher).
+getDriverWatcher({ log: (level, msg) => console[level === "info" ? "log" : level](msg) });
+
+const app = createApp(cfg, manager, queue);
 
 const server = serve({ fetch: app.fetch, port: cfg.port }, (info) => {
   console.log(`agent-rooms api  http://localhost:${info.port}`);

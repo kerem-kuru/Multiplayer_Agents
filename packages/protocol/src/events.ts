@@ -31,6 +31,14 @@ const AgentRef = { agent: AgentName };
 /** Bir turn'ün içindeki her event'te zorunlu — hangi mesaja ait olduğu belli olsun. */
 const TurnRef = { agent: AgentName, messageId: z.string().uuid() };
 
+/**
+ * Bir insan. Hafta 5'te kuyruk, sürücü ve kesme event'leri KİMİN yaptığını
+ * payload'da da taşır: `actor` zarfta duruyor ama projeksiyon zarfa değil
+ * payload'a bakarak isim gösterebilsin ve snapshot'lar kendi kendine yeter
+ * olsun.
+ */
+const UserRef = z.object({ id: z.string().uuid(), name: z.string().min(1).max(120) });
+
 // --- Oda ve oturum yaşam döngüsü -------------------------------------------
 
 export const RoomCreated = ev(
@@ -108,12 +116,42 @@ export const MessageReceived = ev(
   z.object({ ...TurnRef, text: z.string().min(1) }),
 );
 
-export const AgentInterrupted = ev(
-  "agent.interrupted",
+/**
+ * Mesaj KUYRUĞA girdi. `actor` = yazan insan.
+ *
+ * Sıra sözleşmesi:
+ *   message.queued → (kuyruktan çıkınca) message.received → turn.started → …
+ *                  → turn.completed / turn.failed
+ *   kuyrukta iptal edilirse: message.queued → message.cancelled
+ *   (o mesaj `message.received` HİÇ almaz)
+ *
+ * `text` kullanıcının yazdığı HAM metindir: `[Ayse]: ` öneki event log'da
+ * DEĞİL, mesaj kuyruktan çıkıp runner'a verilirken eklenir.
+ */
+export const MessageQueued = ev(
+  "message.queued",
+  z.object({ ...TurnRef, text: z.string().min(1), user: UserRef }),
+);
+
+/**
+ * Kuyruk kaydı iptal edildi — o mesaj HİÇ çalışmadı.
+ *
+ * `server_restart`: sunucu koşarken düştü, mesaj yeniden KOŞTURULMAZ (Hafta
+ * 2'den gelen kural: agent yarısını yapmış olabilir).
+ * `agent_failed`: agent kurtarılamadı; sessizce bekleyen bir kuyruk
+ * kullanıcıya yalan söyler.
+ */
+export const MessageCancelled = ev(
+  "message.cancelled",
   z.object({
-    agent: AgentName,
-    /** Uzun bash komutu ortasında anlık kesilemez; kuyruğa alındıysa false. */
-    applied: z.boolean(),
+    ...TurnRef,
+    /**
+     * İptal eden insan. `server_restart` ve `agent_failed` sebeplerinde
+     * NULL: o iptali bir insan yapmadı ve kaydın sahibini "iptal eden" diye
+     * yazmak log'u yalancı yapardı.
+     */
+    by: UserRef.nullable(),
+    reason: z.enum(["user", "driver", "server_restart", "agent_failed"]),
   }),
 );
 
@@ -147,7 +185,8 @@ export const TurnFailed = ev(
   "turn.failed",
   z.object({
     ...TurnRef,
-    reason: z.enum(["aborted", "crash", "sdk_error", "stopped"]),
+    /** `interrupted`: sürücü kesti (Hafta 5). Kesilen mesaj tekrar koşmaz. */
+    reason: z.enum(["aborted", "crash", "sdk_error", "stopped", "interrupted"]),
     error: z.string(),
   }),
 );
@@ -281,12 +320,56 @@ export const PresenceUpdated = ev(
   }),
 );
 
-export const DriverChanged = ev(
-  "driver.changed",
+/**
+ * Sürücülük — agent başına bir rol, bir kilit DEĞİL.
+ *
+ * Sürücü olmayan odayı kullanmaya devam eder: mesaj yazar, kuyruğa girer.
+ * Sürücünün fazladan iki yetkisi var: koşan turn'ü kesmek ve başkasının
+ * kuyruk kaydını iptal etmek.
+ *
+ * Hafta 1'deki tek `driver.changed` event'i yerine üç ayrı event: "kim aldı",
+ * "kim bıraktı, neden" ve "kimden kime" farklı sorulardır ve devir
+ * tarihçesinde ikisini ayırt etmek gerekir.
+ */
+export const DriverClaimed = ev("driver.claimed", z.object({ ...AgentRef, user: UserRef }));
+
+export const DriverReleased = ev(
+  "driver.released",
   z.object({
-    agent: AgentName,
-    /** Sürücü devri: null = sürücü boşaldı. */
-    driverId: z.string().min(1).nullable(),
+    ...AgentRef,
+    user: UserRef,
+    /** `left_room`: presence 60 sn kayıptı — sürücülük kendiliğinden düştü. */
+    reason: z.enum(["manual", "left_room", "handoff"]),
+  }),
+);
+
+export const DriverHandedOff = ev(
+  "driver.handed_off",
+  z.object({ ...AgentRef, from: UserRef, to: UserRef }),
+);
+
+/**
+ * KESME İKİ EVENT'TİR ve arasındaki süre sıfır değildir.
+ *
+ * `interrupt.requested` istek anında yazılır; `interrupt.applied` gerçekten
+ * durduğunda. Uzun bir bash komutunun ortasında anlık durdurma sözü
+ * verilmiyor — UI aradaki süreyi "kesme kuyruğa alındı" olarak gösterir.
+ */
+export const InterruptRequested = ev(
+  "interrupt.requested",
+  z.object({ ...TurnRef, by: UserRef }),
+);
+
+export const InterruptApplied = ev(
+  "interrupt.applied",
+  z.object({
+    ...TurnRef,
+    /**
+     * `graceful`: SDK'nın kendi `interrupt()`'ı işe yaradı.
+     * `abort`: abortController devreye girdi (daha sert).
+     * `hard_kill`: 30 sn'de kapanmadı, runner öldürüldü.
+     */
+    mode: z.enum(["graceful", "abort", "hard_kill"]),
   }),
 );
 
@@ -322,8 +405,9 @@ const EVENT_SCHEMAS = [
   AgentReady,
   AgentExited,
   AgentCrashed,
+  MessageQueued,
+  MessageCancelled,
   MessageReceived,
-  AgentInterrupted,
   TurnStarted,
   AgentText,
   TurnCompleted,
@@ -340,7 +424,11 @@ const EVENT_SCHEMAS = [
   ApprovalResolved,
   CommentOnLine,
   PresenceUpdated,
-  DriverChanged,
+  DriverClaimed,
+  DriverReleased,
+  DriverHandedOff,
+  InterruptRequested,
+  InterruptApplied,
   DebugNote,
   OutputChunk,
 ] as const;

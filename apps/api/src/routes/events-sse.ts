@@ -14,6 +14,7 @@ import {
   SSE_RETRY_MS,
 } from "@agent-rooms/protocol";
 import {
+  getDriverWatcher,
   getEventBus,
   joinPresence,
   leavePresence,
@@ -87,6 +88,12 @@ export function streamSession(c: Context, opts: StreamOptions) {
      */
     const connectionId = `${opts.sessionId}:${Date.now()}:${randomUUID().slice(0, 12)}`;
     joinPresence(opts.roomId, connectionId, opts.user);
+    /**
+     * Sürücü izleyicisini bu odaya bağla: sürücünün presence'ı 60 sn kayıpsa
+     * sürücülük düşer. Bağlantı açılınca izlemeye başlamak doğru yer —
+     * presence'ın kaynağı da bu bağlantı.
+     */
+    getDriverWatcher().watch(opts.roomId);
     /** Yazımlar tek yerden sırayla gitsin diye kuyruğa alınır. */
     let pendingPresence: PresencePerson[] | null = listPresence(opts.roomId);
     const unsubscribePresence = subscribePresence(opts.roomId, (people) => {
