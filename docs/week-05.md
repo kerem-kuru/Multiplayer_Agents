@@ -22,7 +22,7 @@ inference'a girerse agent'ın context'i bozulur ve hata **sessizce** oluşur.
 | 9 | Projeksiyon | ✅ `SNAPSHOT_VERSION` 2, snapshot doğruluğu yeni alanlarla geçiyor |
 | 10 | UI | ✅ Composer her zaman açık, QueueList, DriverBadge, kesme düğmesi |
 | 11 | Kapı script'i | ✅ `gate:w5` 25/25 · `gate:w5:agent` 5/5 (Gemini) |
-| 12 | Cuma dogfood | ⏳ iki kişi gerekiyor |
+| 12 | Cuma dogfood | ✅ 20 Eylül, iki kişi iki cihaz, 7 mesaj · notlar README'de |
 | 13 | README | ✅ |
 
 ## Tek koşan garantisi: üç katman, üçü de gerekli
@@ -229,6 +229,35 @@ agent uydurma bir yol aramak yerine neyin eksik olduğunu söylesin.
 Aynı metin iki koşum ortamına da gidiyor: Claude'da `systemPrompt.append`, Gemini'de
 `GEMINI.md`. Tek kaynak `packages/protocol/src/prompts.ts`.
 
+## Dogfood (20 Eylül 2026) — ölçülen sayılar
+
+İki kişi (`kerem`, `deneme50`), iki ayrı cihaz, aynı yerel ağ üzerinden tek agent'a
+(`backend`, `gemini-3.1-flash-lite`) 5 dakikada 7 mesaj. Event log'dan çıkan tablo:
+
+| Ölçüm | Sonuç |
+| --- | --- |
+| Kesme gecikmesi | **109 ms** (`requested` → `applied`, `mode: abort`) |
+| Kesilen turn | `turn.failed · reason: "interrupted"`, kendiliğinden yeniden koşmadı |
+| Kesen kişi | devirden sonraki sürücü — devir kesme yetkisini gerçekten taşıdı |
+| Sürücülük | ilk mesajla otomatik claim (34 ms) → devir → bırakma → yeni claim, 6 sn içinde |
+| Eşzamanlı yazma | koşan turn sırasında gelen mesaj önceki `turn.completed`'dan 59 ms sonra alındı |
+| Kuyrukta bekleme | 10,8 sn; sıra bozulmadı |
+| Örtüşme | sıfır — hiçbir anda iki `running` satır yok |
+
+Dört dogfood sorusunun hiçbirinde sorun çıkmadı: bekleme hissedilmedi, kuyruk ekranında eksik
+bir bilgi rapor edilmedi, agent iki kişinin birbirinin işine dokunan silme isteklerini
+karıştırmadı, devir iki tıkta bitti.
+
+**Kapının ölçtüğü ile gerçek kullanımın ölçtüğü aynı çıktı.** Kapı kesmeyi `sleep 120` gibi
+en kötü durumda ölçüyor (1 sn altı); gerçek kullanımda 109 ms. Burada yeni bir ürün hatası
+çıkmaması, kapının doğru şeyi ölçtüğünün kanıtı — Hafta 4'te dogfood iki hata bulmuştu.
+
+Dogfood'a girerken ayrı bir şey çıktı: Docker yeniden başladığında dünkü oda container'ı
+`Exited` kalıyor ve arayüz ham Docker hatası gösteriyor
+(`HTTP code 409 … is not running`). Sunucu container'ın var-ama-durmuş olduğunu biliyor;
+kullanıcıya bunu insan diliyle söylemesi ya da container'ı kaldırması gerek. **Hafta 6'ya
+borç.**
+
 ## Kalan iş
 
 - **Streaming input'a geçilmedi.** Kesme `abortController` ile yapılıyor (`mode: "abort"`).
@@ -238,4 +267,3 @@ Aynı metin iki koşum ortamına da gidiyor: Claude'da `systemPrompt.append`, Ge
   bağlam dosyasına yazıyor ve kapı bunun modele ULAŞTIĞINI ölçüyor (agent doğrulama
   satırını yazdı). Claude yolundaki `systemPrompt.append` ile birbirinin yedeği.
 - **`gate:w2` hâlâ koşulmadı** (Claude anahtarı yok) — Hafta 2'den kalan boşluk.
-- Hafta 5 dogfood iki kişi gerektiriyor.

@@ -476,22 +476,53 @@ akışı geçiren bir tünel (ngrok gibi) ya da doğrudan ağ yolu kullanılmal�
 
 ## Hafta 5 dogfood notları
 
-> ⏳ **Henüz yapılmadı** — iki kişi gerekiyor. Denenecek senaryo: biri görev verir, diğeri
-> agent yanlış yola girdiğinde keser ve düzeltir, sonra sürücülüğü devreder.
+**20 Eylül 2026, 20:04–20:09.** İki kişi (`kerem`, `deneme50`), iki ayrı cihaz, aynı yerel
+ağ, tek agent (`backend`, Gemini, `gemini-3.1-flash-lite`). 7 mesaj, 6 turn tamamlandı,
+1 turn kesildi. Aşağıdaki sayılar histen değil **event log'dan** çıkarıldı.
 
-Cevaplanacak dört soru:
+| Ölçüm | Sonuç |
+| --- | --- |
+| Kesme gecikmesi | `interrupt.requested` → `interrupt.applied` **109 ms**, `mode: abort` |
+| Kesilen turn | `turn.failed · reason: "interrupted"`, mesaj **yeniden koşmadı** |
+| Kesen kişi | `deneme50` — devrettikten sonraki sürücü |
+| Sürücülük | ilk mesajla otomatik claim (34 ms) → `handed_off` → `released(manual)` → yeni sürücü `claimed` |
+| Eşzamanlı yazma | koşan turn sırasında gelen mesaj, önceki `turn.completed`'dan **59 ms sonra** alındı |
+| Kuyrukta bekleme | **10,8 saniye** — sıra bozulmadı, mesaj kaybolmadı |
+| Örtüşme | sıfır: hiçbir anda iki `running` satır yok |
 
-1. Kesmek istediğinde kaç saniye bekledin ve bu sinir bozucu muydu?
-2. Kuyrukta beklerken ne bilmek istedin de ekranda yoktu?
-3. Agent iki kişiye birden cevap verirken karıştı mı? Karıştıysa hangi durumda?
-4. Sürücülüğü devretmek gerçekten 2 tık mıydı?
+Dört sorunun cevabı — **hiçbirinde sorun çıkmadı**, ürün beklendiği gibi davrandı:
 
-Birinci sorunun **ölçülmüş** bir kısmı şimdiden var: `gate:w5:agent` ilk koşumda kesmenin
-`sleep 120` koşan bir Gemini agent'ında **32 saniye** sürdüğünü ve `hard_kill` ile
-bittiğini gösterdi — SIGTERM, CLI'nın başlattığı kabuk komutunu durdurmuyordu. Süreç artık
-kendi grubunda başlatılıyor ve sinyal gruba gidiyor; aynı ölçüm **1 saniyenin altına**
-indi (`mode: abort`). Sahte koşum ortamıyla bulunamayacak bir hataydı: sahte runner'ın
-çocuk süreci yok.
+1. **Kesmek istediğinde kaç saniye bekledin, sinir bozucu muydu?** Bekleme hissedilmedi.
+   Ölçüm 109 ms; "kesme kuyruğa alındı" ara durumu pratikte görülmeden turn kapandı. Kapıdaki
+   1 sn altı ölçümü gerçek kullanımda da tuttu.
+2. **Kuyrukta beklerken ne bilmek istedin de ekranda yoktu?** Eksik bir şey rapor edilmedi;
+   10,8 saniyelik bekleme sırasında kuyruk görünümü yeterli geldi.
+3. **Agent iki kişiye birden cevap verirken karıştı mı?** Karışmadı. İki kişi arka arkaya
+   birbirinin işine dokunan mesajlar yazdı (`"Yazılan ts dosyasını sil"`,
+   `"bubble sort dosyasını sil"`) ve agent doğru dosyayı hedefledi.
+4. **Sürücülüğü devretmek gerçekten 2 tık mıydı?** Evet. Devir, bırakma ve yeniden alma
+   olayları 6 saniyelik bir aralıkta art arda yazıldı.
+
+Kesmenin ölçülmüş geçmişi de burada duruyor: `gate:w5:agent` ilk koşumda kesmenin
+`sleep 120` koşan bir Gemini agent'ında **32 saniye** sürdüğünü ve `hard_kill` ile bittiğini
+gösterdi — SIGTERM, CLI'nın başlattığı kabuk komutunu durdurmuyordu. Süreç artık kendi
+grubunda başlatılıyor ve sinyal gruba gidiyor; aynı ölçüm **1 saniyenin altına** indi
+(`mode: abort`). Sahte koşum ortamıyla bulunamayacak bir hataydı: sahte runner'ın çocuk
+süreci yok.
+
+### Dogfood'dan önce çıkan bir şey: durmuş oda container'ı
+
+Dogfood'a girerken dünkü oda açılmak istendi ve arayüz şunu gösterdi:
+
+```
+container'a bağlanılamadı: Error: (HTTP code 409) container stopped/paused —
+container b1b953eb5428... is not running
+```
+
+Docker yeniden başlatıldığında oda container'ları `Exited` kalıyor; sunucu container'ın
+**var ama durmuş** olduğunu biliyor ve kullanıcıya ham Docker hatasını veriyor. Kullanıcının
+bilmesi gereken şey "oda kapandı, yeni oda aç" ya da container'ın kendiliğinden kaldırılması.
+Dogfood yeni odada yapıldı; bu madde **Hafta 6'ya borç** olarak taşındı.
 
 ## Karar notları
 

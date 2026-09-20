@@ -1,4 +1,4 @@
-# Kaldığımız yer — 19 Eylül 2026, gece
+# Kaldığımız yer — 20 Eylül 2026, akşam
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
 
@@ -25,8 +25,8 @@ Kurulum sayısı değil, star sayısı değil.
 | 2 | Tek agent, headless koşum | ⏳ kod tamam, `gate:w2` **koşulmadı** (Claude anahtarı yok) |
 | 3 | Stream ve terminal görünümü | ✅ `gate:w3` 11/11 · `gate:w3:agent` 2/2 |
 | 4 | Redaction ve ikinci izleyici | ✅ `gate:w4` 22/22 · `gate:w4:agent` 5/5 · dogfood ✅ |
-| 5 | **Yazma yetkisi, kuyruk, kesme** | ✅ `gate:w5` 25/25 · `gate:w5:agent` 7/7 · ⏳ **dogfood yapılmadı** |
-| 6 | Diff görünümü ve satır yorumu | ⬜ sırada |
+| 5 | **Yazma yetkisi, kuyruk, kesme** | ✅ `gate:w5` 25/25 · `gate:w5:agent` 7/7 · dogfood ✅ **HAFTA KAPANDI** |
+| 6 | Diff görünümü ve satır yorumu | ⬜ **sırada** — görev tanımı Kerem'den bekleniyor |
 
 **233 test.** Paketler: `protocol`, `redact`, `view`, `core`, `runner`, `runner-gemini`.
 Hafta 5'te 31 test eklendi: 12 kuyruk + 8 sürücü (gerçek DB + sahte runner) + 6 projeksiyon
@@ -35,78 +35,69 @@ Hafta 5'te 31 test eklendi: 12 kuyruk + 8 sürücü (gerçek DB + sahte runner) 
 **Kod durumu:** her şey commit'li ve push'lu, çalışma ağacı temiz. Oda imajı Python'lu
 hâliyle yeniden derlendi.
 
-**Makinede ne açık kaldı:** `postgres` + `redis` ayakta (yarın gerekli). API (8787) ve arayüz
-(5173) kapatıldı. Dünkü elle testten **üç oda container'ı ayakta** (eski, Python'suz imajdan):
-duruyorlar, zarar vermiyorlar. İstersen tek tek silinebilir —
-`docker rm -f agent-rooms-room-<kısa-id>` — ama o odalar kurtarılamaz; toplu silme yapma
-(canlı odaları öldürür, 5. tuzak).
+**Makinede ne açık kaldı:** `postgres` (5433) + `redis` (6380) ayakta. API (8787) ve arayüz
+(5173) dogfood için açılmıştı; oturum sonunda kapatılabilir. Oda container'larından biri
+canlı (bugünkü dogfood odası `255d346b`), onbir tanesi `Exited` — eski imajlardan kalma,
+kurtarılamaz. Tek tek silinebilir (`docker rm -f agent-rooms-room-<kısa-id>`) ama **toplu
+silme yapma** (5. tuzak). Compose'un `build-only` profilinden kalan isimsiz bir
+`sleep infinity` container'ı da dönüyor; hiçbir odaya bağlı değil.
 
-## Yarın ilk iş: ELLE TEST (yarım kaldı)
+## Hafta 5 KAPANDI — hafta sonu tanımının 10 maddesi de doğrulandı
 
-Dün akşam gerçek ortam kurulmuş, ilk gerçek görev denenmiş ve iki şey çıkmıştı (aşağıda);
-ikisi de düzeltildi ama **elle test tamamlanmadı**. Yarın buradan devam:
+Son iki madde bugün kapandı:
+
+1. **Elle test** (dün yarım kalmıştı): yeni oda Python'lu imajdan açıldı, rol bağlamı ulaştı,
+   agent gerçek dosya işleri yaptı.
+2. **İki kişilik dogfood** (Adım 12): iki cihaz, aynı yerel ağ, 20:04–20:09, 7 mesaj.
+   Notlar README "Hafta 5 dogfood notları" başlığında, ölçümler `docs/week-05.md` içinde.
+
+Dogfood'un event log'dan çıkan sayıları: kesme **109 ms** (`mode: abort`), kesilen turn
+`reason: "interrupted"` ve yeniden koşmadı, kesmeyi **devirden sonraki sürücü** yaptı,
+koşan turn sırasında gelen mesaj önceki turn'ün bitişinden **59 ms sonra** alındı (10,8 sn
+kuyrukta bekledi), hiçbir anda iki `running` satır yok. Dört sorunun hiçbirinde sorun
+çıkmadı — yani kapının ölçtüğü ile gerçek kullanım aynı çıktı.
+
+## Yarın ilk iş: Hafta 6
+
+Görev tanımı: `C:\Users\KEREM\Downloads\HAFTA-6-GOREV.md` (Kerem verecek, henüz yok).
+Yol haritasındaki hedef: *satıra "bunu böl" yazılıyor, agent 30 sn'de düzeltiyor, ikinci
+kullanıcı canlı görüyor.*
+
+**Hafta 6'ya taşınan üç borç:**
+
+1. **İzleyiciye "yetki iste" eylemi yok.** İzleyici satırı ne olduğunu VE nasıl değişeceğini
+   söylüyor ama tek tıkla yetki isteme yolu yok. Hafta 5 kapsamında talep akışı YOKTU (görev
+   tanımı açıkça kapsam dışı bıraktı).
+2. **Durmuş oda container'ı ham Docker hatası gösteriyor.** Docker yeniden başlayınca oda
+   container'ları `Exited` kalıyor ve arayüze
+   `container'a bağlanılamadı: Error: (HTTP code 409) … is not running` düşüyor. Sunucu
+   container'ın var-ama-durmuş olduğunu biliyor; ya kendiliğinden `docker start` etmeli ya da
+   insan diliyle "oda kapandı, yeni oda aç" demeli. Tek nokta: `AgentStartError`'ın üretildiği
+   yer. **Dikkat:** eski container eski imajdan; otomatik başlatma yapılacaksa imaj/protokol
+   sürümü kontrolü de gerekir.
+3. **`gate:w2` hâlâ koşulmadı** (Claude anahtarı yok) — Hafta 2'den kalan boşluk.
+
+## Dogfood ortamını yeniden kurmak (iki cihaz, yerel ağ)
 
 ```bash
-npm run db:up
-
-# LAN IP'yi doğrula, değişmiş olabilir (dün 192.168.1.114 idi):
+npm run db:up && npm run build
+# LAN IP'yi doğrula (20 Eylül'de 192.168.1.114 idi):
 #   PowerShell: Get-NetIPAddress -AddressFamily IPv4 | ? { $_.InterfaceAlias -like "Wi-Fi*" }
 IP=192.168.1.114
 
 AUTH_DEV_MODE=true APP_BASE_URL="http://$IP:5173" \
   ROOM_CONFIG=config/room.gemini.yaml AGENT_MODEL=gemini-3.1-flash-lite \
-  node apps/api/dist/index.js          # (önce npm run build)
+  node apps/api/dist/index.js
 
 WEB_HOST=1 WEB_ALLOWED_HOSTS="$IP,localhost" npm run dev:web
 ```
 
-Sonra `http://<IP>:5173` → e-posta yaz → **giriş bağlantısı ekranda çıkar** (`AUTH_DEV_MODE`
-artık `.env`'de, `dev:all` ile de çalışır).
+`APP_BASE_URL` LAN IP'si olmalı, yoksa giriş bağlantısı ikinci cihazda `localhost`a gider.
+İkinci cihaza **katılımcı** (`member`) linki ver — izleyici kesemez, devir alamaz.
+Wi-Fi ağı "Public" profilinde ama Node için Public inbound izin kuralı var, ek ayar gerekmedi.
+**Her zaman yeni oda aç:** var olan container eski imajdan yaratılmış olabilir.
 
-**ÜÇ ŞEYE DİKKAT:**
-
-1. **YENİ ODA AÇ.** Dünkü oda container'ı Python'suz eski imajdan yaratıldı. Python'lu imajı
-   yalnızca yeni odalar görür.
-2. **Model:** `AGENT_MODEL=gemini-3.1-flash-lite` — `model: auto` `gemini-3.5-flash`e çözülüyor
-   ve onun günlük kotası dün doldu. Kotalar model başına ayrı.
-3. **Kota istek başına sayılıyor, turn başına değil.** Tek adımlık görevler ver ("models.py'a
-   Post modeli ekle"), "komple blog sitesi yaz" tek hamlede kotayı yiyor.
-
-Doğrulanacak ilk üç şey (hepsi ölçüldü ama ELLE görülmedi):
-
-- Agent'a `oda kurulumu dogru mu` → `ODA-KURULUMU-OK backend` demeli (rol bağlamı ulaşıyor).
-- Agent'a "ortamda python var mı" → sürüm söylemeli, denemeden bilmeli.
-- `pip install django` + tek adımlık Django işi → gerçekten çalışmalı.
-
-### 2. Hafta 5 dogfood (Adım 12) — hafta sonu tanımının tek eksik maddesi
-
-İki kişi, aynı agent, aynı anda. Senaryo: biri görev verir, diğeri agent yanlış yola girdiğinde
-**keser** ve düzeltir, sonra **sürücülüğü devreder**. İkinci kişiye **katılımcı** linki ver
-(paylaşım kutusunda varsayılan bu).
-
-Dört sorunun cevabı README "Hafta 5 dogfood notları" başlığına yazılacak — başlık hazır,
-cevaplar boş:
-
-1. Kesmek istediğinde kaç saniye bekledin ve bu sinir bozucu muydu?
-2. Kuyrukta beklerken ne bilmek istedin de ekranda yoktu?
-3. Agent iki kişiye birden cevap verirken karıştı mı? Karıştıysa hangi durumda?
-4. Sürücülüğü devretmek gerçekten 2 tık mıydı?
-
-Birinci sorunun ölçülmüş kısmı var: kesme kapıda **1 saniyenin altında** uygulanıyor
-(`mode: abort`). Gerçek kullanımda ne olduğunu görmek lazım.
-
-### 3. Hafta 6'ya başla
-
-Görev tanımı: `C:\Users\KEREM\Downloads\HAFTA-6-GOREV.md` (Kerem verecek).
-Yol haritasındaki hedef: *satıra "bunu böl" yazılıyor, agent 30 sn'de düzeltiyor, ikinci
-kullanıcı canlı görüyor.*
-
-Hafta 6'ya taşınan borç: **izleyiciye "yetki iste" eylemi yok.** İzleyici satırı artık ne
-olduğunu VE nasıl değişeceğini söylüyor ("oda sahibi seni katılımcı yaparsa…") ama izleyicinin
-tek tıkla yetki isteyebileceği bir yol yok. Hafta 5 kapsamında talep akışı YOKTU (görev
-tanımı açıkça kapsam dışı bıraktı), bu yüzden metin düzeltildi, akış eklenmedi.
-
-## Elle test ederken çıkan dört şey (kapılardan SONRA)
+## Elle test ederken çıkan dört şey (19 Eylül, kapılardan SONRA)
 
 Kapılar yeşilken arayüz elle denendi ve dördü de gerçek sorundu:
 
