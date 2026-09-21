@@ -236,3 +236,95 @@ export const setPresence = (
     method: "POST",
     body: JSON.stringify(connectionId ? { viewing, connectionId } : { viewing }),
   });
+
+// --- Hafta 6: diff, checkpoint, inceleme -------------------------------------
+
+export interface CheckpointRow {
+  checkpointId: string;
+  agentName: string;
+  kind: "baseline" | "manual" | "turn";
+  label: string;
+  commitSha: string;
+  treeSha: string;
+  messageId: string | null;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export const listCheckpoints = (roomId: string, agent: string): Promise<CheckpointRow[]> =>
+  json<{ checkpoints: CheckpointRow[] }>(`/rooms/${roomId}/agents/${agent}/checkpoints`).then(
+    (r) => r.checkpoints,
+  );
+
+/**
+ * Manuel checkpoint — YENİ TABAN olur.
+ *
+ * Agent boşta değilse sunucu `409` döner. Koşan bir turn'ün ortasında taban
+ * almak yarış yaratır: runner o sırada eski tabana göre yayım yapıyor olabilir.
+ */
+export const createCheckpoint = (
+  roomId: string,
+  agent: string,
+  label: string,
+): Promise<{ checkpointId: string; treeSha: string }> =>
+  json(`/rooms/${roomId}/agents/${agent}/checkpoints`, {
+    method: "POST",
+    body: JSON.stringify({ label }),
+  });
+
+/**
+ * Canlı tabandan BAŞKA bir checkpoint'e göre diff.
+ *
+ * `live: false` — bu görünüm kendiliğinden güncellenmez ve arayüz bunu açıkça
+ * yazmak zorunda. Canlı sanılan bayat bir diff, üzerine yorum yazılan bir
+ * yalandır.
+ */
+export interface DiffFromResponse {
+  from: string;
+  baseTree: string;
+  treeSha: string;
+  files: import("@agent-rooms/protocol").FileDiff[];
+  live: false;
+  cached: boolean;
+}
+
+export const fetchDiffFrom = (
+  roomId: string,
+  agent: string,
+  from: string,
+): Promise<DiffFromResponse> =>
+  json<DiffFromResponse>(`/rooms/${roomId}/agents/${agent}/diff?from=${encodeURIComponent(from)}`);
+
+export interface DraftComment {
+  path: string;
+  side: "new" | "old";
+  line: number;
+  /** Yorumcunun GÖRDÜĞÜ satır — çapanın yarısı. Kırpılmadan gider. */
+  lineText: string;
+  body: string;
+  /** Yorumcunun gördüğü `diff.updated`'ın seq'i. */
+  diffSeq: number;
+}
+
+/**
+ * İncelemeyi gönder: 1–20 yorum, TEK turn.
+ *
+ * Hazır prompt GÖNDERİLMEZ — agent'a giden metni sunucu `reviews`
+ * kaydından kuruyor.
+ */
+export const submitReview = (
+  roomId: string,
+  agent: string,
+  comments: DraftComment[],
+): Promise<{ reviewId: string; messageId: string; position: number }> =>
+  json(`/rooms/${roomId}/agents/${agent}/reviews`, {
+    method: "POST",
+    body: JSON.stringify({ comments }),
+  });
+
+/** Çözme İNSAN kararıdır: agent bir yorumu kapatamaz. */
+export const resolveComment = (roomId: string, commentId: string): Promise<unknown> =>
+  json(`/rooms/${roomId}/comments/${commentId}/resolve`, { method: "POST" });
+
+export const reopenComment = (roomId: string, commentId: string): Promise<unknown> =>
+  json(`/rooms/${roomId}/comments/${commentId}/reopen`, { method: "POST" });

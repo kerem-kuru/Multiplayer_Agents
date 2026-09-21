@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { TurnItem, TurnView } from "@agent-rooms/view";
+import type { CommentView, TurnItem, TurnView } from "@agent-rooms/view";
 import { formatTool, stripAnsi } from "../model/format-tool.js";
 
 /**
@@ -54,7 +54,14 @@ function Outcome({ turn }: { turn: TurnView }) {
   );
 }
 
-function ToolRow({ item }: { item: Extract<TurnItem, { kind: "tool" }> }) {
+function ToolRow({
+  item,
+  onOpenFile,
+}: {
+  item: Extract<TurnItem, { kind: "tool" }>;
+  /** Hafta 6: dosyaya tıklayınca Diff sekmesinde o dosyaya gidilir. */
+  onOpenFile?: (path: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const failed = item.result?.isError === true;
   const pending = item.result === null;
@@ -123,7 +130,29 @@ function ToolRow({ item }: { item: Extract<TurnItem, { kind: "tool" }> }) {
           {item.files.length > 0 && (
             <div style={{ marginTop: 6 }}>
               <span style={{ color: "var(--ink-soft)" }}>değişen dosyalar: </span>
-              <span className="mono">{item.files.join(", ")}</span>
+              {item.files.map((f, i) => (
+                <span key={f}>
+                  {i > 0 && ", "}
+                  {/* Diff'e geçiş: aynı dosyayı iki sekmede elle aramak
+                      "beraber çalışma" iddiasını ilk kıran şey olurdu. */}
+                  <button
+                    className="mono"
+                    onClick={() => onOpenFile?.(f)}
+                    disabled={!onOpenFile}
+                    style={{
+                      border: "none",
+                      background: "transparent",
+                      padding: 0,
+                      color: onOpenFile ? "var(--run)" : "inherit",
+                      textDecoration: onOpenFile ? "underline" : "none",
+                      cursor: onOpenFile ? "pointer" : "default",
+                    }}
+                    title={onOpenFile ? "Diff sekmesinde göster" : undefined}
+                  >
+                    {f}
+                  </button>
+                </span>
+              ))}
             </div>
           )}
           {item.result && (
@@ -156,7 +185,7 @@ function ToolRow({ item }: { item: Extract<TurnItem, { kind: "tool" }> }) {
   );
 }
 
-function Item({ item }: { item: TurnItem }) {
+function Item({ item, onOpenFile }: { item: TurnItem; onOpenFile?: (path: string) => void }) {
   if (item.kind === "text") {
     return (
       <div style={{ padding: "5px 0", borderBottom: "1px solid var(--rule)" }}>{item.text}</div>
@@ -175,10 +204,23 @@ function Item({ item }: { item: TurnItem }) {
       </div>
     );
   }
-  return <ToolRow item={item} />;
+  return <ToolRow item={item} onOpenFile={onOpenFile} />;
 }
 
-export function ActivityFeed({ turns, canWrite = true }: { turns: TurnView[]; canWrite?: boolean }) {
+export function ActivityFeed({
+  turns,
+  canWrite = true,
+  onOpenFile,
+  comments = [],
+  onOpenReview,
+}: {
+  turns: TurnView[];
+  canWrite?: boolean;
+  onOpenFile?: (path: string) => void;
+  /** Hafta 6: inceleme turn'ünün başlığında kaç yorum olduğunu yazmak için. */
+  comments?: CommentView[];
+  onOpenReview?: (reviewId: string) => void;
+}) {
   if (turns.length === 0) {
     return (
       <p style={{ color: "var(--ink-soft)", padding: 16 }}>
@@ -202,7 +244,35 @@ export function ActivityFeed({ turns, canWrite = true }: { turns: TurnView[]; ca
               borderBottom: "1px solid var(--ink)",
             }}
           >
-            <strong style={{ fontSize: 15 }}>{turn.prompt}</strong>
+            {/*
+              İNCELEME TURN'Ü: başlıkta on iki satırlık ham prompt yerine
+              "Ayşe'nin 3 yorumluk incelemesi" yazar. Ham metin title'da durur;
+              tıklayınca Diff sekmesinde yorumlara gidilir.
+            */}
+            {turn.reviewId ? (
+              <button
+                onClick={() => onOpenReview?.(turn.reviewId!)}
+                disabled={!onOpenReview}
+                title={turn.prompt}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  padding: 0,
+                  font: "inherit",
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: onOpenReview ? "var(--run)" : "inherit",
+                  textDecoration: onOpenReview ? "underline" : "none",
+                  cursor: onOpenReview ? "pointer" : "default",
+                }}
+              >
+                {turn.actor}'nin{" "}
+                {comments.filter((c) => c.reviewId === turn.reviewId).length || "?"} yorumluk
+                incelemesi
+              </button>
+            ) : (
+              <strong style={{ fontSize: 15 }}>{turn.prompt}</strong>
+            )}
             <span style={{ color: "var(--ink-soft)", fontSize: 12 }}>{turn.actor}</span>
             <span style={{ marginLeft: "auto", fontSize: 12 }}>
               <Outcome turn={turn} />
@@ -211,7 +281,7 @@ export function ActivityFeed({ turns, canWrite = true }: { turns: TurnView[]; ca
           {/* Soldaki ince ray: turn'ün içindekiler buraya girintilenir. */}
           <div style={{ borderLeft: "1px solid var(--rule)", paddingLeft: 12, marginLeft: 3 }}>
             {turn.items.map((item) => (
-              <Item key={`${item.kind}-${item.seq}`} item={item} />
+              <Item key={`${item.kind}-${item.seq}`} item={item} onOpenFile={onOpenFile} />
             ))}
           </div>
         </section>

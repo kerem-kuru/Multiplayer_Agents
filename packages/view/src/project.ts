@@ -62,6 +62,14 @@ export type TurnOutcome =
 export interface TurnView {
   messageId: string;
   prompt: string;
+  /**
+   * Bu turn bir İNCELEMEden başladıysa onun kimliği (Hafta 6).
+   *
+   * Akış başlığı ham prompt'u değil "Ayşe'nin 3 yorumluk incelemesi" yazsın
+   * diye: on iki satırlık bir inceleme metnini turn başlığına basmak, akışı
+   * okunmaz yapar.
+   */
+  reviewId: string | null;
   actor: string;
   startedAt: string;
   sdkSessionId: string | null;
@@ -75,6 +83,8 @@ export interface QueuedMessage {
   user: { id: string; name: string };
   text: string;
   queuedAt: string;
+  /** İnceleme kaydıysa kimliği; düz mesajda null. */
+  reviewId: string | null;
 }
 
 /** Diff'te duran bir dosyanın son hâli + hangi event'le geldiği. */
@@ -257,6 +267,7 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
           user,
           text: typeof payload.text === "string" ? payload.text : "",
           queuedAt: e.ts,
+          reviewId: typeof payload.reviewId === "string" ? payload.reviewId : null,
         });
         break;
       }
@@ -302,6 +313,9 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
         const created: TurnView = {
           messageId,
           prompt: typeof payload.text === "string" ? payload.text : "",
+          // Kuyruk satırından taşınıyor: `message.received` reviewId taşımıyor
+          // ve taşıması da gerekmiyor — bilgi zaten `message.queued`'da.
+          reviewId: queued?.reviewId ?? null,
           actor: actorLabel(e.actor),
           startedAt: e.ts,
           sdkSessionId: null,

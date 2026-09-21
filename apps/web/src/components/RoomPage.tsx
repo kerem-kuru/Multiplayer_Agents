@@ -16,6 +16,7 @@ import { PresenceBar } from "./PresenceBar.js";
 import { ShareDialog } from "./ShareDialog.js";
 import { QueueList } from "./QueueList.js";
 import { DriverBadge } from "./DriverBadge.js";
+import { DiffView } from "./DiffView.js";
 
 /** Renk tek başına bilgi taşımaz — her durumun yanında kelimesi yazar. */
 const STATUS_COLOR: Record<string, string> = {
@@ -46,7 +47,14 @@ export function RoomPage({
   const { view, connection, lastSeq, people, connectionId, reconnect } = useEventStream(roomId);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [tab, setTab] = useState<"feed" | "terminal">("feed");
+  const [tab, setTab] = useState<"feed" | "diff" | "terminal">("feed");
+  /**
+   * Etkinlik akışından "bu dosyaya git" isteği. Hafta 3'teki tool satırında
+   * `file.changed` olan bir dosyaya tıklanınca Diff sekmesi açılıp o dosyaya
+   * gidiyor: iki sekme arasında elle arama yapmak zorunda kalmak, "beraber
+   * çalışma" iddiasını ilk kıran şey olurdu.
+   */
+  const [focusPath, setFocusPath] = useState<string | null>(null);
   /**
    * Rol SUNUCUDAN gelir. UI'ın düğme gizlemesi yetki değildir — sunucu zaten
    * 403 döner; buradaki amaç kullanıcıyı boşuna denemekten kurtarmak.
@@ -108,6 +116,8 @@ export function RoomPage({
 
   const agentView = selected ? view.agents[selected] : undefined;
   const turns = agentView?.turns ?? [];
+  const openFiles = Object.keys(agentView?.diff.files ?? {}).length;
+  const openComments = (agentView?.comments ?? []).filter((c) => !c.resolved).length;
   // Durum event log'dan türer; runtime tablosu yedek.
   const status: AgentStatus =
     agentView?.status ??
@@ -244,7 +254,7 @@ export function RoomPage({
           )}
 
           <div style={{ display: "flex", gap: 4, padding: "6px 14px 0" }}>
-            {(["feed", "terminal"] as const).map((t) => (
+            {(["feed", "diff", "terminal"] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -253,13 +263,50 @@ export function RoomPage({
                   background: tab === t ? "#fff" : "transparent",
                 }}
               >
-                {t === "feed" ? "Etkinlik" : "Terminal"}
+                {t === "feed" ? "Etkinlik" : t === "diff" ? "Diff" : "Terminal"}
+                {/* Sekme başlığında açık dosya ve açık yorum sayısı: hangi
+                    sekmede iş olduğunu görmek için sekmeyi açmak gerekmesin. */}
+                {t === "diff" && (openFiles > 0 || openComments > 0) && (
+                  <span style={{ color: "var(--ink-soft)" }}>
+                    {" "}
+                    {openFiles}
+                    {openComments > 0 ? ` · 💬 ${openComments}` : ""}
+                  </span>
+                )}
               </button>
             ))}
           </div>
 
           <div style={{ flex: 1, overflow: "auto", minHeight: 0 }}>
-            {tab === "feed" ? <ActivityFeed turns={turns} canWrite={canWrite} /> : null}
+            {tab === "feed" ? (
+              <ActivityFeed
+                turns={turns}
+                canWrite={canWrite}
+                comments={agentView?.comments ?? []}
+                onOpenFile={(path) => {
+                  setFocusPath(path);
+                  setTab("diff");
+                }}
+                onOpenReview={(reviewId) => {
+                  // İncelemenin ilk yorumunun dosyasına git: "yorumlara git"
+                  // demek pratikte "o yorumun durduğu yere git" demek.
+                  const first = (agentView?.comments ?? []).find((c) => c.reviewId === reviewId);
+                  if (first) setFocusPath(first.path);
+                  setTab("diff");
+                }}
+              />
+            ) : null}
+            {tab === "diff" && selected ? (
+              <DiffView
+                roomId={roomId}
+                agent={selected}
+                agentView={agentView}
+                canWrite={canWrite}
+                agentStatus={status}
+                focusPath={focusPath}
+                onFocusHandled={() => setFocusPath(null)}
+              />
+            ) : null}
             {/* Terminal DOM'da kalır: unmount olursa geçmiş kaybolur. */}
             <div style={{ height: "100%", display: tab === "terminal" ? "block" : "none" }}>
               <TerminalView turns={turns} visible={tab === "terminal"} />
