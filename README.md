@@ -207,6 +207,20 @@ grubunda başlatılıyor ve sinyal gruba gidiyor; aynı ölçüm **1 saniyenin a
 
 Docker'sız çalışmak için `SPAWN_CONTAINER=0` — oda kaydı ve klasörler kurulur, container açılmaz.
 
+## İzleyiciden katılımcıya: yetki isteme
+
+İzleyici diff'i ve akışı görür, yazamaz. Ekrandaki satır artık ne olduğunu söylemekle
+kalmıyor, **yapma yolunu da veriyor**: "Yetki iste" düğmesi. İstek odanın sahibine üst
+kısımda tek satır olarak düşer — *"Ayse katılımcı olmak istiyor"* — ve **Katılımcı yap** /
+**Reddet** tek tık.
+
+İstekler ayrı bir tabloda tutulmuyor: `access.requested` ve `access.resolved` event'leri
+event log'a giriyor ve durum projeksiyondan okunuyor. Böylece rol değişikliğinin
+**gerekçesi** de odanın tarihinde kalıyor ve ikinci bir gerçek kaynak doğmuyor.
+
+Açık bir isteğin varken ikinci kez basmak yeni kayıt açmaz. İstenen rol yalnızca
+`member` — `owner` istemek bir yetki devridir, istek değil.
+
 ## Diff, satır yorumu ve checkpoint
 
 Agent detayında üç sekme var: **Etkinlik · Diff · Terminal**. Diff sekmesi agent'ın
@@ -248,9 +262,13 @@ Checkpoint alırken branch, `HEAD`, `.git/index` ve çalışma ağacı **değiş
 geçici index kullanılıyor). İmajdaki git sürümü: **2.39.5**.
 
 ```bash
-npm run gate:w6          # 13 kontrol, MODEL İSTEĞİ HARCAMAZ (~3 dk)
-npm run gate:w6:agent    # canlı diff + inceleme döngüsü; üç turn, kota yer
+npm run gate:w6          # 13/13, MODEL İSTEĞİ HARCAMAZ (~3 dk)
+npm run gate:w6:agent    # 12/12, canlı diff + inceleme döngüsü; üç turn, kota yer
 ```
+
+Son ölçüm: satıra yorum bırakıldıktan **13,7 saniye** sonra agent düzeltmeyi yayımladı;
+`processOrder` üç fonksiyona bölündü ve yorumun çapası 15. satırdan 53'e **taşındı**
+(`moved`), kaybolmadı.
 
 ## Yapı
 
@@ -446,6 +464,20 @@ döndü, sol çubuk üçünü de çizdi). Kontrolden sonra geçici YAML silindi.
 | İsteğe bağlı diff event log'a YAZILMIYOR | "Ayşe'nin 14:02 checkpoint'inden beri" kullanıcıya özel bir görünüm, herkesin durumu değil. Event log herkesin gördüğü şeydir; kişisel bir sorgu oraya girmemeli. Sonuç 30 sn önbellekleniyor ve anahtarda ağaç sha'sı var — yoksa önbellek bayat bir diff dönerdi. |
 | Kapı İKİYE bölündü | Canlı `diff.updated` modelsiz ölçülemez: diff'i runner yayımlıyor ve tetiği bir tool çağrısı. `gate:w6` (13 kontrol) hiç model isteği harcamıyor — gerçek container, gerçek git, gerçek gitkit, dosyalar `docker exec` ile değişiyor. Gerçekten modele bağlı olanlar (canlı yayım, artımlı filtre, yorumdan düzeltmeye SÜRE) `gate:w6:agent` içinde ve anahtar yoksa atlıyor. |
 | Kapı git'i ürünle AYNI bayraklarla okuyor | İlk koşumda kontrol 1 "dubious ownership" ile düştü: workspace bind mount üzerinden geliyor, uid eşleşmiyor ve gitkit zaten `safe.directory=*` ile çağırıyordu. Kapının okuması üründen farklı bir koşulda olsaydı, ölçtüğü şey ürünün davranışı olmazdı. |
+
+### Hafta 6 sonrası — anahtar, sağlayıcı ve yetki
+
+| Karar | Gerekçe |
+| --- | --- |
+| Kimlik doğrulaması agent BAŞLATILMADAN kontrol ediliyor | Gemini anahtarı tanımlıyken Claude runtime'lı bir agent başlatılabiliyordu: yönetici kuruluydu, container açıldı, runner kalktı ve hata ancak container İÇİNDE oluştu ("Not logged in · Please run /login"). SDK bunu normal metin olarak döndürdüğü için turn `completed` yazıldı ve ekranda YEŞİL bir "tamamlandı" göründü — sıfır token, 52 ms. Yapılandırma eksikliği bir sonuç değil önkoşuldur. |
+| Anahtar eksikliği `503`, container sorunu `409` | İkisine aynı kodu döndürmek, arayüzün anahtar eksikliğinde de "odayı yeniden aç" demesi demekti. |
+| Her koşum ortamı yalnızca KENDİ anahtarına bakar | Claude anahtarının varlığı bir Gemini agent'ını başlatmak için gerekçe değil. Sağlayıcı arka uçlarında (Bedrock/Vertex/gateway) anahtar ARANMAZ; orada kimlik dışarıdan gelir ve anahtar istemek çalışan bir kurulumu kırardı. |
+| Durmuş container KENDİLİĞİNDEN başlatılmıyor | O container eski imajdan yaratılmış olabilir; bayat imajla agent `stopped`da kalıp "protokol sürümü uyuşmuyor" yazar. Sessizce ayağa kaldırmak, sebebi görünmeyen ikinci bir hata üretirdi. Bunun yerine insan diliyle "oda kapandı, yeni oda aç" deniyor. |
+| `AGENT_MODEL` koşum ortamına özel hâle geldi | Tek değer iki koşum ortamına da gidiyordu: odada bir Gemini bir Claude agent'ı varken `AGENT_MODEL=gemini-3.1-flash-lite` Claude agent'ına da gidiyordu. `AGENT_MODEL_CLAUDE` / `AGENT_MODEL_GEMINI` eklendi, global olan yedek kaldı (kapılar onu kullanıyor). |
+| Yetki istekleri ayrı tabloda DEĞİL, event log'da | Rol değişikliğinin gerekçesi de odanın tarihidir. Ayrı tablo "tabloda bekliyor ama log'da çözülmüş" çelişkisini mümkün kılardı. |
+| Kabulde rol ÖNCE değişiyor, event SONRA yazılıyor | Event "oldu" demektir, "olacak" demek değil. Ters sırada bir hata, log'da olmuş görünen ama gerçekleşmemiş bir yetki bırakırdı. |
+| Kapı durumu `/snapshot`'tan değil CANLI görünümden okuyor | O uç saklanan snapshot'ı döndürüyor ve event log'un gerisinde olabilir. Bir kapı koşumunda yorum seq 48'de yazıldı, snapshot seq 34'te kaldı ve kapı "projeksiyonda yorum yok" dedi — ürün doğruydu. `scripts/room-view.mjs` snapshot + sonraki event'leri projeksiyondan geçiriyor: tarayıcının yaptığının aynısı. |
+| Çapa kontrolü sabit beklentiden çıkarıldı | "Yorum `current` kalırsa başarısız" ölçütü, agent'ın satırı kaydırmasını varsayıyor; gerçek modelde bu bir şans işi. Ölçülen şey artık projeksiyonun çapa kuralının patch'in gerçeğiyle aynı sonucu verip vermediği. |
 
 ## Ölçülecek tek metrik
 

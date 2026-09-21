@@ -23,11 +23,11 @@ herkesin ekranında güncelleniyor ve insanlar satırın kendisine yorum bırak�
 | 10 | Checkpoint ve isteğe bağlı diff API'si | ✅ 30 sn önbellek, anahtarda ağaç sha'sı var |
 | 11 | Projeksiyon | ✅ diff, checkpoint, yorum ve çapa durumları |
 | 12 | UI: Diff sekmesi | ✅ `DiffView`, `DiffFile`, `LineComment`, `ReviewTray`, `CheckpointPicker` |
-| 13 | Kapı script'i | ✅ `gate:w6` 13/13 (modelsiz) · `gate:w6:agent` (anahtar yoksa atlar) |
+| 13 | Kapı script'i | ✅ `gate:w6` **13/13** (modelsiz) · `gate:w6:agent` **12/12** (üç turn) |
 | 14 | Cuma dogfood | ⬜ iki kişi gerekiyor |
 | 15 | README | ✅ |
 
-**312 test** (Hafta 5 sonunda 233'tü). İmajdaki git: **2.39.5**.
+**329 test** (Hafta 5 sonunda 233'tü). İmajdaki git: **2.39.5**.
 
 ## Neden host'ta git çalışmıyor
 
@@ -163,6 +163,41 @@ birkaç kez gidiyor. Anahtar yoksa atlar, başarısız saymaz.
 
 Ölçtüğü şeyler modelsiz ölçülemez: canlı `diff.updated`, artımlı yayım (arka arkaya iki
 gerçek turn gerekiyor) ve **yorumdan düzeltmeye geçen süre** — haftanın vaadi bu.
+
+## Ölçülen sayı: yorumdan düzeltmeye 13,7 saniye
+
+Haftanın vaadi buydu ve `gate:w6:agent` onu sayıyla kapatıyor. Son koşum
+(Gemini, `gemini-3.1-flash-lite`):
+
+| Ölçüm | Değer |
+| --- | --- |
+| `review.submitted` → sonraki `diff.updated` | **13,7 sn** (eşik: 30 sn uyarı, 60 sn başarısız) |
+| `src/order.js` içindeki `function` sayısı | 1 → **3** (agent gerçekten böldü) |
+| Yorumun çapası | `moved`, satır **15 → 53** |
+| Turn başına checkpoint | 4 turn, 4 turn checkpoint'i |
+
+## Kapı üç koşumda kendi üç hatasını buldu
+
+Hiçbiri üründe değildi; üçü de "ölçtüğümü sandığım şey" ile "gerçekten
+ölçtüğüm şey" arasındaki fark:
+
+1. **Yorum satırı workspace dosyasından seçiliyordu.** İnceleme *"src/order.js:15
+   diff'te böyle bir satır yok"* ile reddedildi — haklı olarak: unified diff
+   yalnızca hunk'ları taşır. Yorum yalnızca diff'te görünen satırlara bırakılır,
+   yani kapı da satırı **patch'ten** seçmeli.
+2. **SSE probe'ları dosyayı ancak süre dolunca yazıyor.** Uzun süreli iki probe
+   başlatıp ortada okumak "dosya yok" demekti. Probe'lar artık `--since 0` ile
+   geçmişi tekrar oynatıyor.
+3. **Durum `/rooms/:id/snapshot`'tan okunuyordu.** O uç SAKLANAN snapshot'ı
+   döndürür, canlı durumu değil. Bir koşumda yorum seq 48'de yazıldı, snapshot
+   seq 34'te kalmıştı ve kapı "projeksiyonda yorum yok" dedi. Ürün doğruydu.
+   `scripts/room-view.mjs` eklendi: snapshot + sonraki event'ler → `project()`,
+   yani **tarayıcının yaptığının aynısı**. İki kapı da onu kullanıyor.
+
+Çapa kontrolü de sabit beklentiden çıkarıldı. Görev tanımı "current kalırsa
+başarısız" diyor; bu, agent'ın satırı kaydırmasını varsayıyor ve gerçek modelde
+bu bir şans işi. Ölçülen şey artık: projeksiyonun çapa kuralı patch'in
+gerçeğiyle aynı sonucu veriyor mu.
 
 ## Kapsam dışı bırakılanlar (bilerek)
 

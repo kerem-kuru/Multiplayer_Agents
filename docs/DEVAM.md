@@ -1,4 +1,4 @@
-# Kaldığımız yer — 21 Eylül 2026, akşam
+# Kaldığımız yer — 21 Eylül 2026, gece
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
 
@@ -12,7 +12,6 @@ değiştirir.
 > deposudur.** Agent'lar birbirine mesaj atmaz; ortak oda defterine yazar ve oradan okur.
 
 **Ölçülecek tek metrik:** aynı oturuma iki farklı insanın yazdığı oturum sayısı, haftalık.
-Kurulum sayısı değil, star sayısı değil.
 
 12 haftalık plan `docs/roadmap.md` içinde. Haftalık görev tanımları Downloads klasöründeki
 `HAFTA-<N>-GOREV.md` dosyalarından geliyor.
@@ -21,72 +20,82 @@ Kurulum sayısı değil, star sayısı değil.
 
 | Hafta | Konu | Durum |
 | --- | --- | --- |
-| 1 | İskelet ve event log | ✅ `npm run gate` → 10/10 |
+| 1 | İskelet ve event log | ✅ `gate` 10/10 |
 | 2 | Tek agent, headless koşum | ⏳ kod tamam, `gate:w2` **koşulmadı** (Claude anahtarı yok) |
 | 3 | Stream ve terminal görünümü | ✅ `gate:w3` 11/11 · `gate:w3:agent` 2/2 |
 | 4 | Redaction ve ikinci izleyici | ✅ `gate:w4` 22/22 · `gate:w4:agent` 5/5 · dogfood ✅ |
 | 5 | Yazma yetkisi, kuyruk, kesme | ✅ `gate:w5` 25/25 · `gate:w5:agent` 7/7 · dogfood ✅ |
-| 6 | **Diff görünümü ve satır yorumu** | 🔶 Adım 1-13 ✅ · `gate:w6` **13/13** · elle test ve dogfood **yapılmadı** |
+| 6 | **Diff görünümü ve satır yorumu** | 🔶 Adım 1-13, 15 ✅ · `gate:w6` **13/13** · `gate:w6:agent` **12/12** · **elle test ve dogfood kaldı** |
 
-**312 test** (Hafta 5 sonunda 233'tü). Paketler: `protocol`, `redact`, `view`, `gitkit`,
-`core`, `runner`, `runner-gemini`. `npm run typecheck` temiz.
+**329 test**, `npm run typecheck` temiz. Paketler: `protocol`, `redact`, `view`, `gitkit`,
+`core`, `runner`, `runner-gemini`.
 
-## Hafta 6'da bugün ne yapıldı
+## Hafta 6'nın ölçülen sayısı
 
-- **Adım 13 (kapı) yazıldı ve koşturuldu.** `scripts/week6-gate.sh` → **13/13**.
-  `test/fixtures/week6-repo/` (üç işi birden yapan `processOrder`) eklendi.
-  Kapı ikiye bölündü — gerekçe aşağıda.
-- **Adım 15 (belgeler):** `docs/week-06.md`, README'ye "Diff, satır yorumu ve checkpoint"
-  bölümü + Hafta 6 karar notları (12 karar) + güncel `Yapı` ağacı.
+`gate:w6:agent` son koşumu (Gemini, `gemini-3.1-flash-lite`):
 
-### Kapı neden ikiye bölündü
+- **yorumdan düzeltmeye 13,7 sn** (eşik: 30 sn uyarı, 60 sn başarısız)
+- `src/order.js` içindeki `function` sayısı 1 → **3** (agent gerçekten böldü)
+- yorumun çapası `moved`, satır **15 → 53** (kaybolmadı, taşındı)
+- 4 turn, 4 turn checkpoint'i
 
-Ölçerek çıkan mimari gerçek: **`diff.updated` yalnızca runner tarafından yayımlanıyor** ve
-tetiği bir tool çağrısı (`PostToolUse` hook'u) ya da `set_base`. Yani canlı diff'i modelsiz
-ölçmek mümkün değil — Hafta 5'in sahte koşum ortamında container ve gitkit hiç yok.
+Yani yol haritasındaki cümle kanıtlandı: *satıra "bunu böl" yazılıyor, agent 30 sn'de
+düzeltiyor, ikinci kullanıcı canlı görüyor.* Kalan tek şey bunun **iki gerçek insanla**
+tekrarı (Adım 14 dogfood).
 
-- `npm run gate:w6` — **13 kontrol, hiç model isteği harcamıyor.** Gerçek container, gerçek
-  git, gerçek gitkit; dosyalar `docker exec` ile değişiyor, diff isteğe bağlı diff ucundan
-  okunuyor. Agent BAŞLATILIYOR (taban checkpoint'i orada alınıyor) ama runner'ın ayağa
-  kalkması modele gitmiyor. Ölçtüğü: taban ref'i, ekilmiş hook/fsmonitor'un tetiklenmediği,
-  HEAD/index/çalışma ağacının değişmediği, host'ta git çağrısı olmadığı, diff doğruluğu
-  (added/modified/renamed/truncated, node_modules hariç), viewer 403, tabanın kaydırılması.
-- `npm run gate:w6:agent` — canlı yayım, artımlı filtre, inceleme döngüsü ve **yorumdan
-  düzeltmeye süre**. Üç gerçek turn koşar, anahtar yoksa atlar. **Henüz koşulmadı** (kota).
+## Bu oturumda yapılanlar (21 Eylül gecesi)
 
-İlk koşumda kontrol 1 "dubious ownership" ile düştü: kapı git'i ürünün kullandığı
-`safe.directory=*` bayrağı olmadan çağırıyordu. Kapının okuması üründen farklı bir koşulda
-olursa ölçtüğü şey ürünün davranışı olmaz.
+1. **Adım 13 — kapılar.** `gate:w6` (modelsiz, 13/13) + `gate:w6:agent` (12/12) +
+   `test/fixtures/week6-repo/`. Kapı neden ikiye bölündü: `diff.updated` yalnızca runner
+   tarafından yayımlanıyor ve tetiği bir tool çağrısı — canlı diff modelsiz ölçülemez.
+2. **Adım 15 — belgeler.** `docs/week-06.md`, README'ye iki yeni bölüm ve 20 karar notu.
+3. **Anahtarsız Claude agent'ı artık HİÇ başlamıyor** (aşağıda).
+4. **İzleyiciye "yetki iste"** — Hafta 5'in borcu kapandı.
+5. **`AGENT_MODEL` koşum ortamına özel hâle geldi** — Claude anahtarı bağlanınca
+   patlayacak bir tuzak kapatıldı.
 
-## Yarın ilk iş — Hafta 6'yı kapatmak için kalan üç şey
+### Kapı üç koşumda kendi üç hatasını buldu (ürün hatası değil)
 
-1. **Elle test (hiç yapılmadı).** Bugün tıkandığı yer: `.env`'e `ROOM_CONFIG` yazıldı ama
-   API yeniden başlatılmadı; `.env` yalnızca süreç açılışında okunuyor
-   (`apps/api/src/index.ts`, `process.loadEnvFile`). Eski süreç hâlâ `room.example.yaml`
-   ile oda açıyordu, o da Claude runtime → container'daki CLI `Not logged in · Please run
-   /login` deyip 52 ms'de çıkıyordu. **Çözüm: `dev:all`'ı yeniden başlat, YENİ oda aç.**
-   Bakılacaklar: `docs/week-06.md` + görev tanımı Adım 12 (diff sekmesi, taslak yorum,
-   inceleme tepsisi, çapa durumları, checkpoint çubuğu, viewer rolü).
-2. **`gate:w6:agent` koş** — kota açıkken (TSİ ~10:00 sonrası). Üç turn harcar.
-3. **Cuma dogfood (Adım 14).** İki kişi, gerçek kod, yalnızca diff üzerinden yönlendirme.
+1. Yorum bırakılacak satır **workspace dosyasından** seçiliyordu → inceleme "diff'te böyle
+   bir satır yok" ile reddedildi. Unified diff yalnızca hunk'ları taşır; satır artık
+   **patch'ten** seçiliyor.
+2. SSE probe'ları `--out` dosyasını ancak süre dolunca yazıyor → probe'lar artık
+   `--since 0` ile geçmişi tekrar oynatıyor.
+3. **En önemlisi:** durum `GET /rooms/:id/snapshot`'tan okunuyordu. O uç **saklanan**
+   snapshot'ı döndürür, canlı durumu değil. Bir koşumda yorum seq 48'de yazıldı, snapshot
+   seq 34'te kaldı ve kapı "projeksiyonda yorum yok" dedi — **ürün doğruydu**.
+   `scripts/room-view.mjs` eklendi: snapshot + sonraki event'ler → `project()`, yani
+   tarayıcının yaptığının aynısı. Her iki kapı da artık onu kullanıyor.
+   **Yeni bir kapı yazarken durumu bu script'ten oku, /snapshot'tan değil.**
+
+## Claude anahtarı bağlanmadan önce bilinmesi gerekenler
+
+Anahtar `.env`'e yazılıp **sunucu yeniden başlatıldığında** Claude agent'ları çalışır.
+Hazırlık olarak üç şey yapıldı:
+
+1. `missingCredentials()` — anahtar yoksa agent HİÇ başlamıyor, `503` ve açık cümle.
+   Sağlayıcı arka uçlarında (Bedrock/Vertex/gateway) anahtar aranmıyor.
+2. `AGENT_MODEL_CLAUDE` / `AGENT_MODEL_GEMINI` eklendi. **`.env`'deki
+   `AGENT_MODEL=gemini-3.1-flash-lite` satırı iki koşum ortamına da gidiyor** — Claude
+   anahtarını bağlarken ya o satırı boşalt ya da koşum ortamına özel olanları kullan.
+3. `gate:w2` hâlâ koşulmadı; anahtar bağlanınca ilk iş o olmalı.
+
+## Sırada ne var
+
+1. **Elle test** (Kerem yapacak, kota yenilenince). Liste: `docs/week-06.md` + görev tanımı
+   Adım 12. Önce `dev:all`'ı yeniden başlat ve **yeni oda aç**.
+2. **Adım 14 — Cuma dogfood.** İki kişi, gerçek kod, yalnızca diff üzerinden yönlendirme.
    README'ye dört soru: yorumdan düzeltmeye kaç sn, kaç yorum yanlış satıra uygulandı,
    "eskimiş" işareti doğru muydu, composer'a dönmek zorunda kalındı mı.
+3. **Push:** 12 commit `origin/main`'e gitmeyi bekliyor.
+4. Hafta 7 görev tanımı.
 
-## Bugün çıkan ve DURAN üç sorun
+## Duran tek borç
 
-1. **Claude runtime'lı agent, anahtar olmadan da başlatılıyor.** `index.ts:45` yöneticiyi
-   `apiKey || provider || geminiApiKey` ile kuruyor; Gemini anahtarı varken Claude agent'ı
-   için 503 koruması hiç tetiklenmiyor. Hata container içinde oluşuyor ve SDK onu normal
-   metin olarak döndürdüğü için `turn.completed` yazılıyor → ekranda yeşil "tamamlandı".
-   **Yapılacak:** `manager.ts` başlatma yolunda runtime bazlı kontrol — anahtar yoksa
-   container hiç çalıştırılmadan `AgentStartError`.
-2. **Durmuş oda container'ı ham Docker hatası gösteriyor** (Hafta 5'ten taşındı):
-   `container'a bağlanılamadı: Error: (HTTP code 409) … is not running`. Aynı nokta:
-   `AgentStartError`'ın üretildiği yer. İkisi tek dokunuşla düzelir.
-3. **İzleyiciye "yetki iste" eylemi yok** (Hafta 5'ten taşındı).
-
-`gate:w2` hâlâ koşulmadı (Claude anahtarı yok) — Hafta 2'den kalan boşluk. 1. madde tam
-olarak bu boşluğun yüzü: kapı koşmadığı için hata bugüne kadar görülmedi.
+**Durmuş oda container'ı** artık insan diliyle hata veriyor ("oda kapandı — container'ı
+durmuş durumda. Yeni bir oda aç") ama kendiliğinden ayağa kaldırılmıyor: eski container
+eski imajdan yaratılmış olabilir. Otomatik başlatma istenirse imaj/protokol sürümü
+kontrolü de gerekir.
 
 ## Dogfood ortamını yeniden kurmak (iki cihaz, yerel ağ)
 
@@ -189,6 +198,7 @@ npm run dev:all                                   # api 8787 + arayüz 5173
 AUTH_DEV_MODE=true npm run api                    # giriş bağlantısı ekranda görünsün
 npm run gate / gate:w3 / gate:w4 / gate:w5        # kapılar, model isteği harcamaz
 npm run gate:w6                                   # Hafta 6, 13/13 — model isteği harcamaz
+node scripts/room-view.mjs <oda> --base <url> --session <cerez>  # CANLI durum (kapılar bunu kullanır)
 npm run gate:w3:agent / gate:w4:agent / gate:w5:agent / gate:w6:agent   # agent gerektirenler (kota yer)
 ```
 
