@@ -1,0 +1,7 @@
+{
+  "name": "week6-fixture",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hafta 6 kapısının incelediği örnek proje.",
+  "main": "src/order.js"
+}
