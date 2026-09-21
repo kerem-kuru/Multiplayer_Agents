@@ -47,6 +47,8 @@ import { inviteRoutes } from "./routes/invites.js";
 import { messageRoutes } from "./routes/messages.js";
 import { driverRoutes } from "./routes/driver.js";
 import { interruptRoutes } from "./routes/interrupt.js";
+import { reviewRoutes } from "./routes/reviews.js";
+import { checkpointRoutes } from "./routes/checkpoints.js";
 import { resolveSince, streamSession, wantsSse } from "./routes/events-sse.js";
 
 /**
@@ -112,8 +114,16 @@ export function createApp(
   if (queue) {
     app.route("/", messageRoutes(queue));
     app.route("/", interruptRoutes(queue));
+    // İnceleme uçları kuyruğa bağlı: bir incelemenin yorumları TEK turn.
+    app.route("/", reviewRoutes(queue));
   }
   app.route("/", driverRoutes());
+  /**
+   * Checkpoint ve isteğe bağlı diff. Manager verilmezse manuel checkpoint
+   * yine alınır ama koşan runner'a `set_base` gönderilemez — yeni tabanı bir
+   * sonraki başlangıçta öğrenir.
+   */
+  app.route("/", checkpointRoutes(manager));
 
   /** Anahtar yoksa agent uçları kapalı — sessizce boş cevap vermek yerine söyle. */
   const requireManager = (): AgentManager => {

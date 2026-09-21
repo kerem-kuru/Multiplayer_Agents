@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
-import type { NewRoomEvent } from "@agent-rooms/protocol";
-import { appendEvent } from "./db/eventStore.js";
-import { getPool } from "./db/pool.js";
+import type { CommentSide, NewRoomEvent, ReviewComment } from "@agent-rooms/protocol";
+import { buildReviewPrompt } from "@agent-rooms/protocol";
+import { appendEvent, appendEvents } from "./db/eventStore.js";
+import { getPool, withTx } from "./db/pool.js";
 import { latestSession } from "./room/rooms.js";
 
 /**
@@ -30,6 +31,18 @@ import { latestSession } from "./room/rooms.js";
 export const QUEUE_MAX_TEXT = 8000;
 /** Agent başına bekleyen mesaj sınırı. Aşarsa `429`. */
 export const QUEUE_MAX_QUEUED = 10;
+/** Bir incelemedeki yorum sınırı. Aşarsa `400`. */
+export const REVIEW_MAX_COMMENTS = 20;
+
+/**
+ * Kuyruğa giren bir inceleme yorumu. `reviews.comments` JSONB'sinde AYNEN
+ * bu şekil duruyor: agent'a giden metin buradan kuruluyor.
+ */
+export interface QueuedReviewComment extends ReviewComment {
+  commentId: string;
+  side: CommentSide;
+  diffSeq: number;
+}
 
 export type QueueStatus = "queued" | "running" | "done" | "cancelled";
 
@@ -215,6 +228,125 @@ export class AgentQueue {
     // Zamanlayıcıyı dürt. BEKLEMEDEN: turn'ün bitmesini beklemek isteği asar.
     void this.tick(roomId, agentName);
 
+    return { messageId, position };
+  }
+
+  /**
+   * İnceleme kuyruğa girer: `reviews` satırı + `agent_queue` satırı TEK
+   * transaction'da, ardından event'ler SIRAYLA.
+   *
+   * Sıra sözleşmesi (Adım 9):
+   *   comment.on_line ×N → review.submitted → message.queued (reviewId ile) → tick
+   *
+   * Yorumlar önce yazılır çünkü `review.submitted` onların kimliklerine
+   * atıfta bulunuyor: tersi sırada log, henüz var olmayan yorumlara işaret
+   * eden bir inceleme taşırdı.
+   *
+   * **Metin bir kez kurulur.** `buildReviewPrompt` burada çağrılıp hem kuyruk
+   * satırına hem `message.queued.text`'e yazılıyor. Görev tanımı metni
+   * kuyruktan çıkarken kurmayı öneriyordu; iki kez kurmak, log'un söylediği
+   * ile agent'ın duyduğunun ayrılma riskini açardı. Kuyruk listesi ham
+   * prompt'u değil `reviewId`'yi kullanıp "Ayşe'nin 3 yorumluk incelemesi"
+   * diye gösteriyor — `reviewId` alanı tam olarak bunun için var.
+   *
+   * Hafta 5'in "mesajlar birleştirilmez" kuralı BOZULMUYOR: birleştirilen şey
+   * aynı kişinin aynı inceleme içindeki yorumları. Farklı kişilerin
+   * incelemeleri yine ayrı turn'ler.
+   */
+  async enqueueReview(
+    roomId: string,
+    agentName: string,
+    user: QueueUser,
+    review: { reviewId: string; comments: QueuedReviewComment[]; baseCheckpointId: string },
+  ): Promise<{ messageId: string; position: number }> {
+    if (review.comments.length === 0) throw new QueueError(400, "inceleme boş");
+    if (review.comments.length > REVIEW_MAX_COMMENTS) {
+      throw new QueueError(400, `bir incelemede en fazla ${REVIEW_MAX_COMMENTS} yorum olabilir`);
+    }
+
+    const sessionId = await this.sessionId(roomId);
+    const pending = await this.pool.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM agent_queue
+        WHERE room_id = $1 AND agent_name = $2 AND status = 'queued'`,
+      [roomId, agentName],
+    );
+    if (Number(pending.rows[0]?.n ?? "0") >= QUEUE_MAX_QUEUED) {
+      throw new QueueError(429, `bu agent için kuyruk dolu (${QUEUE_MAX_QUEUED})`, {
+        maxQueued: QUEUE_MAX_QUEUED,
+      });
+    }
+
+    const messageId = randomUUID();
+    const text = buildReviewPrompt(user.name, review.comments);
+
+    await withTx(async (client) => {
+      await client.query(
+        `INSERT INTO reviews (id, room_id, agent_name, author_id, comments, message_id)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
+        [
+          review.reviewId,
+          roomId,
+          agentName,
+          user.id,
+          JSON.stringify(review.comments),
+          messageId,
+        ],
+      );
+      await client.query(
+        `INSERT INTO agent_queue (room_id, agent_name, message_id, user_id, text, kind, review_id)
+         VALUES ($1, $2, $3, $4, $5, 'review', $6)`,
+        [roomId, agentName, messageId, user.id, text, review.reviewId],
+      );
+    }, this.pool);
+
+    const events: NewRoomEvent[] = review.comments.map(
+      (c) =>
+        ({
+          roomId,
+          sessionId,
+          actor: { kind: "human", id: user.id, name: user.name },
+          type: "comment.on_line",
+          payload: {
+            agent: agentName,
+            commentId: c.commentId,
+            reviewId: review.reviewId,
+            author: user,
+            path: c.path,
+            side: c.side,
+            line: c.line,
+            lineText: c.lineText,
+            body: c.body,
+            baseCheckpointId: review.baseCheckpointId,
+            diffSeq: c.diffSeq,
+          },
+        }) satisfies NewRoomEvent,
+    );
+    events.push({
+      roomId,
+      sessionId,
+      actor: { kind: "human", id: user.id, name: user.name },
+      type: "review.submitted",
+      payload: {
+        agent: agentName,
+        reviewId: review.reviewId,
+        author: user,
+        commentIds: review.comments.map((c) => c.commentId),
+        messageId,
+      },
+    } satisfies NewRoomEvent);
+    events.push({
+      roomId,
+      sessionId,
+      actor: { kind: "human", id: user.id, name: user.name },
+      type: "message.queued",
+      payload: { agent: agentName, messageId, text, user, reviewId: review.reviewId },
+    } satisfies NewRoomEvent);
+
+    // Tek transaction, verilen SIRAYLA: araya başka bir yazıcı giremez.
+    await appendEvents(events, this.pool);
+
+    const position = await this.position(roomId, agentName, messageId);
+    void this.tick(roomId, agentName);
     return { messageId, position };
   }
 

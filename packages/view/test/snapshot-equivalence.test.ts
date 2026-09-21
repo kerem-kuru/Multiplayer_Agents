@@ -35,6 +35,31 @@ const ALI = { id: "bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb", name: "Ali" };
  * doğruluğu YENİ ALANLARLA da geçmeli. Kuyruk ve sürücü "anlık durum"
  * tuttuğu için sınırın iki yanına düşmesi en riskli yer burası.
  */
+const BASE = "cp_aaaaaaaaaaaa";
+
+/** Turn i'nin diff'i. Her turn dosyanın başına bir satır daha ekliyor. */
+const patchFor = (i: number): string =>
+  [
+    "@@ -1,3 +1," + (3 + i + 1) + " @@",
+    ...Array.from({ length: i + 1 }, (_, k) => `+// satir ${k}`),
+    " function processOrder(o) {",
+    "   return o;",
+    " }",
+    "",
+  ].join("\n");
+
+const fileDiff = (i: number): Record<string, unknown> => ({
+  path: "src/order.js",
+  oldPath: null,
+  status: "modified",
+  patch: patchFor(i),
+  additions: i + 1,
+  deletions: 0,
+  blobHash: String(i).repeat(40),
+  truncated: false,
+  collapsedByDefault: false,
+});
+
 function buildEvents(): StoredEvent[] {
   seq = 0;
   const out: StoredEvent[] = [];
@@ -42,6 +67,21 @@ function buildEvents(): StoredEvent[] {
     if (i === 0) out.push(ev("agent.starting", { agent: "backend" }));
     if (i === 0) out.push(ev("agent.ready", { agent: "backend", runnerPid: 8 }));
     if (i === 0) out.push(ev("driver.claimed", { agent: "backend", user: AYSE }));
+    if (i === 0) {
+      out.push(
+        ev("checkpoint.created", {
+          agent: "backend",
+          checkpointId: BASE,
+          kind: "baseline",
+          label: "taban",
+          commitSha: "b".repeat(40),
+          treeSha: "c".repeat(40),
+          messageId: null,
+          by: null,
+          becomesBase: true,
+        }),
+      );
+    }
     if (i === 1) {
       // Devir ve bir de iptal edilen kayıt: ikisi de anlık durumu değiştiriyor.
       out.push(ev("driver.handed_off", { agent: "backend", from: AYSE, to: ALI }));
@@ -86,6 +126,51 @@ function buildEvents(): StoredEvent[] {
       }),
     );
     out.push(ev("agent.text", { agent: "backend", messageId: mid, text: `bitti ${i}` }));
+
+    /**
+     * Hafta 6: canlı diff, satır yorumu ve turn checkpoint'i de sınırın iki
+     * yanına düşmeli. En riskli yer ÇAPA: `comment.on_line` snapshot'ın
+     * içinde, onu eskiten `diff.updated` dışında kalabilir.
+     */
+    out.push(
+      ev("diff.updated", {
+        agent: "backend",
+        messageId: mid,
+        baseCheckpointId: BASE,
+        files: [fileDiff(i)],
+      }),
+    );
+    if (i === 0) {
+      out.push(
+        ev("comment.on_line", {
+          agent: "backend",
+          commentId: "c-1",
+          reviewId: "r-1",
+          author: AYSE,
+          path: "src/order.js",
+          side: "new",
+          line: 1,
+          lineText: "// satir 0",
+          body: "bunu böl",
+          baseCheckpointId: BASE,
+          diffSeq: seq,
+        }),
+      );
+    }
+    if (i === 1) out.push(ev("comment.resolved", { agent: "backend", commentId: "c-1", by: ALI }));
+    out.push(
+      ev("checkpoint.created", {
+        agent: "backend",
+        checkpointId: `cp_turn${i}0000000`,
+        kind: "turn",
+        label: `turn sonu ${i}`,
+        commitSha: "d".repeat(40),
+        treeSha: "e".repeat(40),
+        messageId: mid,
+        by: null,
+        becomesBase: false,
+      }),
+    );
     out.push(
       ev("turn.completed", {
         agent: "backend",

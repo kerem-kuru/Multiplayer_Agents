@@ -1,4 +1,5 @@
-import type { StoredEvent } from "@agent-rooms/protocol";
+import type { CommentSide, FileDiff, StoredEvent } from "@agent-rooms/protocol";
+import { anchorOf, type AnchorState } from "./patch.js";
 
 /**
  * Event dizisi → ekranda gösterilebilir model. SAF fonksiyon.
@@ -22,7 +23,7 @@ import type { StoredEvent } from "@agent-rooms/protocol";
  * Projeksiyon sürümü. Bu dosyadaki üretim mantığı değiştiğinde ARTIRILIR:
  * eski sürümle üretilmiş snapshot'lar okunmaz, tam replay'e düşülür.
  */
-export const SNAPSHOT_VERSION = 2;
+export const SNAPSHOT_VERSION = 3;
 
 export type AgentStatus = "stopped" | "starting" | "idle" | "busy" | "crashed" | "failed";
 
@@ -76,6 +77,45 @@ export interface QueuedMessage {
   queuedAt: string;
 }
 
+/** Diff'te duran bir dosyanın son hâli + hangi event'le geldiği. */
+export type DiffFileView = FileDiff & { seq: number };
+
+export interface DiffView {
+  /** Canlı taban. null = taban henüz alınmadı, diff yok. */
+  base: { checkpointId: string; label: string; kind: string } | null;
+  /** path → dosyanın SON hâli. `status: "clean"` gelen dosya silinir. */
+  files: Record<string, DiffFileView>;
+  /** Son `diff.updated`'ın seq'i. Yorum gönderirken istemci bunu yollar. */
+  lastSeq: number;
+}
+
+export interface CheckpointView {
+  checkpointId: string;
+  kind: string;
+  label: string;
+  at: string;
+  messageId: string | null;
+  by: { id: string; name: string } | null;
+}
+
+export interface CommentView {
+  commentId: string;
+  reviewId: string;
+  author: { id: string; name: string };
+  path: string;
+  side: CommentSide;
+  line: number;
+  lineText: string;
+  body: string;
+  diffSeq: number;
+  at: string;
+  /** Çözme İNSAN kararı: agent bir yorumu kapatamaz. */
+  resolved: boolean;
+  anchor: AnchorState;
+  /** `moved` ise yorumun yeni satırı; diğer durumlarda null. */
+  currentLine: number | null;
+}
+
 export interface AgentView {
   status: AgentStatus;
   lastError: string | null;
@@ -95,6 +135,12 @@ export interface AgentView {
    * alındı" olarak gösterir; `interrupt.applied` gelince temizlenir.
    */
   interrupt: { requestedBy: { id: string; name: string }; at: string } | null;
+  /** Canlı diff (Hafta 6). Taban dışı bir karşılaştırma seçilirse UI bunu kullanmaz. */
+  diff: DiffView;
+  /** En yeniden eskiye. "Son checkpoint'ten beri" seçimi bunu gösterir. */
+  checkpoints: CheckpointView[];
+  /** Satır yorumları — eski → yeni. Çapa durumu her diff yayımında yeniden hesaplanır. */
+  comments: CommentView[];
 }
 
 export interface RoomView {
@@ -110,6 +156,9 @@ const emptyAgent = (): AgentView => ({
   running: null,
   driver: null,
   interrupt: null,
+  diff: { base: null, files: {}, lastSeq: 0 },
+  checkpoints: [],
+  comments: [],
 });
 
 /** Payload'daki kullanıcı nesnesi — Hafta 5 event'lerinde `user` / `by` / `to`. */
@@ -364,6 +413,115 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
         if (agent.running?.messageId === messageId) agent.running = null;
         // Turn kapandıysa bekleyen kesme isteği de biter.
         if (agent.interrupt && agent.running === null) agent.interrupt = null;
+        break;
+
+      // --- diff, checkpoint, yorum (Hafta 6) ---
+      case "checkpoint.created": {
+        const checkpointId = String(payload.checkpointId ?? "");
+        if (!checkpointId) break;
+        // İdempotanlık: aynı event iki kez gelirse liste ikiye katlanmaz.
+        if (agent.checkpoints.some((c) => c.checkpointId === checkpointId)) break;
+        const view: CheckpointView = {
+          checkpointId,
+          kind: String(payload.kind ?? ""),
+          label: String(payload.label ?? ""),
+          at: e.ts,
+          messageId: typeof payload.messageId === "string" ? payload.messageId : null,
+          by: userRef(payload.by),
+        };
+        // En yeni başta: "son checkpoint'ten beri" seçimi listenin başından okunuyor.
+        agent.checkpoints.unshift(view);
+
+        /**
+         * Taban değişti: biriken diff SIFIRLANIR. Runner hemen ardından yeni
+         * tabana göre tam bir diff yayımlıyor; eski dosyaları bırakmak iki
+         * tabanın karışımını göstermek olurdu.
+         */
+        if (payload.becomesBase === true) {
+          agent.diff.files = {};
+          agent.diff.base = { checkpointId, label: view.label, kind: view.kind };
+          for (const c of agent.comments) {
+            const a = anchorOf(undefined, c.side, c.line, c.lineText);
+            c.anchor = a.anchor;
+            c.currentLine = a.currentLine;
+          }
+        }
+        break;
+      }
+
+      case "diff.updated": {
+        const files = Array.isArray(payload.files) ? (payload.files as FileDiff[]) : [];
+        if (files.length === 0) break;
+        const baseCheckpointId = String(payload.baseCheckpointId ?? "");
+        if (baseCheckpointId && !agent.diff.base) {
+          // Taban event'ini görmeden diff gelebilir (snapshot sınırı): en
+          // azından kimliği bilinsin, etiket checkpoint event'iyle dolar.
+          agent.diff.base = { checkpointId: baseCheckpointId, label: "taban", kind: "baseline" };
+        }
+        for (const f of files) {
+          if (f.status === "clean") delete agent.diff.files[f.path];
+          else agent.diff.files[f.path] = { ...f, seq: e.seq };
+        }
+        agent.diff.lastSeq = Math.max(agent.diff.lastSeq, e.seq);
+
+        /**
+         * Çapa durumu HER diff yayımından sonra yeniden hesaplanır — ve
+         * yalnızca dokunulan dosyalar için: değişmeyen bir dosyanın
+         * yorumlarını yeniden hesaplamak sonucu değiştirmez.
+         */
+        const touched = new Set(files.map((f) => f.path));
+        for (const c of agent.comments) {
+          if (!touched.has(c.path)) continue;
+          const a = anchorOf(agent.diff.files[c.path], c.side, c.line, c.lineText);
+          c.anchor = a.anchor;
+          c.currentLine = a.currentLine;
+        }
+        break;
+      }
+
+      case "comment.on_line": {
+        const commentId = String(payload.commentId ?? "");
+        if (!commentId) break;
+        if (agent.comments.some((c) => c.commentId === commentId)) break;
+        const author = userRef(payload.author) ?? humanActor(e.actor);
+        if (!author) break;
+        const path = String(payload.path ?? "");
+        const side = (payload.side === "old" ? "old" : "new") as CommentSide;
+        const line = Number(payload.line ?? 0);
+        const lineText = typeof payload.lineText === "string" ? payload.lineText : "";
+        const a = anchorOf(agent.diff.files[path], side, line, lineText);
+        agent.comments.push({
+          commentId,
+          reviewId: String(payload.reviewId ?? ""),
+          author,
+          path,
+          side,
+          line,
+          lineText,
+          body: typeof payload.body === "string" ? payload.body : "",
+          diffSeq: Number(payload.diffSeq ?? 0),
+          at: e.ts,
+          resolved: false,
+          anchor: a.anchor,
+          currentLine: a.currentLine,
+        });
+        break;
+      }
+
+      case "comment.resolved":
+      case "comment.reopened": {
+        const commentId = String(payload.commentId ?? "");
+        const c = agent.comments.find((x) => x.commentId === commentId);
+        // Çözme insan kararı; agent'ın cevabı bir yorumu KAPATMAZ.
+        if (c) c.resolved = e.type === "comment.resolved";
+        break;
+      }
+
+      case "review.submitted":
+        // Yorumlar kendi event'lerinden geliyor; inceleme kaydı kuyruk
+        // satırında (`message.queued.reviewId`) görünüyor. Projeksiyonda
+        // ayrıca bir "inceleme" nesnesi tutmak aynı bilgiyi ikinci kez
+        // saklamak olurdu.
         break;
 
       default:
