@@ -150,6 +150,31 @@ export interface Me {
   name: string;
 }
 
+/**
+ * Yetki isteği — izleyicinin tek tıkla "beni katılımcı yap" demesi.
+ *
+ * Durum event log'dan geliyor (`view.access`), bu yüzden ayrı bir listeleme
+ * çağrısına gerek yok: istek yazıldığı anda SSE üzerinden herkese düşüyor.
+ */
+export const requestAccess = (
+  roomId: string,
+  note?: string,
+): Promise<{ requestId: string; state: string; existing: boolean }> =>
+  json(`/rooms/${roomId}/access-requests`, {
+    method: "POST",
+    body: JSON.stringify(note ? { note } : {}),
+  });
+
+export const resolveAccessRequest = (
+  roomId: string,
+  requestId: string,
+  decision: "granted" | "denied",
+): Promise<unknown> =>
+  json(`/rooms/${roomId}/access-requests/${requestId}`, {
+    method: "POST",
+    body: JSON.stringify({ decision }),
+  });
+
 export const me = (): Promise<Me> => json<Me>("/auth/me");
 
 export const requestLogin = (email: string, next?: string): Promise<{ devLink?: string }> =>

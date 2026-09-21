@@ -329,6 +329,43 @@ export const TaskUpdated = ev(
   }),
 );
 
+// --- Yetki isteği ----------------------------------------------------------
+
+/**
+ * İzleyici "beni katılımcı yap" diyor.
+ *
+ * Neden event: rol değişikliğinin GEREKÇESİ de odanın tarihine giriyor. Ayrı
+ * bir tabloda tutulsaydı "bu kişi neden katılımcı oldu" sorusunun cevabı event
+ * log'da olmazdı ve ikinci bir gerçek kaynak doğardı.
+ *
+ * İstenen rol yalnızca `member`: `owner` istemek bir yetki devri, istek değil.
+ */
+export const AccessRequested = ev(
+  "access.requested",
+  z.object({
+    requestId: z.string().uuid(),
+    user: UserRef,
+    role: z.literal("member"),
+    /** İsteğe bağlı tek satır: "diff'e yorum bırakacağım". */
+    note: z.string().max(280).nullable(),
+  }),
+);
+
+/**
+ * Sahip karar verdi. `granted` ise rol DEĞİŞTİRİLDİKTEN sonra yazılır: event
+ * "oldu" demek, "olacak" demek değil.
+ */
+export const AccessResolved = ev(
+  "access.resolved",
+  z.object({
+    requestId: z.string().uuid(),
+    decision: z.enum(["granted", "denied"]),
+    /** İsteği yapan — istemci karar satırını kime ait göstereceğini bilsin. */
+    user: UserRef,
+    by: UserRef,
+  }),
+);
+
 // --- Onay kuyruğu ----------------------------------------------------------
 
 export const ApprovalRequested = ev(
@@ -525,6 +562,8 @@ const EVENT_SCHEMAS = [
   JournalUpdated,
   TaskCreated,
   TaskUpdated,
+  AccessRequested,
+  AccessResolved,
   ApprovalRequested,
   ApprovalResolved,
   CommentOnLine,

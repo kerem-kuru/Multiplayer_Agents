@@ -23,7 +23,7 @@ import { anchorOf, type AnchorState } from "./patch.js";
  * Projeksiyon sürümü. Bu dosyadaki üretim mantığı değiştiğinde ARTIRILIR:
  * eski sürümle üretilmiş snapshot'lar okunmaz, tam replay'e düşülür.
  */
-export const SNAPSHOT_VERSION = 3;
+export const SNAPSHOT_VERSION = 4;
 
 export type AgentStatus = "stopped" | "starting" | "idle" | "busy" | "crashed" | "failed";
 
@@ -153,9 +153,29 @@ export interface AgentView {
   comments: CommentView[];
 }
 
+/**
+ * İzleyicinin "beni katılımcı yap" isteği.
+ *
+ * Ayrı bir tabloda DEĞİL, event log'un projeksiyonunda: rol değişikliğinin
+ * gerekçesi de odanın tarihidir ve ikinci bir gerçek kaynak yaratmak,
+ * "tablodaki bekliyor ama log'da çözülmüş" gibi bir çelişki üretirdi.
+ */
+export interface AccessRequestView {
+  requestId: string;
+  user: { id: string; name: string };
+  note: string | null;
+  state: "pending" | "granted" | "denied";
+  /** Kararı veren sahip; `pending` iken null. */
+  by: { id: string; name: string } | null;
+  /** İsteğin yazıldığı seq — sıralama ve "hangisi daha yeni" için. */
+  seq: number;
+}
+
 export interface RoomView {
   lastSeq: number;
   agents: Record<string, AgentView>;
+  /** Oda düzeyinde; agent'a bağlı değil. */
+  access: AccessRequestView[];
 }
 
 const emptyAgent = (): AgentView => ({
@@ -199,8 +219,13 @@ const actorLabel = (actor: unknown): string => {
  */
 export function project(events: StoredEvent[], base?: RoomView): RoomView {
   const view: RoomView = base
-    ? { lastSeq: base.lastSeq, agents: structuredClone(base.agents) }
-    : { lastSeq: 0, agents: {} };
+    ? {
+        lastSeq: base.lastSeq,
+        agents: structuredClone(base.agents),
+        // Eski snapshot'lar (sürüm < 4) bu alanı taşımıyor.
+        access: structuredClone(base.access ?? []),
+      }
+    : { lastSeq: 0, agents: {}, access: [] };
 
   // Tekrarı yut: aynı event iki kez gelirse sonuç değişmemeli.
   const applied = new Set<number>();
@@ -231,6 +256,36 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
     view.lastSeq = Math.max(view.lastSeq, e.seq);
 
     const payload = e.payload as Record<string, unknown>;
+
+    /**
+     * Yetki istekleri ODA düzeyinde — `agent` alanları yok, o yüzden aşağıdaki
+     * agent filtresinden ÖNCE işleniyor.
+     */
+    if (e.type === "access.requested") {
+      const user = userRef(payload.user);
+      const id = typeof payload.requestId === "string" ? payload.requestId : null;
+      if (user && id && !view.access.some((r) => r.requestId === id)) {
+        view.access.push({
+          requestId: id,
+          user,
+          note: typeof payload.note === "string" ? payload.note : null,
+          state: "pending",
+          by: null,
+          seq: e.seq,
+        });
+      }
+      continue;
+    }
+    if (e.type === "access.resolved") {
+      const id = typeof payload.requestId === "string" ? payload.requestId : null;
+      const found = id ? view.access.find((r) => r.requestId === id) : undefined;
+      if (found) {
+        found.state = payload.decision === "granted" ? "granted" : "denied";
+        found.by = userRef(payload.by);
+      }
+      continue;
+    }
+
     const agentName = typeof payload.agent === "string" ? payload.agent : null;
     if (!agentName) continue; // oda/oturum event'leri bu görünümün konusu değil
 

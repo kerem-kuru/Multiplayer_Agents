@@ -44,6 +44,7 @@ import {
   type Role,
 } from "./auth/guard.js";
 import { authRoutes } from "./routes/auth.js";
+import { accessRoutes } from "./routes/access.js";
 import { inviteRoutes } from "./routes/invites.js";
 import { messageRoutes } from "./routes/messages.js";
 import { driverRoutes } from "./routes/driver.js";
@@ -119,6 +120,8 @@ export function createApp(
     app.route("/", reviewRoutes(queue));
   }
   app.route("/", driverRoutes());
+  /** Yetki isteği: izleyicinin "beni katılımcı yap" yolu. Kuyruğa bağlı değil. */
+  app.route("/", accessRoutes());
   /**
    * Checkpoint ve isteğe bağlı diff. Manager verilmezse manuel checkpoint
    * yine alınır ama koşan runner'a `set_base` gönderilemez — yeni tabanı bir

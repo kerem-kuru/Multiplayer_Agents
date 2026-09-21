@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import {
   fetchRoom,
   listAgents,
+  requestAccess,
+  resolveAccessRequest,
   setPresence,
   startAgent,
   stopAgent,
@@ -64,12 +66,24 @@ export function RoomPage({
   /** Başlatma/durdurma hatası — sessizce yutulursa agent "starting"de asılı görünür. */
   const [actionError, setActionError] = useState<string | null>(null);
   /**
+   * Yetki isteğinin ekrandaki durumu. Gerçek durum event log'da (`view.access`)
+   * ama istekle SSE arasındaki yarım saniyede düğme "hiçbir şey olmadı" gibi
+   * durmamalı.
+   */
+  const [accessBusy, setAccessBusy] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
+  /**
    * Hafta 5: yazmak artık `owner` işi değil. `member` de kuyruğa mesaj ekler,
    * sürücülüğü alır ve sürücüyken keser. `owner`'a özel kalan şeyler: agent
    * start/stop, davet üretme, rol değiştirme.
    */
   const canWrite = role === "owner" || role === "member";
   const isOwner = role === "owner";
+  /** Kendi açık isteğim (izleyiciysem) ve karar bekleyenler (sahipsem). */
+  const myRequest = view.access.find((r) => r.user.id === meId && r.state === "pending") ?? null;
+  const myLastDecision =
+    view.access.filter((r) => r.user.id === meId && r.state !== "pending").slice(-1)[0] ?? null;
+  const pendingRequests = view.access.filter((r) => r.state === "pending");
 
   useEffect(() => {
     let alive = true;
@@ -253,6 +267,61 @@ export function RoomPage({
             </div>
           )}
 
+          {/* Sahibin karar satırı. Bildirim değil EYLEM: kabul etmek tek tık,
+              çünkü iki tık uzaktaki bir karar ertelenir ve izleyici bekler. */}
+          {isOwner && pendingRequests.length > 0 && (
+            <div
+              style={{
+                margin: "8px 14px 0",
+                padding: 10,
+                border: "1px solid var(--rule)",
+                background: "var(--paper)",
+                fontSize: 13,
+              }}
+            >
+              {pendingRequests.map((r) => (
+                <div
+                  key={r.requestId}
+                  style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
+                >
+                  <span>
+                    <strong>{r.user.name}</strong> katılımcı olmak istiyor
+                    {r.note ? ` — "${r.note}"` : ""}
+                  </span>
+                  <button
+                    disabled={accessBusy}
+                    onClick={() => {
+                      setAccessError(null);
+                      setAccessBusy(true);
+                      void resolveAccessRequest(roomId, r.requestId, "granted")
+                        .catch((e: Error) => setAccessError(e.message))
+                        .finally(() => setAccessBusy(false));
+                    }}
+                  >
+                    Katılımcı yap
+                  </button>
+                  <button
+                    disabled={accessBusy}
+                    onClick={() => {
+                      setAccessError(null);
+                      setAccessBusy(true);
+                      void resolveAccessRequest(roomId, r.requestId, "denied")
+                        .catch((e: Error) => setAccessError(e.message))
+                        .finally(() => setAccessBusy(false));
+                    }}
+                  >
+                    Reddet
+                  </button>
+                </div>
+              ))}
+              {accessError && (
+                <div style={{ color: "var(--fail)", fontSize: 12, marginTop: 6 }}>
+                  {accessError}
+                </div>
+              )}
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: 4, padding: "6px 14px 0" }}>
             {(["feed", "diff", "terminal"] as const).map((t) => (
               <button
@@ -346,6 +415,41 @@ export function RoomPage({
               Bu odayı izliyorsun: kuyruğu ve akışı görüyorsun, yazamıyorsun. Oda sahibi seni
               <strong> katılımcı </strong>yaparsa (veya katılımcı linkiyle davet ederse) aynı
               agent'lara görev yazabilirsin.
+              {/* Ne yapılması gerektiğini söyleyip yapma yolunu vermemek, bilgiyi
+                  tavsiyeye çevirir. Hafta 5'in borcu buydu. */}
+              <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center" }}>
+                {myRequest ? (
+                  <span>
+                    Yetki isteğin <strong>sahibin kararını bekliyor</strong>. Sahip kabul ettiği
+                    anda bu satır kaybolur ve yazabilirsin.
+                  </span>
+                ) : (
+                  <>
+                    <button
+                      disabled={accessBusy}
+                      onClick={() => {
+                        setAccessError(null);
+                        setAccessBusy(true);
+                        void requestAccess(roomId)
+                          .catch((e: Error) => setAccessError(e.message))
+                          .finally(() => setAccessBusy(false));
+                      }}
+                    >
+                      {accessBusy ? "gönderiliyor…" : "Yetki iste"}
+                    </button>
+                    {myLastDecision?.state === "denied" && (
+                      <span>
+                        Önceki isteğin reddedildi. Tekrar isteyebilirsin.
+                      </span>
+                    )}
+                  </>
+                )}
+              </div>
+              {accessError && (
+                <div style={{ color: "var(--fail)", fontSize: 12, marginTop: 6 }}>
+                  {accessError}
+                </div>
+              )}
             </div>
           )}
         </main>

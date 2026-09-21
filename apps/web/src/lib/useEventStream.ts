@@ -35,7 +35,7 @@ export interface StreamState {
   reconnect: () => void;
 }
 
-const EMPTY: RoomView = { lastSeq: 0, agents: {} };
+const EMPTY: RoomView = { lastSeq: 0, agents: {}, access: [] };
 
 export function useEventStream(roomId: string | null): StreamState {
   const [view, setView] = useState<RoomView>(EMPTY);
