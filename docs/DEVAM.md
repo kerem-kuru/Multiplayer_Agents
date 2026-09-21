@@ -80,15 +80,34 @@ Hazırlık olarak üç şey yapıldı:
    anahtarını bağlarken ya o satırı boşalt ya da koşum ortamına özel olanları kullan.
 3. `gate:w2` hâlâ koşulmadı; anahtar bağlanınca ilk iş o olmalı.
 
-## Sırada ne var
+## Sırada ne var — yarının ilk üç işi
 
-1. **Elle test** (Kerem yapacak, kota yenilenince). Liste: `docs/week-06.md` + görev tanımı
-   Adım 12. Önce `dev:all`'ı yeniden başlat ve **yeni oda aç**.
-2. **Adım 14 — Cuma dogfood.** İki kişi, gerçek kod, yalnızca diff üzerinden yönlendirme.
-   README'ye dört soru: yorumdan düzeltmeye kaç sn, kaç yorum yanlış satıra uygulandı,
-   "eskimiş" işareti doğru muydu, composer'a dönmek zorunda kalındı mı.
-3. **Push:** 12 commit `origin/main`'e gitmeyi bekliyor.
-4. Hafta 7 görev tanımı.
+1. **Elle test** (Kerem yapacak, kota TSİ ~10:00'da yenilenince). Bakılacaklar listesi:
+   `docs/week-06.md` + görev tanımı Adım 12 — diff sekmesi, taslak yorum ve inceleme
+   tepsisi, çapa durumları (`current` / `moved` / "Eskimiş yorumlar"), checkpoint çubuğu,
+   `viewer` rolünde düğmelerin olmaması, **yeni:** izleyicideki "Yetki iste" düğmesi ve
+   sahibin karar satırı.
+   **Önce `dev:all`'ı yeniden başlat ve YENİ oda aç** — `.env` yalnızca süreç açılışında
+   okunuyor ve oda konfigürasyonu DB'de sabit.
+2. **Adım 14 — dogfood.** İki kişi, gerçek kod, yalnızca diff üzerinden yönlendirme;
+   terminal ve composer kullanılmamaya çalışılacak. README'ye dört soru: yorumdan
+   düzeltmeye kaç sn, kaç yorum yanlış satıra uygulandı, "eskimiş" işareti doğru muydu,
+   composer'a dönmek zorunda kalındı mı. Bu ikisi bitince **Hafta 6 kapanır.**
+3. **Hafta 7 görev tanımı** Kerem'den gelecek.
+
+Elle testte bir şey düşerse: `gate:w6` (modelsiz, 13/13) regresyonu saniyeler içinde
+söyler; `gate:w6:agent` üç turn harcar, kota doluyken koşturma.
+
+## Makinede ne kaldı (21 Eylül gecesi)
+
+- **Push edildi:** çalışma ağacı temiz, `origin/main` = `dbb7904`. Hafta 6'nın tamamı
+  (11 commit) public repoda.
+- `postgres` (5433) + `redis` (6380) ayakta. `dev:all` ayakta: API 8787, arayüz 5173.
+  Kapı script'lerinin geçici sunucuları (8798/8799) ve elle test sunucuları kapatıldı.
+- **On dört oda container'ı `Up`, biri `Exited`.** Kapılar kendi odalarını siliyor;
+  bunlar gün içindeki elle denemelerden kaldı. Tek tek silinebilir
+  (`docker rm -f agent-rooms-room-<kısa-id>`) ama **toplu silme yapma** (5. tuzak).
+- `rooms-data/` altında 194 oda klasörü var; hiçbiri temizlenmedi.
 
 ## Duran tek borç
 
