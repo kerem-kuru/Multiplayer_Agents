@@ -207,6 +207,51 @@ grubunda başlatılıyor ve sinyal gruba gidiyor; aynı ölçüm **1 saniyenin a
 
 Docker'sız çalışmak için `SPAWN_CONTAINER=0` — oda kaydı ve klasörler kurulur, container açılmaz.
 
+## Diff, satır yorumu ve checkpoint
+
+Agent detayında üç sekme var: **Etkinlik · Diff · Terminal**. Diff sekmesi agent'ın
+**tabandan beri** değiştirdiği dosyaları gösterir ve herkeste aynı anda güncellenir.
+
+**Taban nedir:** agent ilk başlatıldığında workspace'in o anki hâlinden bir checkpoint
+alınır; diff hep ona göredir. Bu yüzden workspace'e **sonradan elle kopyalanan dosyalar
+agent'ın değişikliği gibi görünür** — sıfırlamak için agent boştayken *Checkpoint al*
+düğmesine basılır, taban oraya kayar ve diff boşalır.
+
+**Satıra yorum:** satır numarasının üzerine gelince (veya klavyeyle odaklanınca) çıkan `+`
+düğmesi. Yazdığını ya *Taslağa ekle* dersin (taslaklar yalnızca senin tarayıcında durur,
+başkası görmez) ya da *Hemen gönder* — o da tek yorumlu bir incelemedir. Taslak varken
+ekranın altında "N taslak yorum · Yorumları gönder (N)" çubuğu durur.
+
+İnceleme gönderildiğinde agent'a **tek turn** olarak gider ve metni sunucu kurar:
+
+```
+1) src/order.js:14
+   > function processOrder(order, db) {
+   bunu böl
+```
+
+Yorum bir satır numarasına değil, **numara + satır metnine** çapalanır. Agent araya satır
+eklerse yorum kaybolmaz: aynı metin başka tek bir satırda bulunursa yorum oraya taşınır ve
+"satır yer değiştirdi" etiketi alır (`moved`); metin hiç yoksa veya birden çok kez geçiyorsa
+dosyanın altındaki **"Eskimiş yorumlar"** bölümüne düşer (`outdated`). Belirsizlikte
+tahmin yürütülmez.
+
+Yorumu **çözmek ve yeniden açmak insanın işidir.** Agent cevabında uyguladığını söyleyebilir
+ama yorumu kapatamaz. `viewer` diff'i ve yorumları görür, yazamaz — yetki sunucuda, `+`
+düğmesinin gizlenmesinde değil.
+
+**Güvenlik notu:** agent'ın workspace'i düşman bir depo sayılır. Agent oraya bir git hook'u
+veya `core.fsmonitor` komutu yazabilir; host bu depoda `git` çalıştırsaydı o kod host'ta
+çalışırdı. Bu yüzden **git yalnızca container içinde koşar**, sunucu ona `docker exec` ile
+ulaşır ve çağrılar `core.hooksPath=/dev/null`, `core.fsmonitor=false` ile korunur.
+Checkpoint alırken branch, `HEAD`, `.git/index` ve çalışma ağacı **değişmez** (ayrı bir
+geçici index kullanılıyor). İmajdaki git sürümü: **2.39.5**.
+
+```bash
+npm run gate:w6          # 13 kontrol, MODEL İSTEĞİ HARCAMAZ (~3 dk)
+npm run gate:w6:agent    # canlı diff + inceleme döngüsü; üç turn, kota yer
+```
+
 ## Yapı
 
 ```
@@ -218,11 +263,18 @@ packages/
   protocol/       Zod event şemaları + host↔runner NDJSON protokolü + tool eşlemesi
   core/           YAML yükleyici, event store, oda düzeni, container, AgentManager
   runner/         Container İÇİNDE koşan süreç: Claude Agent SDK turn döngüsü
+  runner-gemini/  Aynı protokol, Gemini CLI ile
+  redact/         Secret maskeleme; appendEvent'in geçidi
+  view/           Event log → projeksiyon (snapshot, diff, yorum çapaları)
+  gitkit/         Checkpoint ve diff. Container İÇİNDE koşar: runner import eder,
+                  sunucu `docker exec node /opt/runner/gitkit/dist/gitkit.js` ile
+                  çağırır. Tek uygulama, iki giriş noktası.
 db/migrations/    Append-only şema
+test/fixtures/    Kapı testlerinin örnek projeleri (week6-repo)
 rooms/Dockerfile  Oda container imajı
 config/           Örnek rol konfigürasyonu
-scripts/          migrate, smoke, build-runner, validate-events, week1-gate, week2-gate
-docs/             Haftalık kapılar
+scripts/          migrate, smoke, build-runner, validate-events, sse-probe, week1..week6-gate
+docs/             Haftalık kapılar (week-01 … week-06) ve devir notu (DEVAM.md)
 ```
 
 ## İki mimari kural
@@ -377,6 +429,23 @@ döndü, sol çubuk üçünü de çizdi). Kontrolden sonra geçici YAML silindi.
 | E-posta gönderimi yokken `/auth/request` artık `503` | Eskiden `{ ok: true }` dönüyordu ve ekran "bağlantı gönderdik" yazıyordu: gönderici hiç kurulmadığı için giriş imkânsızdı ve arayüz kullanıcıya yalan söylüyordu (elle test ederken gerçekten oldu). "Yapamıyorum" demek doğrusu. |
 | Eksik sürücü satırı kendini onarıyor | Hafta 5'ten önce açılmış odalarda `agent_driver` satırı yok ve sürücü uçları "agent bulunamadı" diyordu — oysa agent orada. Migration mevcut odaları dolduruyor; kod eksik satırı rol YAML'ından yeniden yazıyor. Eksik bir projeksiyon satırı, kullanıcıya olmayan bir sorun göstermemeli. |
 | 4xx'ler sunucu loguna yazılıyor (üretim dışında) | "403 alıyorum" hangi uç olduğunu söylemiyor. Sunucunun bildiği bir şeyi kullanıcıya tarayıcı ağ sekmesinde aratmak yanlış. |
+
+### Hafta 6
+
+| Karar | Gerekçe |
+| --- | --- |
+| Git agent'ın deposunda YALNIZCA container içinde çalışıyor | Agent workspace'e `.git/hooks/post-commit` veya `core.fsmonitor = touch /tmp/pwned` yazabilir. Host orada `git` çalıştırsaydı agent'ın yazdığı kod host'un yetkileriyle çalışırdı. Kural bir güvenlik kuralıdır: "host'ta çalıştırmak daha kolay olurdu" gerekçe değil. Kapı bunu hem statik (`execFile("git"` araması) hem de ekilmiş hook'la ölçüyor. |
+| Checkpoint ayrı bir index dosyasıyla alınıyor | Agent'ın `.git/index`'ini kullanmak, agent bir `git add` yapmışken onun kurduğu durumu bozardı. `.git/rooms-index` kalıcı tutuluyor (her seferinde silinse sonraki `add -A` tüm depoyu yeniden hash'lerdi) ve checkpoint HEAD'e, branch'e, çalışma ağacına dokunmuyor. |
+| Taban runner'da değil SUNUCUDA alınıyor | Runner kendi tabanını üretseydi agent her yeniden başlatıldığında taban kayar ve önceki turn'lerin değişiklikleri sessizce kaybolurdu. Taban bir kez alınır, `agent_runtime.diff_base_checkpoint_id`'de durur. |
+| Taban alınamazsa agent YİNE başlıyor | Diff bir sunum katmanı, agent'ın çalışmasının önkoşulu değil. Diff yayımlanmaz ve sebep log'a yazılır; agent'ı diff yüzünden başlatmamak orantısız olurdu. |
+| Hook diff HESAPLAMIYOR, sadece bayrak kaldırıyor | Her `Edit` çağrısında tam bir `git add -A` + diff koşturmak on dosyaya dokunan turn'de agent'ı bekletir. Hesap 300 ms debounce'lu bir işe düşüyor; turn sonunda `flush` BEKLENİYOR ki "bu diff hangi turn'ün işi" sorusu cevapsız kalmasın. |
+| Yorum çapası numara + METİN | Agent araya üç satır eklerse 42 artık başka bir satırdır; yalnızca numaraya güvenmek yorumu sessizce yanlış yere taşır. Metin birden çok kez geçiyorsa `outdated` sayılıyor: iki adaydan birini seçmek yanlış satıra yapışmanın kibar hâli olurdu. |
+| İnceleme metni SUNUCUDA kuruluyor | İstemci hazır prompt gönderseydi "agent'a ne söylendiği" tarayıcının insafına kalırdı ve event log'daki `message.received.text` ile gerçekte gönderilen ayrışabilirdi. |
+| İnceleme ayrı bir yol değil, Hafta 5'in KUYRUĞU | `agent_queue.kind` alanı eklendi. İkinci bir giriş kapısı açmak "agent başına tek koşan" garantisini ikisinin arasından sızdırırdı. |
+| Yorumu agent KAPATAMAZ | Durum bir insan kararı. Agent "uyguladım" diyebilir; uygulayıp uygulamadığına bakan kişi kapatır. Otomatik çözme, okunmamış bir düzeltmeyi çözülmüş göstermenin yoludur. |
+| İsteğe bağlı diff event log'a YAZILMIYOR | "Ayşe'nin 14:02 checkpoint'inden beri" kullanıcıya özel bir görünüm, herkesin durumu değil. Event log herkesin gördüğü şeydir; kişisel bir sorgu oraya girmemeli. Sonuç 30 sn önbellekleniyor ve anahtarda ağaç sha'sı var — yoksa önbellek bayat bir diff dönerdi. |
+| Kapı İKİYE bölündü | Canlı `diff.updated` modelsiz ölçülemez: diff'i runner yayımlıyor ve tetiği bir tool çağrısı. `gate:w6` (13 kontrol) hiç model isteği harcamıyor — gerçek container, gerçek git, gerçek gitkit, dosyalar `docker exec` ile değişiyor. Gerçekten modele bağlı olanlar (canlı yayım, artımlı filtre, yorumdan düzeltmeye SÜRE) `gate:w6:agent` içinde ve anahtar yoksa atlıyor. |
+| Kapı git'i ürünle AYNI bayraklarla okuyor | İlk koşumda kontrol 1 "dubious ownership" ile düştü: workspace bind mount üzerinden geliyor, uid eşleşmiyor ve gitkit zaten `safe.directory=*` ile çağırıyordu. Kapının okuması üründen farklı bir koşulda olsaydı, ölçtüğü şey ürünün davranışı olmazdı. |
 
 ## Ölçülecek tek metrik
 

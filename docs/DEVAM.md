@@ -1,4 +1,4 @@
-# Kaldığımız yer — 20 Eylül 2026, akşam
+# Kaldığımız yer — 21 Eylül 2026, akşam
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
 
@@ -14,8 +14,8 @@ değiştirir.
 **Ölçülecek tek metrik:** aynı oturuma iki farklı insanın yazdığı oturum sayısı, haftalık.
 Kurulum sayısı değil, star sayısı değil.
 
-12 haftalık plan `docs/roadmap.md` içinde. Haftalık görev tanımları
-`C:\Users\KEREM\Downloads\HAFTA-<N>-GOREV.md` dosyalarından geliyor.
+12 haftalık plan `docs/roadmap.md` içinde. Haftalık görev tanımları Downloads klasöründeki
+`HAFTA-<N>-GOREV.md` dosyalarından geliyor.
 
 ## Durum
 
@@ -25,57 +25,68 @@ Kurulum sayısı değil, star sayısı değil.
 | 2 | Tek agent, headless koşum | ⏳ kod tamam, `gate:w2` **koşulmadı** (Claude anahtarı yok) |
 | 3 | Stream ve terminal görünümü | ✅ `gate:w3` 11/11 · `gate:w3:agent` 2/2 |
 | 4 | Redaction ve ikinci izleyici | ✅ `gate:w4` 22/22 · `gate:w4:agent` 5/5 · dogfood ✅ |
-| 5 | **Yazma yetkisi, kuyruk, kesme** | ✅ `gate:w5` 25/25 · `gate:w5:agent` 7/7 · dogfood ✅ **HAFTA KAPANDI** |
-| 6 | Diff görünümü ve satır yorumu | ⬜ **sırada** — görev tanımı Kerem'den bekleniyor |
+| 5 | Yazma yetkisi, kuyruk, kesme | ✅ `gate:w5` 25/25 · `gate:w5:agent` 7/7 · dogfood ✅ |
+| 6 | **Diff görünümü ve satır yorumu** | 🔶 Adım 1-13 ✅ · `gate:w6` **13/13** · elle test ve dogfood **yapılmadı** |
 
-**233 test.** Paketler: `protocol`, `redact`, `view`, `core`, `runner`, `runner-gemini`.
-Hafta 5'te 31 test eklendi: 12 kuyruk + 8 sürücü (gerçek DB + sahte runner) + 6 projeksiyon
-+ 5 rol bağlamı / hata özeti.
+**312 test** (Hafta 5 sonunda 233'tü). Paketler: `protocol`, `redact`, `view`, `gitkit`,
+`core`, `runner`, `runner-gemini`. `npm run typecheck` temiz.
 
-**Kod durumu:** her şey commit'li ve push'lu, çalışma ağacı temiz. Oda imajı Python'lu
-hâliyle yeniden derlendi.
+## Hafta 6'da bugün ne yapıldı
 
-**Makinede ne açık kaldı:** `postgres` (5433) + `redis` (6380) ayakta. API (8787) ve arayüz
-(5173) dogfood için açılmıştı; oturum sonunda kapatılabilir. Oda container'larından biri
-canlı (bugünkü dogfood odası `255d346b`), onbir tanesi `Exited` — eski imajlardan kalma,
-kurtarılamaz. Tek tek silinebilir (`docker rm -f agent-rooms-room-<kısa-id>`) ama **toplu
-silme yapma** (5. tuzak). Compose'un `build-only` profilinden kalan isimsiz bir
-`sleep infinity` container'ı da dönüyor; hiçbir odaya bağlı değil.
+- **Adım 13 (kapı) yazıldı ve koşturuldu.** `scripts/week6-gate.sh` → **13/13**.
+  `test/fixtures/week6-repo/` (üç işi birden yapan `processOrder`) eklendi.
+  Kapı ikiye bölündü — gerekçe aşağıda.
+- **Adım 15 (belgeler):** `docs/week-06.md`, README'ye "Diff, satır yorumu ve checkpoint"
+  bölümü + Hafta 6 karar notları (12 karar) + güncel `Yapı` ağacı.
 
-## Hafta 5 KAPANDI — hafta sonu tanımının 10 maddesi de doğrulandı
+### Kapı neden ikiye bölündü
 
-Son iki madde bugün kapandı:
+Ölçerek çıkan mimari gerçek: **`diff.updated` yalnızca runner tarafından yayımlanıyor** ve
+tetiği bir tool çağrısı (`PostToolUse` hook'u) ya da `set_base`. Yani canlı diff'i modelsiz
+ölçmek mümkün değil — Hafta 5'in sahte koşum ortamında container ve gitkit hiç yok.
 
-1. **Elle test** (dün yarım kalmıştı): yeni oda Python'lu imajdan açıldı, rol bağlamı ulaştı,
-   agent gerçek dosya işleri yaptı.
-2. **İki kişilik dogfood** (Adım 12): iki cihaz, aynı yerel ağ, 20:04–20:09, 7 mesaj.
-   Notlar README "Hafta 5 dogfood notları" başlığında, ölçümler `docs/week-05.md` içinde.
+- `npm run gate:w6` — **13 kontrol, hiç model isteği harcamıyor.** Gerçek container, gerçek
+  git, gerçek gitkit; dosyalar `docker exec` ile değişiyor, diff isteğe bağlı diff ucundan
+  okunuyor. Agent BAŞLATILIYOR (taban checkpoint'i orada alınıyor) ama runner'ın ayağa
+  kalkması modele gitmiyor. Ölçtüğü: taban ref'i, ekilmiş hook/fsmonitor'un tetiklenmediği,
+  HEAD/index/çalışma ağacının değişmediği, host'ta git çağrısı olmadığı, diff doğruluğu
+  (added/modified/renamed/truncated, node_modules hariç), viewer 403, tabanın kaydırılması.
+- `npm run gate:w6:agent` — canlı yayım, artımlı filtre, inceleme döngüsü ve **yorumdan
+  düzeltmeye süre**. Üç gerçek turn koşar, anahtar yoksa atlar. **Henüz koşulmadı** (kota).
 
-Dogfood'un event log'dan çıkan sayıları: kesme **109 ms** (`mode: abort`), kesilen turn
-`reason: "interrupted"` ve yeniden koşmadı, kesmeyi **devirden sonraki sürücü** yaptı,
-koşan turn sırasında gelen mesaj önceki turn'ün bitişinden **59 ms sonra** alındı (10,8 sn
-kuyrukta bekledi), hiçbir anda iki `running` satır yok. Dört sorunun hiçbirinde sorun
-çıkmadı — yani kapının ölçtüğü ile gerçek kullanım aynı çıktı.
+İlk koşumda kontrol 1 "dubious ownership" ile düştü: kapı git'i ürünün kullandığı
+`safe.directory=*` bayrağı olmadan çağırıyordu. Kapının okuması üründen farklı bir koşulda
+olursa ölçtüğü şey ürünün davranışı olmaz.
 
-## Yarın ilk iş: Hafta 6
+## Yarın ilk iş — Hafta 6'yı kapatmak için kalan üç şey
 
-Görev tanımı: `C:\Users\KEREM\Downloads\HAFTA-6-GOREV.md` (Kerem verecek, henüz yok).
-Yol haritasındaki hedef: *satıra "bunu böl" yazılıyor, agent 30 sn'de düzeltiyor, ikinci
-kullanıcı canlı görüyor.*
+1. **Elle test (hiç yapılmadı).** Bugün tıkandığı yer: `.env`'e `ROOM_CONFIG` yazıldı ama
+   API yeniden başlatılmadı; `.env` yalnızca süreç açılışında okunuyor
+   (`apps/api/src/index.ts`, `process.loadEnvFile`). Eski süreç hâlâ `room.example.yaml`
+   ile oda açıyordu, o da Claude runtime → container'daki CLI `Not logged in · Please run
+   /login` deyip 52 ms'de çıkıyordu. **Çözüm: `dev:all`'ı yeniden başlat, YENİ oda aç.**
+   Bakılacaklar: `docs/week-06.md` + görev tanımı Adım 12 (diff sekmesi, taslak yorum,
+   inceleme tepsisi, çapa durumları, checkpoint çubuğu, viewer rolü).
+2. **`gate:w6:agent` koş** — kota açıkken (TSİ ~10:00 sonrası). Üç turn harcar.
+3. **Cuma dogfood (Adım 14).** İki kişi, gerçek kod, yalnızca diff üzerinden yönlendirme.
+   README'ye dört soru: yorumdan düzeltmeye kaç sn, kaç yorum yanlış satıra uygulandı,
+   "eskimiş" işareti doğru muydu, composer'a dönmek zorunda kalındı mı.
 
-**Hafta 6'ya taşınan üç borç:**
+## Bugün çıkan ve DURAN üç sorun
 
-1. **İzleyiciye "yetki iste" eylemi yok.** İzleyici satırı ne olduğunu VE nasıl değişeceğini
-   söylüyor ama tek tıkla yetki isteme yolu yok. Hafta 5 kapsamında talep akışı YOKTU (görev
-   tanımı açıkça kapsam dışı bıraktı).
-2. **Durmuş oda container'ı ham Docker hatası gösteriyor.** Docker yeniden başlayınca oda
-   container'ları `Exited` kalıyor ve arayüze
-   `container'a bağlanılamadı: Error: (HTTP code 409) … is not running` düşüyor. Sunucu
-   container'ın var-ama-durmuş olduğunu biliyor; ya kendiliğinden `docker start` etmeli ya da
-   insan diliyle "oda kapandı, yeni oda aç" demeli. Tek nokta: `AgentStartError`'ın üretildiği
-   yer. **Dikkat:** eski container eski imajdan; otomatik başlatma yapılacaksa imaj/protokol
-   sürümü kontrolü de gerekir.
-3. **`gate:w2` hâlâ koşulmadı** (Claude anahtarı yok) — Hafta 2'den kalan boşluk.
+1. **Claude runtime'lı agent, anahtar olmadan da başlatılıyor.** `index.ts:45` yöneticiyi
+   `apiKey || provider || geminiApiKey` ile kuruyor; Gemini anahtarı varken Claude agent'ı
+   için 503 koruması hiç tetiklenmiyor. Hata container içinde oluşuyor ve SDK onu normal
+   metin olarak döndürdüğü için `turn.completed` yazılıyor → ekranda yeşil "tamamlandı".
+   **Yapılacak:** `manager.ts` başlatma yolunda runtime bazlı kontrol — anahtar yoksa
+   container hiç çalıştırılmadan `AgentStartError`.
+2. **Durmuş oda container'ı ham Docker hatası gösteriyor** (Hafta 5'ten taşındı):
+   `container'a bağlanılamadı: Error: (HTTP code 409) … is not running`. Aynı nokta:
+   `AgentStartError`'ın üretildiği yer. İkisi tek dokunuşla düzelir.
+3. **İzleyiciye "yetki iste" eylemi yok** (Hafta 5'ten taşındı).
+
+`gate:w2` hâlâ koşulmadı (Claude anahtarı yok) — Hafta 2'den kalan boşluk. 1. madde tam
+olarak bu boşluğun yüzü: kapı koşmadığı için hata bugüne kadar görülmedi.
 
 ## Dogfood ortamını yeniden kurmak (iki cihaz, yerel ağ)
 
@@ -176,8 +187,9 @@ sürücü koşan turn'ü kesebiliyor.
 npm run db:up                                     # postgres + redis
 npm run dev:all                                   # api 8787 + arayüz 5173
 AUTH_DEV_MODE=true npm run api                    # giriş bağlantısı ekranda görünsün
-npm run gate / gate:w3 / gate:w4 / gate:w5        # kapılar, anahtar gerektirmez
-npm run gate:w3:agent / gate:w4:agent / gate:w5:agent   # agent gerektirenler
+npm run gate / gate:w3 / gate:w4 / gate:w5        # kapılar, model isteği harcamaz
+npm run gate:w6                                   # Hafta 6, 13/13 — model isteği harcamaz
+npm run gate:w3:agent / gate:w4:agent / gate:w5:agent / gate:w6:agent   # agent gerektirenler (kota yer)
 ```
 
 **`gate:w5` yaklaşık 8 dakika sürer**: içinde 60 saniyelik gerçek sürücülük düşme ölçümü ve
@@ -213,7 +225,13 @@ Pasifik gece yarısı (≈ TSİ 10:00) sıfırlanıyor. Model başına ayrı kot
    logunda "imaj protokol sürümü uyuşmuyor" yazar. Agent kapısı ilk koşumda tam bunun yüzünden
    düştü.
 5. **Toplu `docker rm -f` ile oda container'larını silme** — canlı odaları öldürür.
-6. **Kapı testinde ölçüm sıklığı.** Örnek başına bir `docker compose exec` açmak saniyede bir
+6. **`.env` yalnızca SÜREÇ AÇILIŞINDA okunuyor** (`process.loadEnvFile`). `.env`'i
+   değiştirip sunucuyu yeniden başlatmazsan eski değerler geçerli kalır ve bu sessizce
+   yanlış davranır: 21 Eylül'de `ROOM_CONFIG` değiştirildi, API yeniden başlatılmadı ve
+   tarayıcıdan açılan her oda eski YAML'la (Claude runtime) açılmaya devam etti. Ayrıca
+   arayüzdeki oda açma düğmesi gövdede `configPath` göndermiyor — hangi YAML kullanılacağı
+   TAMAMEN sunucunun açılışta okuduğu değere bağlı.
+7. **Kapı testinde ölçüm sıklığı.** Örnek başına bir `docker compose exec` açmak saniyede bir
    örnek demek; eşzamanlılık iddiasını 3 örnekle kanıtlamak ölçmemekle aynı şey. Örnekleme
    Postgres'in içinde (`\watch 0.1`).
 
@@ -240,7 +258,7 @@ Pasifik gece yarısı (≈ TSİ 10:00) sıfırlanıyor. Model başına ayrı kot
 1. Bu dosya
 2. `README.md` — mimari, iki kural, roller, kuyruk/sürücü/kesme semantiği, karar notları
 3. `docs/roadmap.md` — 12 haftalık plan
-4. `docs/week-01.md` … `docs/week-05.md` — hafta hafta ne yapıldı ve **neden**
+4. `docs/week-01.md` … `docs/week-06.md` — hafta hafta ne yapıldı ve **neden**
 5. `docs/runtime-gemini.md` — ikinci koşum ortamının ölçümleri ve eksikleri
 
 ## Çalışma tarzı (yeni oturum bunu bilmeli)
