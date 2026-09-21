@@ -43,6 +43,14 @@ export interface AgentSettings {
   geminiApiKey: string;
   /** YAML'daki model'i ezer. Kapı testleri maliyeti düşürmek için haiku verir. */
   modelOverride: string;
+  /**
+   * Koşum ortamına özel model. Global olanı ezer.
+   *
+   * `AGENT_MODEL` iki koşum ortamına da aynı değeri veriyordu; odada iki farklı
+   * sağlayıcının agent'ı varken bu, birini bozmadan diğerini ayarlamayı
+   * imkânsız kılıyor.
+   */
+  modelOverrides: { claude?: string; gemini?: string };
   maxTurns: number;
   maxBudgetUsd: number;
   heartbeatTimeoutMs: number;
@@ -76,6 +84,10 @@ export function loadApiConfig(): ApiConfig {
       apiKey: process.env.ANTHROPIC_API_KEY ?? "",
       geminiApiKey: process.env.GEMINI_API_KEY ?? "",
       modelOverride: process.env.AGENT_MODEL ?? "",
+      modelOverrides: {
+        claude: process.env.AGENT_MODEL_CLAUDE || undefined,
+        gemini: process.env.AGENT_MODEL_GEMINI || undefined,
+      },
       maxTurns: Number(process.env.AGENT_MAX_TURNS ?? 30),
       maxBudgetUsd: Number(process.env.AGENT_MAX_BUDGET_USD ?? 1),
       heartbeatTimeoutMs: Number(process.env.AGENT_HEARTBEAT_TIMEOUT_MS ?? 20_000),

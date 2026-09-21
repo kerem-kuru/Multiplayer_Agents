@@ -59,6 +59,7 @@ const manager = cfg.agent.fakeRuntime
       apiKey: cfg.agent.apiKey,
       geminiApiKey: cfg.agent.geminiApiKey,
       modelOverride: cfg.agent.modelOverride || undefined,
+      modelOverrides: cfg.agent.modelOverrides,
       providerEnv,
       maxTurns: cfg.agent.maxTurns,
       maxBudgetUsd: cfg.agent.maxBudgetUsd,

@@ -8,6 +8,7 @@ import {
   AgentManager,
   AgentQueue,
   FakeAgentRuntime,
+  AgentCredentialsError,
   AgentNotFoundError,
   AgentStartError,
   appendEvent,
@@ -366,6 +367,10 @@ export function createApp(
     } catch (err) {
       // Ayağa kalkamama SEBEBİ kullanıcıya gider: "starting"de asılı kalmak
       // veya çıplak 500 görmek, ekrana bakan kişiye hiçbir şey anlatmıyor.
+      // Anahtar eksikliği bir SUNUCU YAPILANDIRMA sorunu (503); container'ın
+      // ayağa kalkmaması odanın durumu (409). Aynı kodu döndürmek, arayüzün
+      // ikisine de "odayı yeniden aç" demesi demekti.
+      if (err instanceof AgentCredentialsError) throw new HttpError(503, err.message);
       if (err instanceof AgentStartError) throw new HttpError(409, err.message);
       if (err instanceof AgentNotFoundError) throw new HttpError(404, err.message);
       throw err;

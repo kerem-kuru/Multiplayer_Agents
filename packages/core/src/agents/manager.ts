@@ -1,7 +1,18 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
-import type { Actor, AgentConfig, NewRoomEvent, RoomConfig } from "@agent-rooms/protocol";
-import { PROTOCOL_VERSION, RunnerOutput, collectProviderEnv } from "@agent-rooms/protocol";
+import type {
+  Actor,
+  AgentConfig,
+  NewRoomEvent,
+  RoomConfig,
+  RuntimeKind,
+} from "@agent-rooms/protocol";
+import {
+  PROTOCOL_VERSION,
+  RunnerOutput,
+  collectProviderEnv,
+  hasProviderBackend,
+} from "@agent-rooms/protocol";
 import { appendEvent } from "../db/eventStore.js";
 import { getPool } from "../db/pool.js";
 import {
@@ -43,6 +54,16 @@ export interface AgentManagerOptions {
   apiKey: string;
   /** YAML'daki model'i ezen global ayar — kapı testleri haiku'ya düşürmek için kullanır. */
   modelOverride?: string;
+  /**
+   * KOŞUM ORTAMI BAZINDA override. Global olanı ezer.
+   *
+   * Global `AGENT_MODEL` iki koşum ortamına da aynı değeri veriyordu: odada bir
+   * Gemini ve bir Claude agent'ı varken `AGENT_MODEL=gemini-3.1-flash-lite`
+   * Claude agent'ına da gidiyor ve o model adı orada anlamsız. İki sağlayıcıyı
+   * tek değişkene bağlamak, ikisinden birini bozmadan ayar yapmayı imkânsız
+   * kılıyordu.
+   */
+  modelOverrides?: Partial<Record<RuntimeKind, string>>;
   /** Gemini koşum ortamı için anahtar. Claude'unkinden bağımsız. */
   geminiApiKey?: string;
   /**
@@ -82,12 +103,86 @@ interface AgentHandle {
   hardKillTimer: NodeJS.Timeout | null;
 }
 
+/**
+ * Bu agent'ın koşum ortamı için kimlik doğrulaması VAR MI? Eksikse kullanıcıya
+ * gösterilecek cümle, varsa `null`.
+ *
+ * SAF: docker, DB ve yönetici olmadan test edilebilir.
+ *
+ * Gerçekte oldu (21 Eylül): Gemini anahtarı tanımlıyken Claude runtime'lı bir
+ * agent başlatıldı. Yönetici kurulmuştu (bir koşum ortamı kullanılabilirdi),
+ * container açıldı, runner kalktı ve hata ancak modele gidilirken container
+ * İÇİNDE oluştu: "Not logged in · Please run /login". SDK bunu normal metin
+ * olarak döndürdüğü için turn `completed` yazıldı ve ekranda YEŞİL bir
+ * "tamamlandı" göründü — sıfır token, 52 ms.
+ *
+ * Yapılandırma eksikliği bir SONUÇ değil önkoşuldur: container hiç
+ * çalıştırılmadan söylenir.
+ *
+ * Sağlayıcı arka uçlarında (Bedrock / Vertex / Foundry / gateway) API anahtarı
+ * YOKTUR — kimlik dışarıdan gelir. Orada da anahtar aramak çalışan bir kurulumu
+ * kırardı.
+ *
+ * Her koşum ortamı yalnızca KENDİ anahtarına bakar: Claude anahtarının varlığı
+ * bir Gemini agent'ını başlatmak için gerekçe değildir.
+ */
+export function missingCredentials(
+  agent: Pick<AgentConfig, "name" | "runtime">,
+  creds: { apiKey: string; geminiApiKey: string; providerEnv: Record<string, string> },
+): string | null {
+  if (agent.runtime === "gemini") {
+    return creds.geminiApiKey
+      ? null
+      : `agent '${agent.name}' Gemini koşum ortamında ama GEMINI_API_KEY tanımlı değil`;
+  }
+  if (creds.apiKey) return null;
+  if (hasProviderBackend(creds.providerEnv)) return null;
+  return (
+    `agent '${agent.name}' Claude koşum ortamında ama kimlik doğrulaması yok — ` +
+    ".env'e ANTHROPIC_API_KEY yaz, ya da bir sağlayıcı arka ucu seç " +
+    "(CLAUDE_CODE_USE_BEDROCK / _VERTEX / ANTHROPIC_BASE_URL)"
+  );
+}
+
+/**
+ * Bu agent hangi modelle koşacak.
+ *
+ * Sıra: koşum ortamına özel override → global override → rol YAML'ı.
+ *
+ * Neden koşum ortamına özel bir katman var: `AGENT_MODEL` tek bir değer ve iki
+ * koşum ortamına da aynısını veriyordu. Odada bir Gemini bir Claude agent'ı
+ * varken `AGENT_MODEL=gemini-3.1-flash-lite` Claude agent'ına da gidiyordu —
+ * orada anlamsız bir model adı. Ayar sağlayıcıya bağımlı olmamalı.
+ */
+export function modelFor(
+  agent: Pick<AgentConfig, "runtime" | "model">,
+  byRuntime: Partial<Record<RuntimeKind, string>> = {},
+  global?: string,
+): string {
+  return byRuntime[agent.runtime] || global || agent.model;
+}
+
 export class AgentNotFoundError extends Error {}
 /** Agent ayağa kalkamadı — sebebi kullanıcıya gösterilebilir. */
 export class AgentStartError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options);
     this.name = "AgentStartError";
+  }
+}
+
+/**
+ * Koşum ortamının kimlik doğrulaması yok — agent HİÇ başlatılmadı.
+ *
+ * `AgentStartError`'dan türüyor ki mevcut yakalayıcılar bozulmasın, ama ayrı
+ * bir tip: bu bir sunucu YAPILANDIRMA eksiği (503), "container ayağa kalkmadı"
+ * (409) değil. İkisini aynı koda sıkıştırmak, "odayı yeniden aç" diyen bir
+ * arayüzün anahtar eksikliğinde de aynı şeyi söylemesi demekti.
+ */
+export class AgentCredentialsError extends AgentStartError {
+  constructor(message: string) {
+    super(message);
+    this.name = "AgentCredentialsError";
   }
 }
 
@@ -124,9 +219,13 @@ export class AgentManager {
   private sink: TurnSink | null = null;
   private readonly pool: pg.Pool;
   private readonly opts: Required<
-    Omit<AgentManagerOptions, "pool" | "modelOverride" | "providerEnv" | "geminiApiKey">
+    Omit<
+      AgentManagerOptions,
+      "pool" | "modelOverride" | "modelOverrides" | "providerEnv" | "geminiApiKey"
+    >
   > & {
     modelOverride?: string;
+    modelOverrides: Partial<Record<RuntimeKind, string>>;
     providerEnv: Record<string, string>;
     geminiApiKey: string;
   };
@@ -137,6 +236,7 @@ export class AgentManager {
     this.opts = {
       apiKey: options.apiKey,
       modelOverride: options.modelOverride,
+      modelOverrides: options.modelOverrides ?? {},
       providerEnv: options.providerEnv ?? collectProviderEnv(process.env),
       geminiApiKey: options.geminiApiKey ?? "",
       maxTurns: options.maxTurns ?? 30,
@@ -217,6 +317,14 @@ export class AgentManager {
 
   // --- başlatma -----------------------------------------------------------
 
+  private missingCredentials(agent: AgentConfig): string | null {
+    return missingCredentials(agent, {
+      apiKey: this.opts.apiKey,
+      geminiApiKey: this.opts.geminiApiKey,
+      providerEnv: this.opts.providerEnv,
+    });
+  }
+
   async start(roomId: string, agentName: string): Promise<AgentStatus> {
     const existing = this.handles.get(this.key(roomId, agentName));
     if (existing) {
@@ -225,6 +333,18 @@ export class AgentManager {
     }
 
     const { config, agent, sessionId, container } = await this.resolveAgent(roomId, agentName);
+
+    /**
+     * Kimlik kontrolü EN BAŞTA: durum `stopped` kalır, event yazılmaz,
+     * container'a dokunulmaz. "Denendi ve başarısız oldu" demek yanlış olurdu,
+     * çünkü denenmedi.
+     */
+    const missing = this.missingCredentials(agent);
+    if (missing) {
+      this.opts.log("error", `agent başlatılmadı (${agentName}): ${missing}`);
+      throw new AgentCredentialsError(missing);
+    }
+
     await ensureRuntimeRows(roomId, config.agents.map((a) => a.name), this.pool);
 
     const before = await getRuntime(roomId, agentName, this.pool);
@@ -248,7 +368,7 @@ export class AgentManager {
       ROOM_ID: roomId,
       SESSION_ID: sessionId,
       ROOM_AGENT_CONFIG: JSON.stringify(agent),
-      AGENT_MODEL: this.opts.modelOverride || agent.model,
+      AGENT_MODEL: modelFor(agent, this.opts.modelOverrides, this.opts.modelOverride),
       AGENT_MAX_TURNS: String(this.opts.maxTurns),
       AGENT_MAX_BUDGET_USD: String(this.opts.maxBudgetUsd),
     };
@@ -297,11 +417,32 @@ export class AgentManager {
         runnerPath: `/opt/runner/${agent.runtime}/dist/runner.js`,
       });
     } catch (err) {
-      const missing =
+      /**
+       * Docker'ın ham hatası kullanıcıya bir şey söylemiyor. Üç ayrı durum var
+       * ve üçünün de cevabı farklı:
+       *
+       *   yok      → container silinmiş (prune, elle temizlik)
+       *   durmuş   → Docker yeniden başladı, container `Exited` kaldı
+       *   diğeri   → gerçekten beklenmedik; ham metni saklıyoruz
+       *
+       * Durmuş container KENDİLİĞİNDEN başlatılmıyor: o container eski imajdan
+       * yaratılmış olabilir ve bayat imajla agent `stopped`da kalıp sunucu
+       * loguna "imaj protokol sürümü uyuşmuyor" yazıyor. Sessizce ayağa
+       * kaldırmak, kullanıcıya sebebi görünmeyen ikinci bir hata üretirdi.
+       */
+      const notFound =
         (err as { statusCode?: number }).statusCode === 404 ||
         /no such container/i.test(String(err));
-      const reason = missing
+      const stopped =
+        !notFound &&
+        ((err as { statusCode?: number }).statusCode === 409 ||
+          /is not running|not running/i.test(String(err)));
+      const state = notFound || stopped ? await containerStatus(container) : null;
+      const reason = notFound
         ? "odanın container'ı yok (silinmiş olabilir) — odayı yeniden aç"
+        : stopped
+        ? `oda kapandı — container'ı durmuş durumda${state ? ` (${state})` : ""}. ` +
+          "Yeni bir oda aç; eski container eski imajdan yaratılmış olabilir."
         : `container'a bağlanılamadı: ${String(err)}`;
 
       await transition(roomId, agentName, "failed", { lastError: reason }, this.pool);
