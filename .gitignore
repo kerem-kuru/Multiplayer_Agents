@@ -17,3 +17,6 @@ playwright-report/
 
 # Gecici teshis script'leri
 .tmp-*/
+
+# gitkit bundle (imaja kopyalanan tek dosya)
+/packages/gitkit/bundle/

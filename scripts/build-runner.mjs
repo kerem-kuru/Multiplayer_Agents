@@ -57,3 +57,29 @@ for (const rt of RUNTIMES) {
   );
   console.log(`${rt.kind} paketlendi → packages/${rt.pkg}/dist/runner.js (${rt.external} ${version}, disarida)`);
 }
+
+/**
+ * gitkit — TEK UYGULAMA, IKI GIRIS NOKTASI (Hafta 6).
+ *
+ * Runner onu import eder (yukaridaki bundle'lara zaten giriyor); sunucu ise
+ * container icinde `docker exec node /opt/runner/gitkit/dist/gitkit.js` ile
+ * cagirir. Ikisi ayni kodu kosar: "runner'in gordugu diff" ile "API'nin
+ * dondugu diff" zamanla birbirinden ayrilamaz.
+ *
+ * Dis bagimliligi yok (sadece node:child_process ve node:fs) — imajda
+ * `npm install` gerekmiyor.
+ */
+{
+  const outDir = path.join(root, "packages", "gitkit", "bundle");
+  await mkdir(outDir, { recursive: true });
+  await build({
+    entryPoints: [path.join(root, "packages", "gitkit", "src", "cli.ts")],
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node22",
+    outfile: path.join(outDir, "gitkit.js"),
+    logLevel: "warning",
+  });
+  console.log("gitkit paketlendi -> packages/gitkit/bundle/gitkit.js");
+}

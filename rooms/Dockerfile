@@ -51,6 +51,16 @@ COPY packages/runner-gemini/dist/package.json ./package.json
 RUN npm install --omit=dev && npm cache clean --force
 COPY packages/runner-gemini/dist/runner.js ./dist/runner.js
 
+# gitkit — checkpoint ve diff mantığı (Hafta 6).
+#
+# Dış bağımlılığı yok, `npm install` gerekmiyor. Sunucu bunu
+# `docker exec node /opt/runner/gitkit/dist/gitkit.js <komut>` ile çağırır;
+# runner ise aynı kodu kendi bundle'ının içinde taşır. HOST'TA GİT ÇALIŞMAZ:
+# agent `.git/config` ve hook dosyalarına yazabiliyor, host'ta koşan bir git
+# onları tetikleyip host'ta kod çalıştırabilirdi.
+WORKDIR /opt/runner/gitkit
+COPY packages/gitkit/bundle/gitkit.js ./dist/gitkit.js
+
 RUN chown -R agent:agent /opt/runner
 
 # Python: HAZIR BİR VENV, PATH'in başında.
