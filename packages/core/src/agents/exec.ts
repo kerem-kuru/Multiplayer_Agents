@@ -148,6 +148,86 @@ export async function startRunnerExec(opts: RunnerExecOptions): Promise<RunnerEx
   };
 }
 
+export interface ExecCaptureResult {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * Tek seferlik `docker exec` — çıktısını toplayıp döner.
+ *
+ * Hafta 6'da gitkit CLI'yı çağırmak için: HOST BU DEPODA GİT ÇALIŞTIRMAZ.
+ * Agent `.git/config`'e `core.fsmonitor = <komut>` yazabiliyor ve host'ta
+ * koşan bir git onu host'ta çalıştırırdı. Tüm git işleri container içinde.
+ *
+ * `startRunnerExec`'ten farkı: orası uzun ömürlü bir protokol akışı, burası
+ * tek komut + çıktı. İkisini birleştirmek "akış mı bitti mi" sorusunu her iki
+ * tarafta da bulanıklaştırırdı.
+ */
+export async function execCapture(opts: {
+  container: string;
+  cmd: string[];
+  workdir?: string;
+  user?: string;
+  env?: Record<string, string>;
+  timeoutMs?: number;
+}): Promise<ExecCaptureResult> {
+  const docker = getDocker();
+  const container = docker.getContainer(opts.container);
+
+  const exec = await container.exec({
+    Cmd: opts.cmd,
+    AttachStdin: false,
+    AttachStdout: true,
+    AttachStderr: true,
+    Tty: false,
+    User: opts.user ?? "agent",
+    ...(opts.workdir ? { WorkingDir: opts.workdir } : {}),
+    ...(opts.env ? { Env: Object.entries(opts.env).map(([k, v]) => `${k}=${v}`) } : {}),
+  });
+
+  const stream = await exec.start({});
+  const outChunks: Buffer[] = [];
+  const errChunks: Buffer[] = [];
+  const stdout = new PassThrough();
+  const stderr = new PassThrough();
+  stdout.on("data", (c: Buffer) => outChunks.push(c));
+  stderr.on("data", (c: Buffer) => errChunks.push(c));
+  docker.modem.demuxStream(stream, stdout, stderr);
+
+  await new Promise<void>((resolve, reject) => {
+    /**
+     * Zaman aşımı GEREKLİ: büyük bir depoda `git add -A` uzun sürebilir ve
+     * askıda kalan bir exec, isteği sonsuza kadar bekletir.
+     */
+    const timer = setTimeout(() => reject(new Error("docker exec zaman aşımı")), opts.timeoutMs ?? 60_000);
+    const done = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    stream.on("end", done);
+    stream.on("close", done);
+    stream.on("error", (err: Error) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+
+  let exitCode: number | null = null;
+  try {
+    exitCode = (await exec.inspect()).ExitCode ?? null;
+  } catch {
+    // Container gitmiş olabilir; çıkış kodu bilinmiyor.
+  }
+
+  return {
+    exitCode,
+    stdout: Buffer.concat(outChunks).toString("utf8"),
+    stderr: Buffer.concat(errChunks).toString("utf8"),
+  };
+}
+
 /** Sunucu açılış mutabakatı: container içinde sahipsiz runner kalmasın. */
 export async function killStrayRunners(container: string): Promise<void> {
   const docker = getDocker();

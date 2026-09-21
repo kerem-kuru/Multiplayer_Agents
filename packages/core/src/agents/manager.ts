@@ -4,6 +4,12 @@ import type { Actor, AgentConfig, NewRoomEvent, RoomConfig } from "@agent-rooms/
 import { PROTOCOL_VERSION, RunnerOutput, collectProviderEnv } from "@agent-rooms/protocol";
 import { appendEvent } from "../db/eventStore.js";
 import { getPool } from "../db/pool.js";
+import {
+  GitkitError,
+  getCheckpoint,
+  initWorkspace as gitkitInitWorkspace,
+  recordCheckpoint,
+} from "../diff.js";
 import { containerStatus, roomContainerName } from "../docker/container.js";
 import { getRoomConfig, latestSession } from "../room/rooms.js";
 import { killStrayRunners, startRunnerExec, type RunnerExec } from "./exec.js";
@@ -256,6 +262,24 @@ export class AgentManager {
     if (resumeSessionId) env.RESUME_SESSION_ID = resumeSessionId;
 
     /**
+     * DİFF TABANI — runner'dan ÖNCE, sunucu tarafından.
+     *
+     * Runner kendi tabanını üretseydi "diff neye göre" sorusunun iki cevabı
+     * olurdu: agent yeniden başlatıldığında taban kayar ve önceki turn'lerin
+     * değişiklikleri sessizce kaybolurdu. Taban bir kez alınır ve
+     * `agent_runtime.diff_base_checkpoint_id`'de durur.
+     *
+     * Taban alınamazsa agent YİNE BAŞLAR: diff bir sunum katmanı, agent'ın
+     * çalışmasının önkoşulu değil. Sadece canlı diff yayımlanmaz ve sebep
+     * loga yazılır.
+     */
+    const base = await this.ensureDiffBase(roomId, agentName, container, agent.workspace, sessionId);
+    if (base) {
+      env.DIFF_BASE_CHECKPOINT_ID = base.checkpointId;
+      env.DIFF_BASE_TREE = base.treeSha;
+    }
+
+    /**
      * Buradan sonrası başarısız olursa runtime `starting`de KALMAMALI.
      *
      * Gerçekte oldu: odanın container'ı dışarıdan silinince (docker prune,
@@ -351,6 +375,86 @@ export class AgentManager {
   /** Çökme sayacı handle silinince kaybolmasın. */
   private readonly previousRestarts = new Map<string, number[]>();
 
+  // --- diff tabanı --------------------------------------------------------
+
+  /**
+   * Agent'ın canlı diff tabanını hazırla.
+   *
+   * Taban zaten varsa ağacını checkpoint kaydından okur; yoksa container
+   * içinde `gitkit init-workspace` çalıştırır, `checkpoint.created`
+   * (`kind: "baseline"`) yazar ve `agent_runtime`'a işler.
+   *
+   * `null` dönmesi "diff yok" demektir, "agent başlamasın" demek değil.
+   */
+  private async ensureDiffBase(
+    roomId: string,
+    agentName: string,
+    container: string,
+    workspace: string,
+    sessionId: string,
+  ): Promise<{ checkpointId: string; treeSha: string } | null> {
+    const workdir = `/room/${workspace}`;
+    try {
+      const rt = await getRuntime(roomId, agentName, this.pool);
+      if (rt?.diffBaseCheckpointId) {
+        const cp = await getCheckpoint(roomId, rt.diffBaseCheckpointId, this.pool);
+        // Kayıt varsa ağacı oradan gelir; yoksa (elle silinmiş DB, eski oda)
+        // taban yeniden alınır — yarım bir tabanla diff göstermek yanlış.
+        if (cp) return { checkpointId: cp.checkpointId, treeSha: cp.treeSha };
+        this.opts.log("warn", `taban checkpoint kaydı yok (${rt.diffBaseCheckpointId}), yeniden alınıyor`);
+      }
+
+      const init = await gitkitInitWorkspace(container, workdir);
+      await recordCheckpoint(
+        {
+          roomId,
+          sessionId,
+          actor: { kind: "system" },
+          type: "checkpoint.created",
+          payload: {
+            agent: agentName,
+            checkpointId: init.checkpointId,
+            kind: "baseline",
+            label: "taban",
+            commitSha: init.commitSha,
+            treeSha: init.treeSha,
+            messageId: null,
+            by: null,
+            becomesBase: true,
+          },
+        } satisfies NewRoomEvent,
+        this.pool,
+      );
+      this.opts.log(
+        "info",
+        `diff tabanı alındı (${agentName}): ${init.checkpointId}${init.created ? " — workspace depoya çevrildi" : ""}`,
+      );
+      return { checkpointId: init.checkpointId, treeSha: init.treeSha };
+    } catch (err) {
+      const why = err instanceof GitkitError ? err.message : String(err);
+      this.opts.log("warn", `diff tabanı alınamadı (${agentName}): ${why} — canlı diff kapalı`);
+      return null;
+    }
+  }
+
+  /**
+   * Tabanı değiştir: manuel checkpoint alındıktan sonra çağrılır.
+   *
+   * Runner ayaktaysa `set_base` gider (yeni tabana göre TAM diff yayımlar);
+   * değilse bir sonraki başlangıçta ortam değişkeniyle alır — iki yol da
+   * `agent_runtime.diff_base_checkpoint_id`'yi okur, yani tek kaynak.
+   */
+  setDiffBase(roomId: string, agentName: string, base: { checkpointId: string; treeSha: string }): void {
+    const handle = this.handles.get(this.key(roomId, agentName));
+    if (!handle) return;
+    handle.exec.send({ kind: "set_base", ...base });
+  }
+
+  /** Runner ayakta mı — API "agent boşta mı" sorusunu runtime'dan sorar, bu ondan ayrı. */
+  isRunning(roomId: string, agentName: string): boolean {
+    return this.handles.has(this.key(roomId, agentName));
+  }
+
   // --- satır işleme -------------------------------------------------------
 
   private enqueue(handle: AgentHandle, line: string): void {
@@ -422,6 +526,16 @@ export class AgentManager {
         handle.lastHeartbeat = Date.now();
         return;
       case "event":
+        /**
+         * `checkpoint.created` AYRI YOLDAN yazılır: event ile `checkpoints`
+         * satırı aynı transaction'a girmeli. İkisi ayrı düşerse "hangi
+         * taban" sorusunun iki cevabı olur ve hangisinin doğru olduğu
+         * bilinemez.
+         */
+        if (output.event.type === "checkpoint.created") {
+          await recordCheckpoint(output.event, this.pool);
+          return;
+        }
         await appendEvent(output.event, this.pool);
         return;
       case "turn_end": {

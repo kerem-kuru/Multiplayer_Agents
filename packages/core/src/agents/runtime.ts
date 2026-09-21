@@ -59,6 +59,12 @@ export interface AgentRuntime {
   restartCount: number;
   lastExitCode: number | null;
   lastError: string | null;
+  /**
+   * Canlı diff tabanı (Hafta 6). null = taban henüz alınmadı; runner canlı
+   * diff yayımlamaz. Sessizce yanlış bir tabana göre diff göstermektense hiç
+   * göstermemek doğru.
+   */
+  diffBaseCheckpointId: string | null;
   updatedAt: string;
 }
 
@@ -71,6 +77,7 @@ interface Row {
   restart_count: number;
   last_exit_code: number | null;
   last_error: string | null;
+  diff_base_checkpoint_id: string | null;
   updated_at: Date;
 }
 
@@ -83,11 +90,13 @@ const toRuntime = (r: Row): AgentRuntime => ({
   restartCount: r.restart_count,
   lastExitCode: r.last_exit_code,
   lastError: r.last_error,
+  diffBaseCheckpointId: r.diff_base_checkpoint_id,
   updatedAt: r.updated_at.toISOString(),
 });
 
 const COLS = `room_id, agent_name, status, sdk_session_id, current_message_id,
-              restart_count, last_exit_code, last_error, updated_at`;
+              restart_count, last_exit_code, last_error, diff_base_checkpoint_id,
+              updated_at`;
 
 /** Oda açılırken YAML'daki her agent için bir satır. Agent sayısı dizi uzunluğudur. */
 export async function ensureRuntimeRows(

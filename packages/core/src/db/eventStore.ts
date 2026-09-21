@@ -121,6 +121,32 @@ export async function appendEvent(
   return stored;
 }
 
+/**
+ * Event'i yaz ve AYNI TRANSACTION'da yan kaydı da ekle.
+ *
+ * Hafta 6'da `checkpoint.created` ile `checkpoints` satırı, `review.submitted`
+ * ile `reviews` satırı böyle yazılıyor. Ayrı transaction'larda yazılsalardı
+ * event log ile işletim tablosu birbirinden ayrılabilirdi: "hangi taban"
+ * sorusunun iki farklı cevabı olurdu ve hangisinin doğru olduğu
+ * bilinemezdi.
+ *
+ * `work` COMMIT'ten önce koşar; hata atarsa event de yazılmaz.
+ */
+export async function appendEventWith(
+  event: NewRoomEvent,
+  work: (client: pg.PoolClient, stored: RoomEvent) => Promise<void>,
+  pool: pg.Pool = getPool(),
+): Promise<RoomEvent> {
+  const stored = await withTx(async (client) => {
+    const e = await appendOne(client, event);
+    await work(client, e);
+    return e;
+  }, pool);
+  getEventBus().publish(stored.sessionId, stored);
+  noteEventForSnapshot(stored.sessionId, stored.seq);
+  return stored;
+}
+
 /** Birden çok event'i tek transaction'da, verilen sırayla yaz. */
 export async function appendEvents(
   events: NewRoomEvent[],

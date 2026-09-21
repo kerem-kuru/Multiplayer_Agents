@@ -12,6 +12,7 @@ export * from "./snapshot.js";
 export * from "./presence.js";
 export * from "./queue.js";
 export * from "./driver.js";
+export * from "./diff.js";
 export * from "./docker/container.js";
 export * from "./room/journal.js";
 export * from "./room/layout.js";
