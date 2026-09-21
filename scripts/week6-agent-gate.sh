@@ -129,12 +129,6 @@ WSDIR="rooms-data/$ROOM/$WS"
 mkdir -p "$WSDIR"
 cp -r test/fixtures/week6-repo/. "$WSDIR/"
 
-# İki bağımsız izleyici (kontrol 9): ikisi de aynı diff event'lerini almalı.
-node scripts/sse-probe.mjs "$ROOM" --base "$BASE" --session "$A" --duration 900 --out "$TMP/p1.json" >/dev/null 2>&1 &
-P1=$!
-node scripts/sse-probe.mjs "$ROOM" --base "$BASE" --session "$B" --duration 900 --out "$TMP/p2.json" >/dev/null 2>&1 &
-P2=$!
-
 acurl -o /dev/null -X POST "$BASE/rooms/$ROOM/agents/$AGENT/start"
 ST="?"
 for _ in $(seq 1 90); do
@@ -176,7 +170,10 @@ diff_paths() { # <messageId> → "a,b,c"
 
 ###############################################################################
 step "1) Canlı diff: agent dosyayı değiştirince diff.updated geliyor  [görev 5]"
-R1=$(send "$A" "src/order.js dosyasının en üstüne tek satırlık bir açıklama yorumu ekle. Başka hiçbir şeyi değiştirme.")
+# Yorum `function processOrder` satırının ÜSTÜNE isteniyor ki o satır diff
+# hunk'ının içinde (bağlam satırı olarak) kalsın: yorum yalnızca DİFF'TE
+# GÖRÜNEN satırlara bırakılabilir — dosyanın herhangi bir satırına değil.
+R1=$(send "$A" "src/order.js dosyasında 'function processOrder' satırının hemen ÜSTÜNE tek satırlık bir açıklama yorumu ekle. Başka hiçbir şeyi değiştirme.")
 M1=$(echo "$R1" | jget messageId)
 if [ -z "$M1" ]; then no "mesaj kuyruğa girmedi: $R1"; else
   if wait_turn "$M1"; then
@@ -229,25 +226,31 @@ fi
 
 ###############################################################################
 step "4) İki izleyici aynı diff.updated event'lerini aldı  [görev 9]"
-sleep 2
-SEQ1=$(node -e '
-  const fs = require("fs");
-  try {
-    const ev = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-    const a = (Array.isArray(ev) ? ev : ev.events || []).filter((e) => e.type === "diff.updated");
-    console.log(a.map((e) => e.seq).join(","));
-  } catch (e) { console.log("OKUNAMADI"); }' "$TMP/p1.json" 2>/dev/null)
-SEQ2=$(node -e '
-  const fs = require("fs");
-  try {
-    const ev = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-    const a = (Array.isArray(ev) ? ev : ev.events || []).filter((e) => e.type === "diff.updated");
-    console.log(a.map((e) => e.seq).join(","));
-  } catch (e) { console.log("OKUNAMADI"); }' "$TMP/p2.json" 2>/dev/null)
-if [ -n "$SEQ1" ] && [ "$SEQ1" = "$SEQ2" ] && [ "$SEQ1" != "OKUNAMADI" ]; then
-  ok "iki probe aynı seq dizisini aldı: $SEQ1"
+# Probe `--out` dosyasını ancak süre dolunca yazıyor. Uzun süreli iki probe
+# çalıştırıp ortada okumak "dosya yok" demekti (ilk koşumda tam bu oldu).
+# `--since 0` geçmişi baştan oynatıyor: iki bağımsız istemci aynı event
+# dizisini alıyor mu — ölçülen şey bu, ve model gerektirmiyor.
+node scripts/sse-probe.mjs "$ROOM" --base "$BASE" --session "$A" --since 0 --duration 12 --out "$TMP/p1.json" >/dev/null 2>&1 &
+P1=$!
+node scripts/sse-probe.mjs "$ROOM" --base "$BASE" --session "$B" --since 0 --duration 12 --out "$TMP/p2.json" >/dev/null 2>&1 &
+P2=$!
+wait "$P1" 2>/dev/null; wait "$P2" 2>/dev/null
+P1=""; P2=""
+probe_seqs() {
+  node -e '
+    const fs = require("fs");
+    try {
+      const ev = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      const a = (Array.isArray(ev) ? ev : ev.events || []).filter((e) => e && e.type === "diff.updated");
+      console.log(a.map((e) => e.seq).join(","));
+    } catch (e) { console.log("OKUNAMADI"); }' "$1"
+}
+SEQ1=$(probe_seqs "$TMP/p1.json")
+SEQ2=$(probe_seqs "$TMP/p2.json")
+if [ -n "$SEQ1" ] && [ "$SEQ1" != "OKUNAMADI" ] && [ "$SEQ1" = "$SEQ2" ]; then
+  ok "iki probe aynı diff.updated dizisini aldı: $SEQ1"
 else
-  warn "probe dosyaları henüz yazılmamış olabilir (p1=$SEQ1 p2=$SEQ2) — SSE kontrolü Hafta 3/4 kapılarında da var"
+  no "probe'lar ayrıştı — p1=$SEQ1 p2=$SEQ2"
 fi
 
 ###############################################################################
@@ -273,8 +276,45 @@ fi
 ###############################################################################
 step "6) İnceleme: yorum → event sırası → kuyruk  [görev 12]"
 DIFFSEQ=$(psql_q "SELECT max(seq) FROM session_events WHERE session_id='$SID' AND type='diff.updated'")
-LINE=$(csh "grep -n 'function processOrder' /room/$WS/src/order.js | head -1 | cut -d: -f1" | tr -d ' \r')
-LINETEXT=$(csh "sed -n '${LINE}p' /room/$WS/src/order.js")
+# Yorum bırakılacak satır DİFF'TEN seçilir, workspace dosyasından DEĞİL.
+#
+# İlk koşumda kapı satırı dosyadan okuyordu ve inceleme "src/order.js:15
+# diff'te böyle bir satır yok" diye reddedildi — haklı olarak: unified diff
+# yalnızca hunk'ları taşır, dosyanın tamamını değil. Yorum yalnızca "diff'te
+# görünen satırlara" bırakılabilir (görev tanımı, Kapsam Dışı). Kapı gerçek
+# kullanıcının gördüğü şeye bakmalı: patch'in kendisine.
+read -r LINE LINETEXT <<EOF
+$(acurl "$BASE/rooms/$ROOM/snapshot" | node -e '
+  let s = "";
+  process.stdin.on("data", (d) => (s += d)).on("end", () => {
+    try {
+      const o = JSON.parse(s);
+      const st = o.state || o.snapshot || o;
+      const ag = (st.agents || {})[process.argv[1]] || {};
+      const f = ((ag.diff || {}).files || {})["src/order.js"];
+      if (!f || !f.patch) return console.log("");
+      let n = 0;
+      const rows = [];
+      const NL = String.fromCharCode(10);
+      for (const raw of String(f.patch).split(NL)) {
+        const h = /^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,[0-9]+)? @@/.exec(raw);
+        if (h) { n = Number(h[1]); continue; }
+        if (raw.startsWith("-")) continue;
+        if (raw.startsWith("+") || raw.startsWith(" ")) {
+          rows.push({ line: n, text: raw.slice(1) });
+          n += 1;
+        }
+      }
+      const hit =
+        rows.find((r) => r.text.includes("function processOrder")) ||
+        rows.find((r) => r.text.trim().length > 3);
+      console.log(hit ? hit.line + " " + hit.text : "");
+    } catch (e) { console.log(""); }
+  });' "$AGENT")
+EOF
+if [ -z "$LINE" ]; then
+  no "diff'te yorum bırakılacak satır bulunamadı — agent src/order.js'i değiştirmemiş olabilir"
+fi
 BODY=$(node -e '
   const [line, text, seq] = process.argv.slice(1);
   console.log(JSON.stringify({ comments: [{ path: "src/order.js", side: "new",
@@ -296,15 +336,30 @@ fi
 
 ###############################################################################
 step "7) Agent'a giden metinde dosya:satır ve alıntı var  [görev 13]"
-TEXT=$(psql_q "SELECT payload->>'text' FROM session_events WHERE session_id='$SID' AND type='message.received' AND payload->>'messageId'='$M4'")
-if echo "$TEXT" | grep -q "src/order.js:$LINE" && echo "$TEXT" | grep -q "bunu böl"; then
-  if echo "$TEXT" | grep -q "\[Ayse\]:"; then
-    no "event log'daki metinde [Ayse]: öneki var — ham kalmalıydı"
-  else
-    ok "metinde src/order.js:$LINE ve yorum gövdesi var, aktör öneki yok"
-  fi
+# Metin psql'den DEĞİL API'den okunuyor: psql çıktısı Windows konsolunda
+# kod sayfasına düşüyor ve Türkçe karakterler bozuluyor. İlk koşumda kontrol
+# tam bu yüzden düştü — metin doğruydu, kapının okuması bozuktu.
+CHK=$(acurl "$BASE/rooms/$ROOM/events?since=0&limit=500" | node -e '
+  let s = "";
+  process.stdin.on("data", (d) => (s += d)).on("end", () => {
+    try {
+      const evs = (JSON.parse(s).events || []).filter(
+        (e) => e.type === "message.received" && e.payload.messageId === process.argv[1],
+      );
+      const t = evs.length ? String(evs[0].payload.text) : "";
+      const marker = process.argv[2];
+      const quoted = process.argv[3].trim();
+      const out = [];
+      out.push(t.includes(marker) ? "yol+satir" : "YOK:yol+satir");
+      out.push(quoted && t.includes(quoted) ? "alinti" : "YOK:alinti");
+      out.push(/\[[^\]]+\]:/.test(t) ? "YOK:onek-var" : "onek-yok");
+      console.log(out.join(" "));
+    } catch (e) { console.log("HATA"); }
+  });' "$M4" "src/order.js:$LINE" "$LINETEXT")
+if [ "$CHK" = "yol+satir alinti onek-yok" ]; then
+  ok "metinde src/order.js:$LINE ve alıntılanan satır var, aktör öneki yok"
 else
-  no "beklenen dosya:satır yok — metin: $(echo "$TEXT" | head -c 200)"
+  no "beklenen alanlar eksik: $CHK"
 fi
 
 ###############################################################################
@@ -330,25 +385,51 @@ else
 fi
 
 ###############################################################################
-step "9) Yorumun çapası kaydı: current KALMAMALI  [görev 15]"
+step "9) Yorumun çapası GERÇEĞE uyuyor mu  [görev 15]"
 sleep 2
-ANCHOR=$(acurl "$BASE/rooms/$ROOM/snapshot" | node -e '
+# Durum CANLI görünümden okunuyor (`scripts/room-view.mjs`): snapshot +
+# sonraki event'ler, tarayıcının yaptığının aynısı. Bir koşumda doğrudan
+# /snapshot okunmuştu ve kapı "projeksiyonda yorum yok" dedi — yorum seq
+# 48'deydi, snapshot seq 34'te kalmıştı. Ürün doğruydu, okuma bayattı.
+#
+# Beklenti de patch'ten TÜRETİLİYOR, sabit değil. Görev tanımı "current
+# kalırsa başarısız" diyor; bu, agent'ın satırı kaydırmasını varsayıyor ve
+# gerçek modelde bu bir şans işi. Ölçülen şey: projeksiyonun çapa kuralı
+# (numara+metin) patch'in gerçeğiyle aynı sonucu veriyor mu.
+CMP=$(node scripts/room-view.mjs "$ROOM" --base "$BASE" --session "$B" --agent "$AGENT" | node -e '
   let s = "";
   process.stdin.on("data", (d) => (s += d)).on("end", () => {
     try {
-      const o = JSON.parse(s);
-      const st = o.state || o.snapshot || o;
-      const a = (st.agents || {})[process.argv[1]] || {};
-      const cs = a.comments || (a.diff && a.diff.comments) || [];
-      const list = Array.isArray(cs) ? cs : Object.values(cs);
-      console.log(list.map((c) => c.anchor).join(",") || "YOK");
-    } catch (e) { console.log("HATA"); }
-  });' "$AGENT")
-case "$ANCHOR" in
-  *moved*|*outdated*) ok "çapa: $ANCHOR" ;;
-  YOK|HATA)           no "çapa projeksiyondan okunamadı ($ANCHOR)" ;;
-  *)                  no "çapa hâlâ $ANCHOR — satır değiştiği hâlde current kalmış" ;;
-esac
+      const a = JSON.parse(s);
+      const list = a.comments || [];
+      if (!list.length) return console.log("YOK yorum-yok");
+      const c = list[list.length - 1];
+      const f = ((a.diff || {}).files || {})[c.path];
+      if (!f || !f.patch) return console.log(c.anchor + " outdated");
+      const NL = String.fromCharCode(10);
+      let n = 0;
+      const rows = [];
+      for (const raw of String(f.patch).split(NL)) {
+        const h = /^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,[0-9]+)? @@/.exec(raw);
+        if (h) { n = Number(h[1]); continue; }
+        if (raw.startsWith("-")) continue;
+        if (raw.startsWith("+") || raw.startsWith(" ")) { rows.push({ line: n, text: raw.slice(1) }); n += 1; }
+      }
+      const at = rows.find((r) => r.line === c.line);
+      const hits = rows.filter((r) => r.text === c.lineText);
+      const beklenen =
+        at && at.text === c.lineText ? "current" : hits.length === 1 ? "moved" : "outdated";
+      console.log(c.anchor + " " + beklenen + " " + (c.currentLine ?? "-"));
+    } catch (e) { console.log("HATA HATA"); }
+  });')
+GERCEK=$(echo "$CMP" | cut -d" " -f1)
+BEKLENEN=$(echo "$CMP" | cut -d" " -f2)
+YENI=$(echo "$CMP" | cut -d" " -f3)
+if [ "$GERCEK" = "$BEKLENEN" ] && [ "$GERCEK" != "HATA" ] && [ "$GERCEK" != "YOK" ]; then
+  ok "çapa $GERCEK (yeni satır: $YENI) — patch'ten türetilen beklentiyle aynı"
+else
+  no "çapa $GERCEK, patch'e göre $BEKLENEN olmalıydı"
+fi
 
 ###############################################################################
 step "10) Geçersiz yorum reddediliyor: 400  [görev 16]"

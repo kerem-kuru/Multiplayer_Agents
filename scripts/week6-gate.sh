@@ -307,16 +307,17 @@ CP2_ID=$(acurl -X POST "$BASE/rooms/$ROOM/agents/$AGENT/checkpoints" \
   -H 'content-type: application/json' -d '{"label":"kapı: yeni taban"}' | jget checkpointId)
 BECOMES=$(psql_q "SELECT payload->>'becomesBase' FROM session_events WHERE session_id='$SID' AND type='checkpoint.created' AND payload->>'checkpointId'='$CP2_ID'")
 sleep 2
-FILES=$(acurl "$BASE/rooms/$ROOM/snapshot" | node -e '
+# CANLI görünüm: snapshot + sonraki event'ler (tarayıcının yaptığı).
+# /snapshot tek başına SAKLANAN durumu döndürüyor ve event log'un gerisinde
+# olabilir; kapının "0 dosya" iddiası o zaman şans eseri doğru olurdu.
+FILES=$(node scripts/room-view.mjs "$ROOM" --base "$BASE" --session "$A" --agent "$AGENT" | node -e '
   let s = "";
   process.stdin.on("data", (d) => (s += d)).on("end", () => {
     try {
-      const o = JSON.parse(s);
-      const st = o.state || o.snapshot || o;
-      const a = (st.agents || {})[process.argv[1]] || {};
+      const a = JSON.parse(s);
       console.log(Object.keys((a.diff && a.diff.files) || {}).length);
     } catch (e) { console.log("?"); }
-  });' "$AGENT")
+  });')
 BASE_DB=$(psql_q "SELECT diff_base_checkpoint_id FROM agent_runtime WHERE room_id='$ROOM' AND agent_name='$AGENT'")
 if [ "$BECOMES" = "true" ] && [ "$BASE_DB" = "$CP2_ID" ] && [ "$FILES" = "0" ]; then
   ok "becomesBase=true, taban=$CP2_ID, projeksiyonda 0 dosya"
