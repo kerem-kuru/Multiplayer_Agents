@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import readline from "node:readline";
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { DiffPublisher } from "@agent-rooms/gitkit";
 import type { NewRoomEvent } from "@agent-rooms/protocol";
 import {
   AgentConfig,
@@ -90,6 +91,32 @@ const emit = (event: NewRoomEvent): void => out({ kind: "event", event });
 const agentActor = { kind: "agent", name: agent.name } as const;
 const envelope = { roomId, sessionId };
 
+/**
+ * Canlı diff yayımcısı.
+ *
+ * Taban SUNUCUDAN geliyor (`gitkit init-workspace` ile agent başlatılmadan
+ * önce alınıyor). Runner kendisi taban ÜRETMEZ: iki yerde taban üretmek
+ * "diff neye göre" sorusunu iki farklı cevaba bölerdi.
+ */
+const baseCheckpointId = process.env.DIFF_BASE_CHECKPOINT_ID;
+const baseTree = process.env.DIFF_BASE_TREE;
+const diff = new DiffPublisher({
+  cwd: process.cwd(),
+  agent: agent.name,
+  roomId,
+  sessionId,
+  emit: (event) => emit(event),
+  base: baseCheckpointId && baseTree ? { checkpointId: baseCheckpointId, treeSha: baseTree } : null,
+  log: (level, msg) => out({ kind: "log", level, msg }),
+});
+if (!diff.enabled) {
+  out({
+    kind: "log",
+    level: "warn",
+    msg: "diff tabanı yok (DIFF_BASE_*) — canlı diff yayımlanmayacak",
+  });
+}
+
 async function runTurn(messageId: string, text: string, ac: AbortController): Promise<void> {
   const ctx = { roomId, sessionId, agent: agent.name, messageId };
   const turn = { agent: agent.name, messageId };
@@ -152,11 +179,19 @@ async function runTurn(messageId: string, text: string, ac: AbortController): Pr
           ],
           PostToolUse: [
             {
-              matcher: "Edit|Write|NotebookEdit",
+              /**
+               * **Bash DA DAHİL.** `sed -i`, kod üreticiler ve `npm install`
+               * dosya değiştirir; matcher'ı yalnızca Edit/Write ile
+               * sınırlamak "agent dosyayı değiştirdi ama diff'te yok"
+               * demekti.
+               */
+              matcher: "Edit|Write|NotebookEdit|Bash",
               hooks: [
                 async (input) => {
                   const i = input as { tool_name?: string; tool_input?: Record<string, unknown> };
                   const path = i.tool_input?.file_path ?? i.tool_input?.notebook_path;
+                  // `file.changed` yalnızca YOLU bilinen araçlar için: Bash'in
+                  // neye dokunduğunu tool girdisinden okumak metin kazımak olurdu.
                   if (typeof path === "string" && path.length > 0) {
                     emit({
                       ...envelope,
@@ -165,6 +200,12 @@ async function runTurn(messageId: string, text: string, ac: AbortController): Pr
                       payload: { ...turn, path: roomRelativePath(path), tool: i.tool_name ?? "" },
                     } as NewRoomEvent);
                   }
+                  /**
+                   * Hook diff HESAPLAMAZ: yalnızca kirli bayrağını kaldırır.
+                   * Her araç çağrısında `git add -A` + diff koşturmak agent'ı
+                   * kendi aletinin içinde bekletirdi.
+                   */
+                  diff.markDirty(messageId);
                   return {};
                 },
               ],
@@ -219,6 +260,26 @@ async function runTurn(messageId: string, text: string, ac: AbortController): Pr
       } as NewRoomEvent);
       interrupting = false;
     }
+
+    /**
+     * Turn bitti: SON bir diff yayımı zorla yapılır, ardından TURN
+     * CHECKPOINT'i alınır. Sıra önemli — önce checkpoint alınsaydı
+     * checkpoint'in ağacı ile yayımlanan diff aynı ana bakmazdı.
+     *
+     * Turn checkpoint'i tabanı KAYDIRMAZ (`becomesBase: false`): "bu oturumda
+     * ne değişti" sorusu her turn'de sıfırlansaydı Diff sekmesi hiçbir zaman
+     * oturumun tamamını göstermezdi. Tek işi "Ayşe'nin 14:02 mesajından
+     * sonrası" diye geri bakılabilmesi.
+     */
+    if (diff.enabled) {
+      await diff.flush(messageId).catch(() => undefined);
+      await diff
+        .checkpoint("turn", `turn sonu: ${messageId.slice(0, 8)}`, messageId)
+        .catch((err: unknown) =>
+          out({ kind: "log", level: "warn", msg: `turn checkpoint'i alınamadı: ${String(err)}` }),
+        );
+    }
+
     // Her durumda gönderilir — host bunu görmeden agent'ı idle'a almaz.
     out({ kind: "turn_end", messageId, sdkSessionId, ok });
   }
@@ -244,7 +305,21 @@ rl.on("line", (line: string) => {
   }
 
   if (cmd.kind === "shutdown") {
+    diff.stop();
     shutdown();
+    return;
+  }
+
+  /**
+   * Taban değişti (sunucu manuel checkpoint aldı). Artımlı harita sıfırlanır
+   * ve yeni tabana göre TAM diff yayımlanır.
+   */
+  if (cmd.kind === "set_base") {
+    void diff
+      .setBase({ checkpointId: cmd.checkpointId, treeSha: cmd.treeSha })
+      .catch((err: unknown) =>
+        out({ kind: "log", level: "warn", msg: `taban değiştirilemedi: ${String(err)}` }),
+      );
     return;
   }
 

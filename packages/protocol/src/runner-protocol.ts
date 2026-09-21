@@ -35,6 +35,18 @@ export const RunnerCommand = z.discriminatedUnion("kind", [
    * runner'ı öldürür.
    */
   z.object({ kind: z.literal("interrupt"), messageId: z.string().uuid() }),
+  /**
+   * Diff tabanı değişti (manuel checkpoint alındı).
+   *
+   * Runner tabanı değiştirir, artımlı haritayı SIFIRLAR ve yeni tabana göre
+   * TAM bir diff yayımlar. Sıfırlamasaydı eski tabana göre "değişmemiş"
+   * sayılan dosyalar yeni tabanda hiç görünmezdi.
+   */
+  z.object({
+    kind: z.literal("set_base"),
+    checkpointId: z.string().min(1),
+    treeSha: z.string().min(1),
+  }),
   z.object({ kind: z.literal("shutdown") }),
 ]);
 export type RunnerCommand = z.infer<typeof RunnerCommand>;
@@ -103,5 +115,16 @@ export const RunnerEnv = z.object({
   AGENT_MODEL: z.string().min(1),
   AGENT_MAX_TURNS: z.string().optional(),
   AGENT_MAX_BUDGET_USD: z.string().optional(),
+  /**
+   * Diff tabanı (Hafta 6). Sunucu agent'ı başlatmadan ÖNCE
+   * `gitkit init-workspace` ile tabanı alır ve buradan geçirir; runner
+   * kendisi taban üretmez — iki yerde taban üretmek "diff neye göre"
+   * sorusunu iki farklı cevaba böler.
+   *
+   * Eksikse runner canlı diff yayımlamaz (ve bunu log'a yazar): sessizce
+   * yanlış bir tabana göre diff göstermektense hiç göstermemek doğru.
+   */
+  DIFF_BASE_CHECKPOINT_ID: z.string().optional(),
+  DIFF_BASE_TREE: z.string().optional(),
 });
 export type RunnerEnv = z.infer<typeof RunnerEnv>;

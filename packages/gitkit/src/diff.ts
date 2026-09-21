@@ -1,3 +1,4 @@
+import type { FileDiff, FileStatus } from "@agent-rooms/protocol";
 import { git } from "./git.js";
 
 /**
@@ -6,32 +7,11 @@ import { git } from "./git.js";
  * Tek bir büyük diff metni değil dosya listesi üretiliyor, çünkü canlı yayım
  * artımlı: her araç çağrısından sonra tüm diff yeniden gönderilirse event log
  * şişer ve ikinci kullanıcının ekranı her seferinde baştan çizilir.
+ *
+ * `FileDiff` şekli `@agent-rooms/protocol` içinde TEK KEZ tanımlı: burada
+ * ikinci bir tanım olsaydı üreten ile tüketen zamanla sessizce ayrılırdı.
  */
-
-export type FileStatus =
-  | "added"
-  | "modified"
-  | "deleted"
-  | "renamed"
-  | "binary"
-  /** Tabana geri döndü: artık diff'te yok. Projeksiyon bunu görünce dosyayı siler. */
-  | "clean";
-
-export interface FileDiff {
-  path: string;
-  /** Yeniden adlandırmada eski yol; diğer durumlarda null. */
-  oldPath: string | null;
-  status: FileStatus;
-  /** Unified, 3 satır bağlam. `binary` ve `clean` için null. */
-  patch: string | null;
-  additions: number;
-  deletions: number;
-  /** Yeni taraftaki blob sha'sı — artımlı yayım değişikliği bundan anlar. */
-  blobHash: string | null;
-  truncated: boolean;
-  /** Lock ve üretilmiş dosyalar kapalı başlar. */
-  collapsedByDefault: boolean;
-}
+export type { FileDiff, FileStatus };
 
 /** Dosya başına patch sınırı. Aşarsa kırpılır ve `truncated` bunu söyler. */
 export const PATCH_LIMIT_BYTES = 32 * 1024;

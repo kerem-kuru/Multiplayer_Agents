@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CheckpointId, CheckpointKind, CommentSide, FileDiff } from "./diff.js";
 import { Actor, AgentName, ApprovalId, RoomId, SessionId, TaskId } from "./ids.js";
 
 /**
@@ -130,7 +131,17 @@ export const MessageReceived = ev(
  */
 export const MessageQueued = ev(
   "message.queued",
-  z.object({ ...TurnRef, text: z.string().min(1), user: UserRef }),
+  z.object({
+    ...TurnRef,
+    text: z.string().min(1),
+    user: UserRef,
+    /**
+     * Bu kayıt bir İNCELEMEden geldiyse (Hafta 6) onun kimliği. UI kuyruk
+     * satırını "Ayşe'nin 3 yorumluk incelemesi" diye gösterebilsin ve
+     * yorumlara gidebilsin diye. Düz mesajlarda yok.
+     */
+    reviewId: z.string().uuid().optional(),
+  }),
 );
 
 /**
@@ -225,19 +236,61 @@ export const ToolDenied = ev(
 
 // --- Dosya ve diff ---------------------------------------------------------
 
-/** Hafta 6'ya kadar sadece yol + tool. Diff üretimi orada gelecek. */
+/**
+ * Yol + tool. Hafta 6'da diff geldi ama bu event KALDI: etkinlik akışı tool
+ * satırının altında "hangi dosyalara dokundu" bilgisini buradan alıyor ve
+ * diff'ten okunamaz — diff "neye göre" sorusunun cevabı, "hangi çağrı"
+ * sorusunun değil.
+ */
 export const FileChanged = ev(
   "file.changed",
   z.object({ ...TurnRef, path: z.string().min(1), tool: z.string().min(1) }),
 );
 
+/**
+ * Checkpoint alındı.
+ *
+ * `becomesBase`: baseline ve manuel checkpoint'ler yeni taban olur (diff
+ * sıfırlanır), turn checkpoint'i OLMAZ — her turn sonunda tabanı kaydırmak
+ * "bu oturumda ne değişti" sorusunu cevapsız bırakırdı.
+ */
+export const CheckpointCreated = ev(
+  "checkpoint.created",
+  z.object({
+    ...AgentRef,
+    checkpointId: CheckpointId,
+    kind: CheckpointKind,
+    label: z.string().min(1).max(200),
+    commitSha: z.string().min(1),
+    treeSha: z.string().min(1),
+    /** Turn checkpoint'inde dolu: hangi mesajdan sonra alındı. */
+    messageId: z.string().uuid().nullable(),
+    /** Manuel checkpoint'te dolu: kim aldı. */
+    by: UserRef.nullable(),
+    becomesBase: z.boolean(),
+  }),
+);
+
+/**
+ * Diff değişti — SADECE DEĞİŞEN DOSYALAR.
+ *
+ * Her araç çağrısından sonra tüm diff yeniden yazılsaydı log şişerdi ve
+ * ikinci kullanıcının ekranı her seferinde baştan çizilirdi. Runner son
+ * yayımlanan `path → parmak izi` haritasını tutuyor; yalnızca değişen, yeni
+ * eklenen veya tabana geri dönen (`status: "clean"`) dosyalar gidiyor.
+ *
+ * Patch metinleri `appendEvent`'ten geçtiği için içlerindeki secret'lar
+ * MASKELENİR. Maske satır içinde yapılır, satır sonu eklenmez — diff'in satır
+ * yapısı bozulmaz.
+ */
 export const DiffUpdated = ev(
   "diff.updated",
   z.object({
-    agent: AgentName,
-    /** worktree HEAD'ine göre unified diff'in sha256'sı — istemci değişti mi diye bakar. */
-    digest: z.string().min(1),
-    files: z.array(z.string().min(1)),
+    ...AgentRef,
+    /** Turn içinde üretildiyse hangi mesajın turn'ünde. Turn dışıysa null. */
+    messageId: z.string().uuid().nullable(),
+    baseCheckpointId: CheckpointId,
+    files: z.array(FileDiff).min(1),
   }),
 );
 
@@ -299,16 +352,67 @@ export const ApprovalResolved = ev(
 
 // --- İnsan katmanı: yorum, presence, sürücü --------------------------------
 
+/**
+ * Bir satıra bırakılmış yorum.
+ *
+ * ÇAPA SATIR NUMARASI + SATIRIN METNİDİR. Satır numarası tek başına kayar:
+ * agent araya üç satır eklerse 42 artık başka bir satırdır. `lineText`
+ * yorumun sessizce yanlış satıra kaymasını engeller — kayma olduğunda yorum
+ * "eskimiş" işaretlenir.
+ *
+ * `diffSeq`: yorumcunun GÖRDÜĞÜ `diff.updated` event'inin seq'i. Sunucu
+ * çapayı bu ana göre doğruluyor.
+ */
 export const CommentOnLine = ev(
   "comment.on_line",
   z.object({
-    agent: AgentName,
+    ...AgentRef,
+    commentId: z.string().uuid(),
+    reviewId: z.string().uuid(),
+    author: UserRef,
     path: z.string().min(1),
+    side: CommentSide,
     line: z.number().int().positive(),
-    text: z.string().min(1).max(4000),
-    /** Agent'ın bir sonraki turn'üne yönerge olarak enjekte edildi mi? */
-    injected: z.boolean().default(false),
+    /** Yorumcunun gördüğü satır, OLDUĞU GİBİ. Kırpılmaz, normalize edilmez. */
+    lineText: z.string(),
+    body: z.string().min(1).max(4000),
+    baseCheckpointId: CheckpointId,
+    diffSeq: z.number().int(),
   }),
+);
+
+/**
+ * Bir inceleme gönderildi: aynı kişinin aynı oturumdaki N yorumu TEK turn.
+ *
+ * Hafta 5'teki "mesajlar birleştirilmez" kuralı bozulmuyor — birleştirilen
+ * şey aynı kişinin aynı inceleme içindeki yorumları. Farklı kişilerin
+ * incelemeleri yine ayrı turn'ler. Beş satıra yorum yazan biri beş turn
+ * beklemez; tek bir inceleme gönderir.
+ */
+export const ReviewSubmitted = ev(
+  "review.submitted",
+  z.object({
+    ...AgentRef,
+    reviewId: z.string().uuid(),
+    author: UserRef,
+    commentIds: z.array(z.string().uuid()).min(1),
+    /** Kuyruğa giren mesaj. Metni SUNUCU kuruyor, istemci hazır prompt yollamıyor. */
+    messageId: z.string().uuid(),
+  }),
+);
+
+/**
+ * Yorumun durumu İNSAN KARARIDIR. Agent cevabında "uyguladım" diyebilir ama
+ * yorumu kapatamaz: kapatma düğmesi insanda.
+ */
+export const CommentResolved = ev(
+  "comment.resolved",
+  z.object({ ...AgentRef, commentId: z.string().uuid(), by: UserRef }),
+);
+
+export const CommentReopened = ev(
+  "comment.reopened",
+  z.object({ ...AgentRef, commentId: z.string().uuid(), by: UserRef }),
 );
 
 export const PresenceUpdated = ev(
@@ -416,6 +520,7 @@ const EVENT_SCHEMAS = [
   ToolResult,
   ToolDenied,
   FileChanged,
+  CheckpointCreated,
   DiffUpdated,
   JournalUpdated,
   TaskCreated,
@@ -423,6 +528,9 @@ const EVENT_SCHEMAS = [
   ApprovalRequested,
   ApprovalResolved,
   CommentOnLine,
+  ReviewSubmitted,
+  CommentResolved,
+  CommentReopened,
   PresenceUpdated,
   DriverClaimed,
   DriverReleased,

@@ -3,6 +3,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
+import { DiffPublisher } from "@agent-rooms/gitkit";
 import type { NewRoomEvent } from "@agent-rooms/protocol";
 import {
   AgentConfig,
@@ -115,6 +116,44 @@ const emit = (event: NewRoomEvent): void => out({ kind: "event", event });
 const envelope = { roomId, sessionId };
 const agentActor = { kind: "agent", name: agent.name } as const;
 
+/**
+ * Canlı diff yayımcısı — Claude runner'la AYNI sınıf.
+ *
+ * Gemini'de `PostToolUse` hook'u yok; tetik akıştaki `tool.*` event'lerinden
+ * geliyor (aşağıda `markDirtyFrom`). Sonuç aynı: dosya değiştiren her araç
+ * çağrısından 300 ms sonra bir yayım.
+ */
+const baseCheckpointId = process.env.DIFF_BASE_CHECKPOINT_ID;
+const baseTree = process.env.DIFF_BASE_TREE;
+const diff = new DiffPublisher({
+  cwd: process.cwd(),
+  agent: agent.name,
+  roomId,
+  sessionId,
+  emit: (event) => emit(event),
+  base: baseCheckpointId && baseTree ? { checkpointId: baseCheckpointId, treeSha: baseTree } : null,
+  log: (level, msg) => out({ kind: "log", level, msg }),
+});
+if (!diff.enabled) {
+  out({
+    kind: "log",
+    level: "warn",
+    msg: "diff tabanı yok (DIFF_BASE_*) — canlı diff yayımlanmayacak",
+  });
+}
+
+/**
+ * Akıştan gelen bir event dosya değiştirmiş olabilir mi.
+ *
+ * Gemini tool çıktısının METNİNİ vermiyor, sadece durumunu; hangi dosyaya
+ * dokunduğunu okumaya çalışmak metin kazımak olurdu. Bu yüzden ölçüt kaba:
+ * bir tool çalıştıysa diff yeniden hesaplanır. Hesap zaten artımlı, boşuna
+ * koşarsa hiçbir event üretmez.
+ */
+const markDirtyFrom = (event: NewRoomEvent, messageId: string): void => {
+  if (event.type === "tool.result" || event.type === "tool.call") diff.markDirty(messageId);
+};
+
 function runTurn(messageId: string, text: string): Promise<void> {
   return new Promise((resolve) => {
     const resuming = geminiSessionId !== null;
@@ -205,7 +244,16 @@ function runTurn(messageId: string, text: string): Promise<void> {
       }
     };
 
+    /**
+     * `finish` İKİ KEZ çağrılabilir: `error` olayından sonra `close` da gelir.
+     * Bitiş artık asenkron (diff yayımı + turn checkpoint'i) olduğu için
+     * pencere genişledi; çift `turn_end` host'ta sıradaki mesajı erken
+     * başlatırdı.
+     */
+    let finished = false;
     const finish = (): void => {
+      if (finished) return;
+      finished = true;
       flushText();
       // Bitiş event'i zaten yazıldıysa ikincisini YAZMA.
       if (!ok && !sawTerminal) {
@@ -241,9 +289,31 @@ function runTurn(messageId: string, text: string): Promise<void> {
         } as NewRoomEvent);
         interrupting = false;
       }
-      out({ kind: "turn_end", messageId, sdkSessionId: geminiSessionId, ok });
-      child = null;
-      resolve();
+
+      /**
+       * Turn bitti: son bir diff yayımı ZORLA yapılır, ardından turn
+       * checkpoint'i alınır — Claude runner'la aynı sıra. `turn_end` en sona
+       * kalır: host onu görünce agent'ı idle'a alıyor ve sıradaki mesajı
+       * veriyor, yani ondan sonra yazılan bir `diff.updated` yanlış turn'e
+       * yapışırdı.
+       */
+      void (async () => {
+        if (diff.enabled) {
+          await diff.flush(messageId).catch(() => undefined);
+          await diff
+            .checkpoint("turn", `turn sonu: ${messageId.slice(0, 8)}`, messageId)
+            .catch((err: unknown) =>
+              out({
+                kind: "log",
+                level: "warn",
+                msg: `turn checkpoint'i alınamadı: ${String(err)}`,
+              }),
+            );
+        }
+        out({ kind: "turn_end", messageId, sdkSessionId: geminiSessionId, ok });
+        child = null;
+        resolve();
+      })();
     };
 
     const rl = readline.createInterface({ input: child.stdout! });
@@ -272,7 +342,10 @@ function runTurn(messageId: string, text: string): Promise<void> {
 
       const mapped = mapStreamLine(parsed, { ...ctx, errorTail: stderrTail });
       if (mapped.sdkSessionId) geminiSessionId = mapped.sdkSessionId;
-      for (const event of mapped.events) emit(event);
+      for (const event of mapped.events) {
+        emit(event);
+        markDirtyFrom(event, messageId);
+      }
       if (mapped.finished) {
         ok = mapped.finished.ok;
         sawTerminal = true;
@@ -368,7 +441,21 @@ rl.on("line", (line: string) => {
   }
 
   if (cmd.kind === "shutdown") {
+    diff.stop();
     shutdown();
+    return;
+  }
+
+  /**
+   * Taban degisti (sunucu manuel checkpoint aldi). Artimli harita sifirlanir
+   * ve yeni tabana gore TAM diff yayimlanir.
+   */
+  if (cmd.kind === "set_base") {
+    void diff
+      .setBase({ checkpointId: cmd.checkpointId, treeSha: cmd.treeSha })
+      .catch((err: unknown) =>
+        out({ kind: "log", level: "warn", msg: `taban degistirilemedi: ${String(err)}` }),
+      );
     return;
   }
 
