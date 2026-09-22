@@ -186,8 +186,8 @@ beklemede.**
 
 ## Makinede ne kaldı (22 Eylül gecesi)
 
-- **Push edildi:** çalışma ağacı temiz, `origin/main` = `194eef0`. Hafta 7'nin Gün 1–5'i
-  (7 commit) public repoda.
+- **Push edildi:** çalışma ağacı temiz, `origin/main` = `f40cabf`. Hafta 7'nin Gün 1–5'i
+  (7 commit + devir notu) public repoda.
 - `postgres` (5433) + `redis` (6380) ayakta.
 - **API 8787 ve arayüz 5173 ayakta** ve GÜNCEL kodu koşuyor
   (`ROOM_CONFIG=config/room.week7.yaml`, koşum ortamı gemini).
