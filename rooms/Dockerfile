@@ -17,13 +17,17 @@ FROM node:22-bookworm-slim
 # Buradaki liste `ROOM_TOOLCHAIN_PROBES` ile eşleşir (packages/protocol/
 # src/prompts.ts): runner başlangıçta bunların sürümünü ÖLÇÜP agent'a
 # söylüyor, yani liste ile gerçek arasında kayma olamaz.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# `apt-get upgrade`: dagitimin git guvenlik yamalari HER imaj build'inde
+# alinsin. Debian yamalari surum numarasini degistirmeden geri tasidigi icin
+# "surum >= X" kontrolu yaniltici olur; guncel kalmanin yolu upgrade etmek.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
       git \
       bash \
       ca-certificates \
       ripgrep \
       curl \
       procps \
+      passwd \
       python3 \
       python3-venv \
       build-essential \
@@ -76,9 +80,13 @@ ENV PATH=/opt/venv/bin:$PATH \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+# /room BOS kalir ve imajda hicbir sey tohumlanmaz.
+#
+# Hafta 7'den beri /room bir named volume. Docker, bos bir volume'u ilk
+# baglayista imajdaki ayni yolun icerigiyle TOHUMLAR — burada klasor yaratip
+# `agent`e verseydik volume yanlis sahiplikte baslardi. Klasorleri izin
+# plani yaratiyor (packages/core/src/room-fs.ts), dogru sahip ve modla.
 WORKDIR /room
-RUN mkdir -p /room/worktrees /room/contracts /room/journal \
-    && chown -R agent:agent /room
 
 USER agent
 

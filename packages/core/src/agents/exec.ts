@@ -41,7 +41,20 @@ export async function startRunnerExec(opts: RunnerExecOptions): Promise<RunnerEx
   const container = docker.getContainer(opts.container);
 
   const exec = await container.exec({
-    Cmd: ["node", opts.runnerPath],
+    /**
+     * `umask 002`: runner'ın yarattığı dosyalar GRUP TARAFINDAN YAZILABİLİR
+     * olsun. `contracts/` setgid olduğu için orada yaratılan dosyalar
+     * `rooms-contracts` grubunu miras alır; umask 022 olsaydı ikinci agent
+     * birincinin yazdığı sözleşme dosyasını değiştiremezdi ve "tek ortak
+     * yazılabilir alan" iddiası çökerdi.
+     *
+     * Worktree içindeki dosyalar da grup-yazılabilir olur ama oradaki grup
+     * agent'ın KENDİ birincil grubu (`agent-<ad>`), yani kimseye yetki açmaz.
+     *
+     * `exec`: sh süreci kalmasın, node PID'i doğrudan exec'in PID'i olsun —
+     * Hafta 5'teki süreç grubu sinyali buna dayanıyor.
+     */
+    Cmd: ["sh", "-c", `umask 002 && exec node ${opts.runnerPath}`],
     AttachStdin: true,
     AttachStdout: true,
     AttachStderr: true,

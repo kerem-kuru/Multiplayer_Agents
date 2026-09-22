@@ -213,9 +213,12 @@ export function createApp(
         container: result.containerId
           ? { id: result.containerId, name: result.containerName }
           : null,
+        // Hafta 7: /room bir named volume; host'ta karsiligi olan bir klasor
+        // yok. Buradaki yollar container ICINDEKI yollardir.
         layout: {
-          root: result.roomRoot,
-          dirs: result.dirs.map((d) => path.relative(result.roomRoot, d).replace(/\\/g, "/")),
+          volume: result.volume,
+          dirs: result.dirs,
+          uids: result.uids,
         },
         agents: config.agents.map((a) => ({ name: a.name, workspace: a.workspace })),
         events: result.events.map((e) => ({ seq: e.seq, type: e.type })),

@@ -47,30 +47,83 @@ export function roomContainerName(roomId: string): string {
 export const ROOM_LABEL = "agent-rooms.room";
 export const MANAGED_LABEL = "agent-rooms.managed";
 
+/**
+ * Oda volume'unun adı.
+ *
+ * Hafta 7, Karar 2: `/room` artık host'taki bir klasöre bind mount EDİLMİYOR,
+ * named volume. Gerekçe: Docker Desktop'ta (Windows/macOS) bind mount
+ * üzerindeki `chown` ve izin bitleri güvenilir çalışmaz. Bu haftanın tamamı
+ * "izolasyon dosya sistemiyle uygulanır" üzerine kurulu; bind mount'ta kalsaydı
+ * `chmod 0750` hatasız döner, `stat` beklediğimizi gösterir ve kapı yeşil
+ * yanardı — gerçek bir sınır olmadan. Yeşil yanan ve yalan söyleyen bir
+ * güvenlik özelliği, hiç olmayanından kötüdür.
+ *
+ * Bedeli: host artık oda dosyalarını doğrudan göremez, her inceleme
+ * `docker exec` ile yapılır (scripts/lib/room-exec.sh).
+ *
+ * Tam uuid kullanılıyor, kısa hali değil: volume container'dan uzun yaşayabilir
+ * ve 8 karakterlik bir çakışma, silinen bir odanın volume'unu yaşayan bir odaya
+ * bağlamak demek olurdu.
+ */
+export function roomVolumeName(roomId: string): string {
+  return `room-${roomId}`;
+}
+
 export interface RoomContainerSpec {
   roomId: string;
-  /** Host tarafındaki oda kökü — container içinde /room olarak görünür. */
-  roomRoot: string;
   image: string;
+  /** Odadaki agent sayısı — bellek sınırı bundan türer. */
+  agentCount?: number;
   memoryMb?: number;
   cpus?: number;
 }
 
+/** Agent sayısına göre bellek: agent başına 2 GB, tavan 8 GB. */
+export function roomMemoryMb(agentCount: number): number {
+  return Math.min(Math.max(agentCount, 1) * 2048, 8192);
+}
+
 export function buildCreateOptions(spec: RoomContainerSpec): Docker.ContainerCreateOptions {
-  const { roomId, roomRoot, image, memoryMb = 2048, cpus = 2 } = spec;
+  const { roomId, image, agentCount = 1, cpus = 2 } = spec;
+  const memoryMb = spec.memoryMb ?? roomMemoryMb(agentCount);
   return {
     Image: image,
     name: roomContainerName(roomId),
     Labels: { [MANAGED_LABEL]: "true", [ROOM_LABEL]: roomId },
     WorkingDir: ROOM_MOUNT,
     HostConfig: {
-      Binds: [`${toDockerPath(roomRoot)}:${ROOM_MOUNT}`],
+      Mounts: [
+        {
+          Type: "volume",
+          Source: roomVolumeName(roomId),
+          Target: ROOM_MOUNT,
+        },
+      ],
       Memory: memoryMb * 1024 * 1024,
       NanoCpus: cpus * 1_000_000_000,
       // Döngüye giren bir agent'ın fork bombasına dönmesini engeller.
       PidsLimit: 512,
     },
   };
+}
+
+/** Volume'u yaratır (varsa dokunmaz). Etiket sweeper'ın sahipsizleri bulması için. */
+export async function ensureRoomVolume(roomId: string): Promise<string> {
+  const name = roomVolumeName(roomId);
+  await getDocker().createVolume({
+    Name: name,
+    Labels: { [MANAGED_LABEL]: "true", [ROOM_LABEL]: roomId },
+  });
+  return name;
+}
+
+/** Volume'u siler. Yoksa sessizce geçer. */
+export async function removeRoomVolume(roomId: string): Promise<void> {
+  try {
+    await getDocker().getVolume(roomVolumeName(roomId)).remove({ force: true });
+  } catch (err) {
+    if ((err as { statusCode?: number }).statusCode !== 404) throw err;
+  }
 }
 
 export async function dockerAvailable(): Promise<boolean> {
@@ -95,6 +148,9 @@ export async function imageExists(image: string): Promise<boolean> {
 export async function startRoomContainer(spec: RoomContainerSpec): Promise<string> {
   const docker = getDocker();
   await stopRoomContainer(roomContainerName(spec.roomId));
+  // Volume container'dan ONCE var olmali; yoksa Docker onu sahipsiz yaratir
+  // ve sweeper'in aradigi etiketi tasimaz.
+  await ensureRoomVolume(spec.roomId);
 
   const container = await docker.createContainer(buildCreateOptions(spec));
   await container.start();

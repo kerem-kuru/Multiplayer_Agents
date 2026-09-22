@@ -113,6 +113,42 @@ export async function ensureRuntimeRows(
   );
 }
 
+/**
+ * Odadaki agent'ların uid ataması. Hafta 7: uid bir kez atanır ve DEĞİŞMEZ —
+ * uid değişmesi, o uid'e ait dosyaların bir anda başka bir agent'ın olması
+ * demek.
+ */
+export async function readUids(
+  roomId: string,
+  pool: pg.Pool = getPool(),
+): Promise<Record<string, number>> {
+  const res = await pool.query<{ agent_name: string; uid: number | null }>(
+    `SELECT agent_name, uid FROM agent_runtime WHERE room_id = $1`,
+    [roomId],
+  );
+  const out: Record<string, number> = {};
+  for (const r of res.rows) {
+    if (typeof r.uid === "number") out[r.agent_name] = r.uid;
+  }
+  return out;
+}
+
+/** uid ve branch'i yazar. `agent_runtime_uid` benzersiz indexi ikinci atamayı reddeder. */
+export async function writeUids(
+  roomId: string,
+  uids: Readonly<Record<string, number>>,
+  branches: Readonly<Record<string, string>> = {},
+  pool: pg.Pool = getPool(),
+): Promise<void> {
+  for (const [name, uid] of Object.entries(uids)) {
+    await pool.query(
+      `UPDATE agent_runtime SET uid = $3, branch = COALESCE($4, branch), updated_at = now()
+       WHERE room_id = $1 AND agent_name = $2`,
+      [roomId, name, uid, branches[name] ?? null],
+    );
+  }
+}
+
 export async function listRuntime(
   roomId: string,
   pool: pg.Pool = getPool(),

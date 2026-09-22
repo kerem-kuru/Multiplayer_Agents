@@ -32,6 +32,27 @@ export class GitkitError extends Error {
   }
 }
 
+/**
+ * Çalışma dizininden o deponun SAHİBİ olan Unix kullanıcısını türetir.
+ *
+ * Hafta 7, Değişmez Kural 3: bir agent'ın deposunda çalışan her işlem o
+ * agent'ın kimliğiyle çalışır — sunucunun checkpoint/diff çağrıları dahil.
+ * Root'la çalıştırmak, agent'ın `.git`'ine ektiği bir şeyin root yetkisiyle
+ * işlenmesi riskini geri getirirdi; ayrıca root'un bıraktığı dosyalar
+ * agent'ın bir sonraki git komutunu bozar.
+ *
+ * Türetme güvenli: config doğrulaması `workspace`in tam olarak
+ * `worktrees/<ad>` olmasını zorluyor (Adım 1). Eşleşmiyorsa bu bir programlama
+ * hatasıdır ve sessizce root'a düşmektense patlamalı.
+ */
+export function ownerOfWorkdir(workdir: string): string {
+  const m = /^\/room\/worktrees\/([^/]+)\/?$/.exec(workdir);
+  if (!m?.[1]) {
+    throw new Error(`worktree yolu beklenen biçimde değil: ${workdir}`);
+  }
+  return `agent-${m[1]}`;
+}
+
 async function gitkit<T>(
   container: string,
   workdir: string,
@@ -42,7 +63,7 @@ async function gitkit<T>(
     container,
     cmd: ["node", GITKIT_PATH, ...args, "--cwd", workdir],
     workdir,
-    user: "agent",
+    user: ownerOfWorkdir(workdir),
     timeoutMs,
   });
   if (res.exitCode !== 0) throw new GitkitError(args[0] ?? "?", res.exitCode, res.stderr);

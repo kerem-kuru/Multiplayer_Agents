@@ -1,0 +1,22 @@
+# Hafta 7 — iki agent, gercek izolasyon.
+#
+# `writable` yalnizca kendi worktree'si + contracts olabilir (Adim 1).
+# `readable` varsayilan BOS: frontend backend'in klasorunu GOREMEZ bile.
+version: 1
+name: "Hafta 7 odasi"
+agents:
+  - name: frontend
+    systemPrompt: "Sen bu odanin frontend gelistiricisisin. Kisa cevap ver."
+    workspace: worktrees/frontend
+    runtime: gemini
+    model: auto
+    toolsAllow: [read, edit, bash]
+    writable: [worktrees/frontend, contracts]
+
+  - name: backend
+    systemPrompt: "Sen bu odanin backend gelistiricisisin. Kisa cevap ver."
+    workspace: worktrees/backend
+    runtime: gemini
+    model: auto
+    toolsAllow: [read, edit, bash]
+    writable: [worktrees/backend, contracts]

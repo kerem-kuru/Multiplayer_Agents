@@ -15,9 +15,23 @@ import { execFile } from "node:child_process";
  *    bizim araçlarımız onu TETİKLEMEZ. `-c` ile verilen ayarlar depodaki
  *    config'i ezer.
  *
- * `safe.directory=*`: workspace bind mount üzerinden geliyor ve sahipliği
- * container kullanıcısıyla uyuşmayabilir — git "dubious ownership" deyip
- * durmasın.
+ */
+/**
+ * Her git çağrısına eklenen güvenlik bayrakları.
+ *
+ * Hafta 7'de `safe.directory=*` KALDIRILDI. O ayar git'in sahiplik kontrolünü
+ * kapatıyor — ama o kontrol tam da başkasına ait bir depoda git çalıştırmayı
+ * engellemek için var. Hafta 7'den beri her gitkit çağrısı deponun sahibi olan
+ * agent kullanıcısıyla yapılıyor, yani kontrol sorun çıkarmıyor. Çıkarıyorsa
+ * bu, YANLIŞ KULLANICIYLA çalıştırıldığının işaretidir ve ayarla gizlenmemeli,
+ * düzeltilmelidir.
+ *
+ * `protocol.file.allow=never`: `file://` ve yerel yol protokolü üzerinden
+ * klonlama/fetch, git'in geçmişte kod çalıştırma açıkları çıkmış yüzeyi.
+ * Checkpoint ve diff işlerinin hiçbirinin buna ihtiyacı yok.
+ *
+ * `submodule.recurse=false`: submodule'e inmek, agent'ın kontrol ettiği bir
+ * .gitmodules'ün bizi başka bir depoya götürmesi demek.
  */
 const SAFE = [
   "-c",
@@ -27,7 +41,9 @@ const SAFE = [
   "-c",
   "core.untrackedCache=false",
   "-c",
-  "safe.directory=*",
+  "protocol.file.allow=never",
+  "-c",
+  "submodule.recurse=false",
 ];
 
 export interface GitOptions {

@@ -24,6 +24,7 @@ import {
 import { containerStatus, roomContainerName } from "../docker/container.js";
 import { getRoomConfig, latestSession } from "../room/rooms.js";
 import { killStrayRunners, startRunnerExec, type RunnerExec } from "./exec.js";
+import { agentUser } from "../room-fs.js";
 import {
   ensureRuntimeRows,
   forceStopped,
@@ -412,8 +413,14 @@ export class AgentManager {
       exec = await startRunnerExec({
         container,
         workdir: `/room/${agent.workspace}`,
-        env,
-        user: "agent",
+        // HOME agent'a ÖZEL: SDK oturum dosyaları burada durur ve /home/agents/<ad>
+        // 0700, yani başka agent göremez. Ortak bir HOME, iki agent'ın oturum
+        // durumunu birbirine karıştırırdı.
+        env: { ...env, HOME: `/home/agents/${agent.name}` },
+        // İsimle veriliyor (uid ile değil): Docker ismi çözdüğünde /etc/group'taki
+        // EK GRUPLARI da yükler. uid verilseydi agent `rooms-contracts` ve
+        // `wtr-*` gruplarını almaz, contracts'a yazamazdı.
+        user: agentUser(agent.name),
         runnerPath: `/opt/runner/${agent.runtime}/dist/runner.js`,
       });
     } catch (err) {

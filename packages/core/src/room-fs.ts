@@ -1,4 +1,5 @@
 import type { RoomConfig } from "@agent-rooms/protocol";
+import { execCapture } from "./agents/exec.js";
 
 /**
  * Hafta 7, Adım 2 — izin planı.
@@ -204,4 +205,125 @@ export function planRoomFs(config: RoomConfig, uids: Readonly<Record<string, num
   dirs.push({ path: `/home/${INTEGRATOR}`, owner: INTEGRATOR, group: INTEGRATOR, mode: "0700" });
 
   return { users, groups, dirs };
+}
+
+/* ------------------------------------------------------------------ *
+ * Uygulayıcı — planı container içinde ROOT olarak yürütür.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Planı tek bir kabuk script'ine çevirir.
+ *
+ * Saf tutuldu: script METNİ Docker olmadan test edilebiliyor. Tek tek
+ * `docker exec` yerine tek script olmasının sebebi hız — 3 agentlı bir odada
+ * plan ~25 komut, her biri ayrı exec olsaydı oda açılışı saniyeler uzardı.
+ *
+ * İdempotent olmak ZORUNDA: container yeniden başladığında ve sweeper
+ * mutabakatında aynı plan tekrar uygulanıyor.
+ */
+export function fsPlanScript(plan: FsPlan): string {
+  const lines: string[] = ["set -eu"];
+
+  for (const g of plan.groups) {
+    // -f: grup zaten varsa hata verme.
+    lines.push(`groupadd -f -g ${g.gid} ${g.name}`);
+  }
+
+  for (const u of plan.users) {
+    lines.push(
+      `id -u ${u.name} >/dev/null 2>&1 || ` +
+        `useradd -u ${u.uid} -g ${u.gid} -d ${u.home} -M -s /bin/bash ${u.name}`,
+    );
+    // Ek grupları her seferinde YENİDEN yaz: YAML'dan bir `readable` satırı
+    // silindiğinde kullanıcının o gruptan da çıkması gerekiyor. `-a` ile
+    // eklemek, kaldırılan yetkinin sessizce kalması demekti.
+    lines.push(`usermod -G "${u.groups.join(",")}" ${u.name}`);
+  }
+
+  for (const d of plan.dirs) {
+    lines.push(`mkdir -p ${d.path}`);
+    // Sıra önemli: chown setgid bitini DÜŞÜRÜR, bu yüzden chmod sonra gelir.
+    lines.push(`chown ${d.owner}:${d.group} ${d.path}`);
+    lines.push(`chmod ${d.mode} ${d.path}`);
+  }
+
+  return lines.join("\n");
+}
+
+/** `stat -c` çıktısını planla karşılaştırmak için tek satırlık biçim. */
+export const STAT_FORMAT = "%n %U %G %a";
+
+/** "0750" → "750"; stat sekizli modu baştaki sıfır olmadan yazar. */
+export function normalizeMode(mode: string): string {
+  const trimmed = mode.replace(/^0+/, "");
+  return trimmed === "" ? "0" : trimmed;
+}
+
+export type FsDrift = { path: string; expected: string; actual: string };
+
+/**
+ * `stat` çıktısını planla karşılaştırır. Saf: metin girer, sapma listesi çıkar.
+ *
+ * Adım 9'daki izin denetimi ve Adım 3'ün kabul kriteri aynı fonksiyonu
+ * kullanıyor — "beklenen izin" tanımının iki kopyası olmasın.
+ */
+export function diffFsStat(plan: FsPlan, statOutput: string): FsDrift[] {
+  const seen = new Map<string, string>();
+  for (const raw of statOutput.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const parts = line.split(/\s+/);
+    if (parts.length < 4) continue;
+    const [path, owner, group, mode] = parts as [string, string, string, string];
+    seen.set(path, `${owner}:${group} ${normalizeMode(mode)}`);
+  }
+
+  const drift: FsDrift[] = [];
+  for (const d of plan.dirs) {
+    const expected = `${d.owner}:${d.group} ${normalizeMode(d.mode)}`;
+    const actual = seen.get(d.path);
+    if (actual === undefined) {
+      drift.push({ path: d.path, expected, actual: "yok" });
+    } else if (actual !== expected) {
+      drift.push({ path: d.path, expected, actual });
+    }
+  }
+  return drift;
+}
+
+/**
+ * Planı container içinde ROOT olarak uygular.
+ *
+ * Root gerekiyor: `useradd`/`chown` başka türlü yapılamaz. Bu, "agent'ın
+ * deposunda root git çalıştırma" kuralıyla çelişmiyor — burada git yok, kimlik
+ * ve izin kurulumu var ve agent süreçleri henüz başlamadı.
+ */
+export async function applyFsPlan(container: string, plan: FsPlan): Promise<void> {
+  const res = await execCapture({
+    container,
+    user: "root",
+    cmd: ["sh", "-c", fsPlanScript(plan)],
+    timeoutMs: 120_000,
+  });
+  if (res.exitCode !== 0) {
+    throw new Error(
+      `izin planı uygulanamadı (çıkış ${res.exitCode}): ${res.stderr.trim() || res.stdout.trim()}`,
+    );
+  }
+}
+
+/**
+ * Planla gerçeği karşılaştırır. Boş dizi = kayma yok.
+ *
+ * Adım 3'ün kabul kriteri ve Adım 9'un periyodik denetimi aynı yerden okuyor.
+ */
+export async function verifyFsPlan(container: string, plan: FsPlan): Promise<FsDrift[]> {
+  const paths = plan.dirs.map((d) => d.path).join(" ");
+  const res = await execCapture({
+    container,
+    user: "root",
+    cmd: ["sh", "-c", `stat -c '${STAT_FORMAT}' ${paths} 2>/dev/null || true`],
+    timeoutMs: 30_000,
+  });
+  return diffFsStat(plan, res.stdout);
 }

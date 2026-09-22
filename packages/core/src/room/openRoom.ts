@@ -1,18 +1,19 @@
-import path from "node:path";
 import type pg from "pg";
 import type { Actor, RoomConfig, RoomEvent } from "@agent-rooms/protocol";
 import { getPool } from "../db/pool.js";
 import { appendEvent } from "../db/eventStore.js";
 import {
   imageExists,
+  removeRoomVolume,
   roomContainerName,
+  roomVolumeName,
   startRoomContainer,
   stopRoomContainer,
 } from "../docker/container.js";
-import { ensureRuntimeRows } from "../agents/runtime.js";
+import { applyFsPlan, assignUids, planRoomFs } from "../room-fs.js";
+import { ensureRuntimeRows, readUids, writeUids } from "../agents/runtime.js";
 import { ensureDriverRows } from "../driver.js";
 import { setRoomAllowPatterns } from "../redaction.js";
-import { scaffoldRoomLayout } from "./layout.js";
 import {
   attachContainer,
   createRoom,
@@ -29,13 +30,18 @@ import {
  *
  * Sıra önemli:
  *   1. oda + oturum kaydı  — event yazabilmek için önce oturum gerekir
- *   2. klasör düzeni       — container mount'u buna bağlanacak
+ *   2. uid ataması         — DB'ye yazılır, bir daha değişmez
  *   3. room.created        — container açılmasa bile bu event yazılmış olmalı
- *   4. container
- *   5. session.started     — containerId'yi taşır, o yüzden en sonda
+ *   4. container (volume)  — /room artık named volume, host klasörü değil
+ *   5. izin planı          — root exec: kullanıcılar, gruplar, 0750 klasörler
+ *   6. session.started     — containerId'yi taşır, o yüzden en sonda
  *
- * 4. adım patlarsa 5 hiç yazılmaz; yerine `session.ended{reason:"crashed"}`
+ * 4-5 patlarsa 6 hiç yazılmaz; yerine `session.ended{reason:"crashed"}`
  * düşer. Log'da "başladı" görünüp aslında başlamamış bir oturum kalmaz.
+ *
+ * Hafta 7: host tarafında klasör AÇILMIYOR. `scaffoldRoomLayout` kaldırıldı —
+ * `/room` bir named volume ve host onu göremiyor (Karar 2). Klasörleri izin
+ * planı container İÇİNDE yaratıyor, doğru sahip ve modla.
  */
 
 export interface OpenRoomInput {
@@ -53,8 +59,12 @@ export interface OpenRoomInput {
 export interface OpenRoomResult {
   room: RoomRecord;
   session: SessionRecord;
-  roomRoot: string;
+  /** Oda volume'unun adı — host'ta klasör yok (Hafta 7, Karar 2). */
+  volume: string;
+  /** Container içindeki klasörler, plandan. */
   dirs: string[];
+  /** Agent adı → Unix uid. DB'ye yazıldı, bir daha değişmeyecek. */
+  uids: Record<string, number>;
   containerId: string | null;
   containerName: string | null;
   events: RoomEvent[];
@@ -77,10 +87,23 @@ export async function openRoom(input: OpenRoomInput): Promise<OpenRoomResult> {
   // geçiyor ve odanın kendi `allow_patterns`'ı o anda bilinmeli.
   setRoomAllowPatterns(room.id, config.redaction?.allow_patterns ?? []);
   const session = await createSession(room.id, pool);
-  const roomRoot = path.join(roomsDataDir, room.id);
-  const dirs = await scaffoldRoomLayout(roomRoot, config);
   // YAML'daki her agent için bir çalışma durumu satırı — hepsi 'stopped'.
   await ensureRuntimeRows(room.id, config.agents.map((a) => a.name), pool);
+
+  /**
+   * uid ataması container'dan ÖNCE ve DB'ye yazılarak yapılır.
+   *
+   * Sonra yapılsaydı: container açılır, plan uygulanır, sonra DB yazımı
+   * patlarsa dosyalar bir uid'e ait olur ama kimse hangisi olduğunu
+   * bilmez. Önce yazmak, en kötü ihtimalle kullanılmayan bir uid bırakır.
+   */
+  const uids = assignUids(
+    config.agents.map((a) => a.name),
+    await readUids(room.id, pool),
+  );
+  await writeUids(room.id, uids, {}, pool);
+  const plan = planRoomFs(config, uids);
+  const dirs = plan.dirs.map((d) => d.path);
   /**
    * Ve bir sürücü satırı — `user_id = NULL`, yani "sürücü yok".
    *
@@ -108,8 +131,9 @@ export async function openRoom(input: OpenRoomInput): Promise<OpenRoomResult> {
     return {
       room,
       session,
-      roomRoot,
+      volume: roomVolumeName(room.id),
       dirs,
+      uids,
       containerId: null,
       containerName: null,
       events,
@@ -124,8 +148,16 @@ export async function openRoom(input: OpenRoomInput): Promise<OpenRoomResult> {
 
   let containerId: string | null = null;
   try {
-    containerId = await startRoomContainer({ roomId: room.id, roomRoot, image });
+    containerId = await startRoomContainer({
+      roomId: room.id,
+      image,
+      agentCount: config.agents.length,
+    });
     await attachContainer(session.id, containerId, pool);
+
+    // İzolasyonun kurulduğu yer. Buradan sonra her agent kendi Unix
+    // kullanıcısıdır ve kendi klasörü dışına yazamaz.
+    await applyFsPlan(containerId, plan);
 
     events.push(
       await appendEvent(
@@ -141,14 +173,17 @@ export async function openRoom(input: OpenRoomInput): Promise<OpenRoomResult> {
     return {
       room,
       session,
-      roomRoot,
+      volume: roomVolumeName(room.id),
       dirs,
+      uids,
       containerId,
       containerName: roomContainerName(room.id),
       events,
     };
   } catch (err) {
     if (containerId) await stopRoomContainer(containerId);
+    // Yarım kalmış oda volume'u bırakma: sweeper'a iş çıkarmadan burada sil.
+    await removeRoomVolume(room.id).catch(() => undefined);
     await appendEvent(
       {
         ...base,

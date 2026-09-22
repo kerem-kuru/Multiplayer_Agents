@@ -27,26 +27,28 @@ describe("container create seçenekleri", () => {
     expect(roomContainerName(roomId)).toBe("agent-rooms-room-c62b1a70");
   });
 
-  it("tek bind: oda kökü /room'a bağlanır", () => {
-    const opts = buildCreateOptions({
-      roomId,
-      roomRoot: "C:\\rooms\\x",
-      image: "agent-rooms/room:dev",
-    });
-    expect(opts.HostConfig?.Binds).toEqual([`C:/rooms/x:${ROOM_MOUNT}`]);
+  // Hafta 7, Karar 2: bind mount KALDIRILDI. Docker Desktop'ta (Windows/macOS)
+  // bind mount uzerinde chown ve izin bitleri guvenilir calismiyor; izolasyon
+  // Linux'ta calisip Mac'te sessizce calismayabilirdi.
+  it("named volume /room'a baglanir — bind mount yok", () => {
+    const opts = buildCreateOptions({ roomId, image: "agent-rooms/room:dev" });
+    expect(opts.HostConfig?.Binds).toBeUndefined();
+    expect(opts.HostConfig?.Mounts).toEqual([
+      { Type: "volume", Source: `room-${roomId}`, Target: ROOM_MOUNT },
+    ]);
     expect(opts.WorkingDir).toBe(ROOM_MOUNT);
     expect(opts.Image).toBe("agent-rooms/room:dev");
     expect(opts.name).toBe("agent-rooms-room-c62b1a70");
   });
 
   it("oda kimliği label olarak geçer — temizlik bunu filtreler", () => {
-    const opts = buildCreateOptions({ roomId, roomRoot: "/r", image: "img" });
+    const opts = buildCreateOptions({ roomId, image: "img" });
     expect(opts.Labels?.[ROOM_LABEL]).toBe(roomId);
     expect(opts.Labels?.[MANAGED_LABEL]).toBe("true");
   });
 
   it("kaynak sınırları konur — döngüye giren agent makineyi yemesin", () => {
-    const opts = buildCreateOptions({ roomId, roomRoot: "/r", image: "img" });
+    const opts = buildCreateOptions({ roomId, image: "img" });
     expect(opts.HostConfig?.Memory).toBe(2048 * 1024 * 1024);
     expect(opts.HostConfig?.NanoCpus).toBe(2_000_000_000);
     expect(opts.HostConfig?.PidsLimit).toBe(512);
