@@ -1,4 +1,5 @@
 export * from "./ids.js";
+export * from "./paths.js";
 export * from "./diff.js";
 export * from "./runtime.js";
 export * from "./tools.js";

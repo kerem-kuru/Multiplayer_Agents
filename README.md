@@ -625,6 +625,54 @@ Docker yeniden başlatıldığında oda container'ları `Exited` kalıyor; sunuc
 bilmesi gereken şey "oda kapandı, yeni oda aç" ya da container'ın kendiliğinden kaldırılması.
 Dogfood yeni odada yapıldı; bu madde **Hafta 6'ya borç** olarak taşındı.
 
+## Hafta 6 dogfood notları
+
+22 Eylül, iki hesap (`deneme201` owner, `deneme50` member), Gemini
+`gemini-3.1-flash-lite`, gerçek iş: sıfırdan bir `index.html`. Sayılar event
+log'dan ölçüldü, gözle değil.
+
+| Soru | Cevap | Kanıt |
+| --- | --- | --- |
+| Yorumdan düzeltmeye kaç sn? | **32 sn** | `review.submitted` 13:44:18 → `file.changed` 13:44:50 |
+| Kaç yorum yanlış satıra uygulandı? | **0** | çapa `index.html:5`, `lineText` = `<title>Merhaba</title>` — doğru satır |
+| "Eskimiş" işareti doğru muydu? | **ölçülmedi** | yorum 13:44:25'te elle çözüldü, düzeltme 13:44:50'de geldi; `outdated` durumu hiç tetiklenmedi |
+| Composer'a dönmek zorunda kalındı mı? | **evet, 1 kez** | son istek (13:46:31, "buton ekle") diff'ten değil composer'dan gitti |
+
+**32 saniye, 30 sn uyarı eşiğinin hemen üstünde** — kapıda (`gate:w6:agent`) aynı ölçüm
+13,7 sn idi. Fark ürünün yavaşlaması değil: agent düzeltmeden önce Gemini CLI'nin kendi
+`update_topic` defter tutma tool'unu çağırdı (13:44:32) ve 18 saniyeyi ona harcadı. Yani
+aradaki fark modelin araya soktuğu bir tur, bizim kod yolumuz değil.
+
+**Dogfood'un asıl kanıtladığı şey — agent kime cevap verdiğini biliyor.** Yorumu
+`deneme50` yazdı, sürücü `deneme201` idi. Agent cevabını `[deneme50]: Yorumunla ilgili
+açıklamam...` diye **yorumu yazana** adresledi, sürücüye değil. Hafta 5'in çok kişili
+bağlam iddiası ilk kez iki gerçek insanla doğrulandı.
+
+**İkinci gözlem: agent yorumu körü körüne uygulamadı.** Yorum `<title>Merhaba</title>`
+satırına "bunu yuvarlak kırmızı bir div'in içine yaz" diyordu. Agent `<title>`in `<head>`
+içinde olduğunu ve yalnızca metin taşıyabileceğini açıklayıp itiraz etti, sonra isteneni
+gövdede yaptı. Çapa doğruydu; yanlış olan insanın seçtiği satırdı. İnceleme akışının
+"agent'a emir değil bağlam veriyoruz" tasarımı burada işe yaradı.
+
+**Açık kalan:** `outdated` çapa durumu dogfood'da tetiklenmedi. Kapıda 12/12 yeşil
+(`gate:w6:agent`), yani mekanizma ölçülü; eksik olan iki insanla tekrarı. Hafta 7
+dogfood'unda tekrar denenecek.
+
+### Bir bulgu: `GEMINI.md` diff'te agent'ın değişikliği gibi görünüyor
+
+İlk `diff.updated` event'inde (seq 15) dosya listesi `GEMINI.md, index.html` idi. `GEMINI.md`
+runner'ın her başlangıçta workspace'e yazdığı rol bağlamı dosyası — altyapı, agent'ın işi
+değil. Taban checkpoint'i runner başlamadan önce alındığı için dosya "agent ekledi" gibi
+görünüyor. Artımlı filtre doğru çalışıyor (sonraki iki diff'te yok) ama ilk diff'i
+kirletiyor. Çözüm yeri: `.git/info/exclude` ya da diff'in yok sayma listesi — Hafta 7'de
+`contracts/` takibiyle birlikte ele alınacak.
+
+### Gemini 503 — kota değil, geçici yük
+
+Dogfood sırasında runner `503 "This model is currently experiencing high demand"` aldı ve
+kendi backoff'uyla toparladı; turn düşmedi. `429` (kota) ile karıştırılmamalı: 429 günlük
+hakkın bitmesi, 503 geçici. `summarizeGeminiError` ikisini de sebebi başa alarak gösteriyor.
+
 ## Karar notları
 
 Hafta 1 görev tanımından bilinçli olarak ayrılan noktalar ve gerekçeleri.

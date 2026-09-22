@@ -29,12 +29,14 @@ describe("rol konfigürasyonu", () => {
     expect(digest).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  // Hafta 7: üçüncü agent artık journal'a yazamaz (journal root:root 0755).
+  // Yazılabilir tek iki şey: kendi worktree'si ve contracts.
   it("agent sayısı dizi uzunluğundan gelir — üçüncüyü eklemek tek blok", () => {
     const { config } = parseRoomConfig(minimal);
     expect(config.agents.map((a) => a.name)).toEqual(["frontend", "backend"]);
 
     const withThird = parseRoomConfig(
-      `${minimal}  - name: security\n    systemPrompt: "security"\n    workspace: worktrees/security\n    writable: [journal]\n`,
+      `${minimal}  - name: security\n    systemPrompt: "security"\n    workspace: worktrees/security\n    writable: [worktrees/security, contracts]\n`,
     );
     expect(withThird.config.agents).toHaveLength(3);
     expect(findAgent(withThird.config, "security")?.workspace).toBe("worktrees/security");
