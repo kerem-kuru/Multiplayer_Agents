@@ -18,6 +18,7 @@ export * from "./repo.js";
 export * from "./conflicts.js";
 export * from "./sweeper.js";
 export * from "./isolation.js";
+export * from "./reads.js";
 export * from "./reviews.js";
 export * from "./docker/container.js";
 export * from "./room/journal.js";

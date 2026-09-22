@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CommentView, TurnItem, TurnView } from "@agent-rooms/view";
-import { formatTool, stripAnsi } from "../model/format-tool.js";
+import { formatTool, stripAnsi } from "@agent-rooms/view";
 
 /**
  * Küratörlü akış — kağıt malzemesi.

@@ -353,3 +353,18 @@ export const resolveComment = (roomId: string, commentId: string): Promise<unkno
 
 export const reopenComment = (roomId: string, commentId: string): Promise<unknown> =>
   json(`/rooms/${roomId}/comments/${commentId}/reopen`, { method: "POST" });
+
+/**
+ * Okunmamış işaretleri (Hafta 7).
+ *
+ * Kullanıcıya özel durum — event akışında gelmiyor, ayrı uçtan okunuyor.
+ */
+export const fetchReads = (roomId: string): Promise<Record<string, number>> =>
+  json<{ reads: Record<string, number> }>(`/rooms/${roomId}/reads`).then((r) => r.reads);
+
+/** "Buraya kadar gördüm." Sunucu değeri GERİYE ALMAZ. */
+export const markSeen = (roomId: string, agent: string, seq: number): Promise<unknown> =>
+  json(`/rooms/${roomId}/agents/${agent}/seen`, {
+    method: "POST",
+    body: JSON.stringify({ seq }),
+  });

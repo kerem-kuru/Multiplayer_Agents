@@ -23,7 +23,16 @@ import { anchorOf, type AnchorState } from "./patch.js";
  * Projeksiyon sürümü. Bu dosyadaki üretim mantığı değiştiğinde ARTIRILIR:
  * eski sürümle üretilmiş snapshot'lar okunmaz, tam replay'e düşülür.
  */
-export const SNAPSHOT_VERSION = 5;
+/**
+ * Snapshot sürümü.
+ *
+ * Yalnızca görünümün ŞEKLİ değişince değil, DAVRANIŞI değişince de artar.
+ * 22 Eylül'de bu unutuldu: oda düzeyi event'lerin işlenmesi düzeltildi ama
+ * sürüm 5'te kaldı, bu yüzden eski (hatalı) snapshot'lar taban olarak
+ * kullanılmaya devam etti ve düzeltme hiç görünmedi — kod doğruydu, veri
+ * bayattı. Sürüm artınca eski snapshot'lar yok sayılıp log baştan oynatılıyor.
+ */
+export const SNAPSHOT_VERSION = 6;
 
 export type AgentStatus = "stopped" | "starting" | "idle" | "busy" | "crashed" | "failed";
 
@@ -327,6 +336,38 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
         found.state = payload.decision === "granted" ? "granted" : "denied";
         found.by = userRef(payload.by);
       }
+      continue;
+    }
+
+    /*
+     * ODA DÜZEYİ event'ler — `agent` alanları YOK, o yüzden aşağıdaki agent
+     * filtresinden ÖNCE işlenmeleri gerekiyor.
+     *
+     * 22 Eylül'de tam burada bir hata çıktı: bu üçü switch'in içine yazılmıştı
+     * ve `if (!agentName) continue` satırı onlara hiç sıra gelmemesine yol
+     * açıyordu. Sonuç sessizdi — çakışma uyarısı ekranda HİÇ görünmeyecekti.
+     * Birim test de yakalamazdı: testler `detectConflicts`i doğrudan
+     * çağırıyordu, projeksiyondan geçirmeden.
+     */
+    if (e.type === "room.repo_initialized") {
+      if (typeof payload.baseSha === "string") view.baseSha = payload.baseSha;
+      continue;
+    }
+    if (e.type === "conflict.detected") {
+      const id = typeof payload.conflictId === "string" ? payload.conflictId : null;
+      if (id && !view.conflicts.some((c) => c.id === id)) {
+        view.conflicts.push({
+          id,
+          kind: payload.kind === "contracts_race" ? "contracts_race" : "path_overlap",
+          agents: Array.isArray(payload.agents) ? (payload.agents as string[]) : [],
+          paths: Array.isArray(payload.paths) ? (payload.paths as string[]) : [],
+        });
+      }
+      continue;
+    }
+    if (e.type === "conflict.cleared") {
+      const id = typeof payload.conflictId === "string" ? payload.conflictId : null;
+      if (id) view.conflicts = view.conflicts.filter((c) => c.id !== id);
       continue;
     }
 
@@ -653,25 +694,6 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
         break;
       }
 
-      case "conflict.detected": {
-        const p = e.payload as { conflictId?: unknown; kind?: unknown; agents?: unknown; paths?: unknown };
-        if (typeof p.conflictId === "string" && !view.conflicts.some((c) => c.id === p.conflictId)) {
-          view.conflicts.push({
-            id: p.conflictId,
-            kind: p.kind === "contracts_race" ? "contracts_race" : "path_overlap",
-            agents: Array.isArray(p.agents) ? (p.agents as string[]) : [],
-            paths: Array.isArray(p.paths) ? (p.paths as string[]) : [],
-          });
-        }
-        break;
-      }
-
-      case "conflict.cleared": {
-        const id = (e.payload as { conflictId?: unknown }).conflictId;
-        if (typeof id === "string") view.conflicts = view.conflicts.filter((c) => c.id !== id);
-        break;
-      }
-
       case "isolation.violation": {
         const p = e.payload as {
           agent?: unknown; path?: unknown; expected?: unknown; actual?: unknown; fixed?: unknown;
@@ -688,13 +710,6 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
           // Son 5: tamami tutulsaydi uzun suren bir oda snapshot'i sisirirdi.
           if (a.isolationViolations.length > 5) a.isolationViolations.shift();
         }
-        break;
-      }
-
-      case "room.repo_initialized": {
-        // Merkez depo kuruldu; tüm klonlar bu commit'ten çıktı.
-        const sha = (e.payload as { baseSha?: unknown }).baseSha;
-        if (typeof sha === "string") view.baseSha = sha;
         break;
       }
 

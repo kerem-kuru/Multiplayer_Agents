@@ -9,6 +9,7 @@ import {
   type RoomSummary,
 } from "./lib/api.js";
 import { RoomPage } from "./components/RoomPage.js";
+import { RoomView } from "./pages/RoomView.js";
 import { Login } from "./pages/Login.js";
 import { AcceptInvite } from "./pages/AcceptInvite.js";
 
@@ -16,11 +17,38 @@ import { AcceptInvite } from "./pages/AcceptInvite.js";
  * Uygulama kabuğu ve üç yol:
  *   /auth/callback?token=  → magic link'i tüket, sonra devam et
  *   /join?token=           → daveti kabul et, odaya gir
- *   /?room=<id>            → oda
+ *   /rooms/<id>                       → oda görünümü (kartlar)
+ *   /rooms/<id>/agents/<ad>/<sekme>   → agent detayı
+ *   /?room=<id>                       → eski yol, oda görünümüne yönlenir
  *
- * Yönlendirici yok: üç yol için kütüphane eklemek, taşıdığı bakım yükü
- * kadar bile fayda vermezdi.
+ * Yönlendirici yok: bu kadar yol için kütüphane eklemek, taşıdığı bakım yükü
+ * kadar bile fayda vermezdi. Tarayıcı geri düğmesi `popstate` ile çalışıyor —
+ * iki seviye arasında geri gitmek doğal olmalı (Hafta 7, Adım 14).
  */
+
+export type DetailTab = "ozet" | "diff" | "terminal";
+
+/** Adres çubuğundan seviye çıkarımı. */
+export function parseRoute(pathname: string, search: string): {
+  roomId: string | null;
+  agent: string | null;
+  tab: DetailTab;
+} {
+  const m = /^\/rooms\/([^/]+)(?:\/agents\/([^/]+)(?:\/([^/]+))?)?\/?$/.exec(pathname);
+  if (m) {
+    const tab = m[3];
+    return {
+      roomId: m[1] ?? null,
+      agent: m[2] ?? null,
+      tab: tab === "diff" || tab === "terminal" ? tab : "ozet",
+    };
+  }
+  return {
+    roomId: new URLSearchParams(search).get("room"),
+    agent: null,
+    tab: "ozet",
+  };
+}
 
 type Phase = "loading" | "login" | "ready";
 
@@ -28,6 +56,8 @@ export function App() {
   const [user, setUser] = useState<Me | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
+  const [agent, setAgent] = useState<string | null>(null);
+  const [tab, setTab] = useState<DetailTab>("ozet");
   const [roomId, setRoomId] = useState<string | null>(null);
   const [inviteToken, setInviteToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,8 +114,16 @@ export function App() {
         setNext(`/join?token=${joinToken}`);
       }
 
-      const roomParam = new URLSearchParams(location.search).get("room");
-      if (roomParam) setRoomId(roomParam);
+      const route = parseRoute(location.pathname, location.search);
+      if (route.roomId) {
+        setRoomId(route.roomId);
+        setAgent(route.agent);
+        setTab(route.tab);
+        // Eski `/?room=` yolunu yeni adrese tasi.
+        if (location.pathname !== `/rooms/${route.roomId}`) {
+          history.replaceState(null, "", `/rooms/${route.roomId}`);
+        }
+      }
 
       try {
         const current = await me();
@@ -103,8 +141,45 @@ export function App() {
   const open = (id: string): void => {
     setInviteToken(null);
     setRoomId(id);
-    history.replaceState(null, "", `/?room=${id}`);
+    setAgent(null);
+    history.pushState(null, "", `/rooms/${id}`);
   };
+
+  /** Karta tiklayinca: seviye 2. Geri dugmesi dogal calissin diye pushState. */
+  const openAgent = (name: string): void => {
+    if (!roomId) return;
+    setAgent(name);
+    setTab("ozet");
+    history.pushState(null, "", `/rooms/${roomId}/agents/${name}/ozet`);
+  };
+
+  const changeTab = (next: DetailTab): void => {
+    if (!roomId || !agent) return;
+    setTab(next);
+    history.replaceState(null, "", `/rooms/${roomId}/agents/${agent}/${next}`);
+  };
+
+  const backToRoom = (): void => {
+    if (!roomId) return;
+    setAgent(null);
+    history.pushState(null, "", `/rooms/${roomId}`);
+  };
+
+  /*
+   * Tarayici geri/ileri: iki seviye arasinda gezinme adres cubuguna yazildigi
+   * icin geri dugmesi tek basina calisiyor; tek yapmamiz gereken durumu
+   * adresten yeniden okumak.
+   */
+  useEffect(() => {
+    const onPop = (): void => {
+      const r = parseRoute(location.pathname, location.search);
+      setRoomId(r.roomId);
+      setAgent(r.agent);
+      setTab(r.tab);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   if (phase === "loading") {
     return <p style={{ padding: 24, color: "var(--ink-soft)" }}>Yükleniyor…</p>;
@@ -123,15 +198,34 @@ export function App() {
   }
 
   if (roomId) {
+    const toRoomList = (): void => {
+      setRoomId(null);
+      setAgent(null);
+      history.pushState(null, "", "/");
+      loadRooms();
+    };
+
+    // Seviye 2 — agent detayi.
+    if (agent) {
+      return (
+        <RoomPage
+          roomId={roomId}
+          meId={user?.id ?? null}
+          agentName={agent}
+          tab={tab}
+          onTabChange={changeTab}
+          onBack={backToRoom}
+        />
+      );
+    }
+
+    // Seviye 1 — kart izgarasi. Ham cikti YOK.
     return (
-      <RoomPage
+      <RoomView
         roomId={roomId}
         meId={user?.id ?? null}
-        onBack={() => {
-          setRoomId(null);
-          history.replaceState(null, "", "/");
-          loadRooms();
-        }}
+        onBack={toRoomList}
+        onOpenAgent={openAgent}
       />
     );
   }

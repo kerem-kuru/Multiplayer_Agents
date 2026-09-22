@@ -3,7 +3,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { TurnView } from "@agent-rooms/view";
-import { SHELL_TOOLS } from "../model/format-tool.js";
+import { SHELL_TOOLS } from "@agent-rooms/view";
 
 /**
  * Ham terminal — ekran malzemesi.

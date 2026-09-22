@@ -4,6 +4,7 @@ import {
   listAgents,
   requestAccess,
   resolveAccessRequest,
+  markSeen,
   setPresence,
   startAgent,
   stopAgent,
@@ -37,19 +38,49 @@ const CONNECTION_LABEL: Record<Connection, string> = {
   offline: "bağlantı yok",
 };
 
+/**
+ * Hafta 7, Adım 14 — agent detayı (seviye 2).
+ *
+ * Hafta 3-6'daki oda sayfası buydu; artık TEK bir agent'a odaklanıyor ve
+ * hangi agent'ın açık olduğunu ADRES söylüyor (`/rooms/<id>/agents/<ad>/<sekme>`).
+ * Böylece tarayıcı geri düğmesi iki seviye arasında doğal çalışıyor ve bir
+ * bağlantı paylaşıldığında karşı taraf aynı yeri açıyor.
+ *
+ * Composer, kuyruk ve sürücü BURADA kalıyor — oda görünümünde yok.
+ */
 export function RoomPage({
   roomId,
   onBack,
   meId,
+  agentName,
+  tab: tabProp,
+  onTabChange,
 }: {
   roomId: string;
   onBack: () => void;
   meId: string | null;
+  /** Rotadan gelen agent. Verilince kenar çubuğu yerine "← Oda" gösterilir. */
+  agentName?: string | null;
+  tab?: "ozet" | "diff" | "terminal";
+  onTabChange?: (t: "ozet" | "diff" | "terminal") => void;
 }) {
   const { view, connection, lastSeq, people, connectionId, reconnect } = useEventStream(roomId);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [tab, setTab] = useState<"feed" | "diff" | "terminal">("feed");
+  const [selectedLocal, setSelected] = useState<string | null>(null);
+  // Rotadan gelen agent her zaman kazanır: adres tek doğru kaynak.
+  const selected = agentName ?? selectedLocal;
+  const [tabLocal, setTabLocal] = useState<"feed" | "diff" | "terminal">("feed");
+  /*
+   * Sekme adı dışarıda "ozet", içeride "feed": Hafta 3'teki etkinlik akışının
+   * yeni adı Özet. Bileşenin içindeki adı değiştirmek 20 satırı dokunmadan
+   * bırakmak için eşleniyor.
+   */
+  const tab: "feed" | "diff" | "terminal" =
+    tabProp === undefined ? tabLocal : tabProp === "ozet" ? "feed" : tabProp;
+  const setTab = (t: "feed" | "diff" | "terminal"): void => {
+    if (onTabChange) onTabChange(t === "feed" ? "ozet" : t);
+    else setTabLocal(t);
+  };
   /**
    * Etkinlik akışından "bu dosyaya git" isteği. Hafta 3'teki tool satırında
    * `file.changed` olan bir dosyaya tıklanınca Diff sekmesi açılıp o dosyaya
@@ -110,6 +141,25 @@ export function RoomPage({
     void setPresence(roomId, selected, connectionId).catch(() => undefined);
   }, [roomId, selected, connectionId]);
 
+  /*
+   * "Buraya kadar gördüm" (Hafta 7, Adım 12).
+   *
+   * Üç koşul birden: detay açık, bir agent seçili ve SEKME GÖRÜNÜR. Arka
+   * planda duran bir sekmenin okundu işaretlemesi, kullanıcı bakmadığı hâlde
+   * okunmamış noktasını söndürürdü.
+   *
+   * 5 sn debounce: koşan bir agent saniyede birkaç event üretiyor; her birinde
+   * POST atmak sunucuya gereksiz yük.
+   */
+  useEffect(() => {
+    if (!selected || lastSeq <= 0) return;
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    const t = setTimeout(() => {
+      void markSeen(roomId, selected, lastSeq).catch(() => undefined);
+    }, 5000);
+    return () => clearTimeout(t);
+  }, [roomId, selected, lastSeq]);
+
   // Agent listesi config'ten gelir; sayı hiçbir yerde sabit değil.
   useEffect(() => {
     let alive = true;
@@ -149,8 +199,8 @@ export function RoomPage({
           background: "var(--paper)",
         }}
       >
-        <button onClick={onBack}>← odalar</button>
-        <strong className="mono">{roomId.slice(0, 8)}</strong>
+        <button onClick={onBack}>{agentName ? "← Oda" : "← odalar"}</button>
+        <strong className="mono">{agentName ?? roomId.slice(0, 8)}</strong>
         <span style={{ marginLeft: "auto" }}>
           <PresenceBar people={people} meId={meId} />
         </span>
@@ -164,8 +214,12 @@ export function RoomPage({
       {sharing && <ShareDialog roomId={roomId} onClose={() => setSharing(false)} />}
 
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-        {/* AgentBar — her zaman agents.map() */}
-        <nav
+        {/*
+          AgentBar — yalnızca ESKİ tek seviyeli kullanımda. Hafta 7'de agent
+          seçimi oda görünümünün (kartların) işi; detayda kenar çubuğu
+          göstermek aynı işi iki yerde yapmak olurdu.
+        */}
+        {!agentName && <nav
           style={{
             width: 190,
             borderRight: "1px solid var(--rule)",
@@ -239,7 +293,7 @@ export function RoomPage({
               )}
             </div>
           )}
-        </nav>
+        </nav>}
 
         <main style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
           {/* Agent başlığı: sürücü, kesme ve kuyruk durumu burada. */}

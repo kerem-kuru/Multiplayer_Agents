@@ -35,7 +35,9 @@ import {
   readJournal,
   archiveRoom,
   execCapture,
-  getAllowPatterns,} from "@agent-rooms/core";
+  getAllowPatterns,
+  markSeen,
+  readMarks,} from "@agent-rooms/core";
 import { loadApiConfig, resolveConfigPath, type ApiConfig } from "./config.js";
 import { HttpError } from "./http-error.js";
 import {
@@ -82,6 +84,7 @@ const EventsQuery = z.object({
 });
 
 const MemberRoleBody = z.object({ role: z.enum(["owner", "member", "viewer"]) }).strict();
+const SeenBody = z.object({ seq: z.number().int().nonnegative() }).strict();
 
 const PresenceBody = z
   .object({
@@ -286,6 +289,29 @@ export function createApp(
       path: rel,
       content: redactValue(res.stdout, { allowPatterns: getAllowPatterns(room.id) }).text,
     });
+  });
+
+  /**
+   * Okunmamış işaretleri (Hafta 7, Adım 12).
+   *
+   * Kullanıcıya özel durum: event log'a yazılmıyor.
+   */
+  app.get("/rooms/:id/reads", async (c) => {
+    const { user } = await requireRoom(c, c.req.param("id"));
+    return c.json({ reads: await readMarks(user.id, c.req.param("id")) });
+  });
+
+  /**
+   * "Buraya kadar gördüm." Detay sayfası açıkken ve sekme görünürken çağrılır
+   * (istemcide 5 sn debounce). Değer GERİYE GİTMEZ — `markSeen` GREATEST ile
+   * uyguluyor, yani iki sekmenin çağrı sırası önemsiz.
+   */
+  app.post("/rooms/:id/agents/:aid/seen", async (c) => {
+    const { user } = await requireRoom(c, c.req.param("id"));
+    const body = SeenBody.safeParse(await c.req.json().catch(() => ({})));
+    if (!body.success) throw new HttpError(400, "seq alanı gerekli (tam sayı)");
+    const seq = await markSeen(user.id, c.req.param("id"), c.req.param("aid"), body.data.seq);
+    return c.json({ agent: c.req.param("aid"), lastSeenSeq: seq });
   });
 
   app.get("/rooms/:id", async (c) => {

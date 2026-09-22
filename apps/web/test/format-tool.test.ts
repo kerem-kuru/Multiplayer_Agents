@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SHELL_TOOLS, formatTool, stripAnsi } from "../src/model/format-tool.js";
+import { SHELL_TOOLS, formatTool, stripAnsi } from "@agent-rooms/view";
 
 /**
  * Tool özeti UI'ın en çok okunan satırı: listede her tool için TEK satır
