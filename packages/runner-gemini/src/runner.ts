@@ -12,6 +12,7 @@ import {
   RunnerCommand,
   RunnerOutput,
   geminiContextFile,
+  roomLayoutNote,
 } from "@agent-rooms/protocol";
 import { mapStreamLine, resolveGeminiTools } from "./map-stream.js";
 
@@ -181,6 +182,25 @@ async function reportIsolationDrift(): Promise<void> {
   } catch {
     // Sunucudaki 5 dakikalik denetim yedegi.
   }
+}
+
+/**
+ * Odanin yapisi — ortamdan okunur, runner uydurmaz.
+ *
+ * `ROOM_PEERS` ve `ROOM_CONTRACTS` sunucudan geliyor (AgentManager, oda
+ * config'inden). Runner kendi peer listesini cikarsaydi rol YAML'i ile iki
+ * kopya olur ve biri digerinden kayardi.
+ */
+function roomLayout(): string {
+  const peers = (process.env.ROOM_PEERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const readable = (process.env.ROOM_READABLE ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return roomLayoutNote({
+    agent: agent.name,
+    peers,
+    workspace: process.cwd(),
+    contracts: process.env.ROOM_CONTRACTS ?? "/room/contracts",
+    readable,
+  });
 }
 
 const markDirtyFrom = (event: NewRoomEvent, messageId: string): void => {
@@ -452,7 +472,7 @@ const probeToolchain = (): Array<{ label: string; version: string | null }> =>
 const writeContextFile = (): void => {
   const target = path.join(process.cwd(), "GEMINI.md");
   try {
-    writeFileSync(target, geminiContextFile(agent, probeToolchain()), "utf8");
+    writeFileSync(target, geminiContextFile(agent, probeToolchain(), roomLayout()), "utf8");
     out({ kind: "log", level: "info", msg: `rol baglami yazildi: ${target}` });
   } catch (err) {
     out({

@@ -8,6 +8,7 @@ import {
   PROTOCOL_VERSION,
   ROOM_TOOLCHAIN_PROBES,
   claudeSystemAppend,
+  roomLayoutNote,
   RunnerCommand,
   RunnerOutput,
   resolveSdkTools,
@@ -145,6 +146,25 @@ if (!diff.enabled) {
  * uretiyor. Runner kendi "dogru izin" tanimini tasisaydi plan ile iki kopya
  * olurdu ve biri digerinden kayardi.
  */
+/**
+ * Odanin yapisi — ortamdan okunur, runner uydurmaz.
+ *
+ * `ROOM_PEERS` ve `ROOM_CONTRACTS` sunucudan geliyor (AgentManager, oda
+ * config'inden). Runner kendi peer listesini cikarsaydi rol YAML'i ile iki
+ * kopya olur ve biri digerinden kayardi.
+ */
+function roomLayout(): string {
+  const peers = (process.env.ROOM_PEERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const readable = (process.env.ROOM_READABLE ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return roomLayoutNote({
+    agent: agent.name,
+    peers,
+    workspace: process.cwd(),
+    contracts: process.env.ROOM_CONTRACTS ?? "/room/contracts",
+    readable,
+  });
+}
+
 async function reportIsolationDrift(): Promise<void> {
   const expected = process.env.ISOLATION_EXPECTED;
   if (!expected) return;
@@ -181,7 +201,7 @@ async function runTurn(messageId: string, text: string, ac: AbortController): Pr
         systemPrompt: {
           type: "preset",
           preset: "claude_code",
-          append: claudeSystemAppend(agent.systemPrompt, toolchain),
+          append: claudeSystemAppend(agent.systemPrompt, toolchain, roomLayout()),
         },
         // Host/container ayar dosyalarını yükleme — yetki sadece YAML'dan gelir.
         settingSources: [],

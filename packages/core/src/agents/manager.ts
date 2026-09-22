@@ -381,6 +381,20 @@ export class AgentManager {
        * olur ve biri digerinden kayardi. Tek kaynak plan.
        */
       ISOLATION_EXPECTED: `${agentUser(agent.name)}:${wtrGroup(agent.name)} 750`,
+      /*
+       * Odanin yapisi (Hafta 7): agent kendi mutlak yolunu, ODADAKI DIGER
+       * agent'lari ve ortak alanin nerede oldugunu bilmeli.
+       *
+       * Elle testte olculdu: bilmeyen agent digerinin kodunu kendi klasorunde
+       * aradi, bulamadi ve "dosyalari gormem icin bana bir yol verir misin?"
+       * diye sordu — bir turn bosa gitti.
+       */
+      ROOM_PEERS: config.agents
+        .map((a) => a.name)
+        .filter((n) => n !== agent.name)
+        .join(","),
+      ROOM_CONTRACTS: `/room/${config.contractsDir}`,
+      ROOM_READABLE: (agent.readable ?? []).join(","),
     };
     // Her koşum ortamı KENDİ anahtarını alır; diğerininkini görmez.
     if (agent.runtime === "gemini") {

@@ -26,6 +26,59 @@ export function appendMultiplayerNote(systemPrompt: string): string {
 }
 
 /**
+ * Hafta 7: odada başka AGENT'lar var.
+ *
+ * Bu not bir KISIT DEĞİL, bir YÖN TARİFİ. Değişmez Kural 2 "izolasyon
+ * prompt'la uygulanmaz" diyor ve o kural duruyor: agent'ın başkasının
+ * klasörüne yazamaması dosya sisteminden geliyor, buradaki cümleden değil.
+ * Burada yapılan şey agent'a İÇİNDE BULUNDUĞU DÜNYAYI anlatmak.
+ *
+ * Gerekçesi ölçüldü (22 Eylül elle testi): backend agent'ı frontend'in
+ * kodunu kendi klasöründe aradı, bulamadı ve "Frontend projesi başka bir
+ * dizinde mi yoksa dosyaları görmem için bana bir yol verebilir misin?" diye
+ * sordu — bir turn boşa gitti. Agent ne başka agent olduğunu, ne kendi mutlak
+ * yolunu, ne de ortak alanın ne işe yaradığını biliyordu.
+ */
+export function roomLayoutNote(opts: {
+  /** Bu agent'ın adı. */
+  agent: string;
+  /** Odadaki DİĞER agent'ların adları. */
+  peers: readonly string[];
+  /** Container içindeki mutlak çalışma alanı. */
+  workspace: string;
+  /** Ortak alanın mutlak yolu. */
+  contracts: string;
+  /** Bu agent'ın okuyabildiği diğer worktree'ler (YAML'daki `readable`). */
+  readable?: readonly string[];
+}): string {
+  const lines = [`Çalışma alanın: \`${opts.workspace}\`. Kendi işini buraya yazarsın.`];
+
+  if (opts.peers.length === 0) {
+    lines.push(`Ortak alan: \`${opts.contracts}\` — burası da yazılabilir.`);
+    return lines.join("\n");
+  }
+
+  lines.push(
+    "",
+    `Bu odada senden başka agent'lar da çalışıyor: ${opts.peers.join(", ")}.`,
+    "Her agent'ın kendi çalışma alanı var ve birbirinizin klasörünü GÖREMEZSİNİZ.",
+    "Bu bir ayar değil, odanın yapısı: aramanın ya da yol istemenin faydası yok.",
+    "",
+    `Koordinasyon tek yerden geçer: \`${opts.contracts}\`.`,
+    "Başka bir agent'ın ihtiyacı olan şeyi (API sözleşmesi, şema, örnek veri,",
+    "dosya biçimi) oraya yaz; onların sana bıraktığını oradan oku.",
+    "Bir şeye ihtiyacın varsa ve ortak alanda yoksa, uydurma: neye ihtiyacın",
+    "olduğunu ortak alana yaz ve insana söyle.",
+  );
+
+  if (opts.readable && opts.readable.length > 0) {
+    lines.push("", `Ayrıca şunları OKUYABİLİRSİN: ${opts.readable.join(", ")}.`);
+  }
+
+  return lines.join("\n");
+}
+
+/**
  * Kurulumun modele ULAŞTIĞINI kanıtlayan satır.
  *
  * "Rol prompt'u gitti mi" sorusunun serbest metinden okunması güvenilmez:
@@ -46,8 +99,11 @@ export const SETUP_PROBE_ANSWER = "ODA-KURULUMU-OK";
 export function claudeSystemAppend(
   systemPrompt: string,
   toolchain?: ReadonlyArray<{ label: string; version: string | null }>,
+  /** Odanın yapısı: kendi yolun, diğer agent'lar, ortak alan (Hafta 7). */
+  layout?: string,
 ): string {
   const parts = [appendMultiplayerNote(systemPrompt)];
+  if (layout) parts.push(layout);
   if (toolchain && toolchain.length > 0) parts.push(toolchainNote(toolchain));
   return parts.join("\n\n");
 }
@@ -129,6 +185,8 @@ export function geminiContextFile(
   agent: { name: string; systemPrompt: string },
   /** Ölçülmüş alet çantası. Verilmezse o bölüm yazılmaz — uydurulmaz. */
   toolchain?: ReadonlyArray<{ label: string; version: string | null }>,
+  /** Odanın yapısı: kendi yolun, diğer agent'lar, ortak alan (Hafta 7). */
+  layout?: string,
 ): string {
   return [
     `# Oda rolü: ${agent.name}`,
@@ -144,6 +202,7 @@ export function geminiContextFile(
     "",
     MULTIPLAYER_PROMPT_NOTE,
     "",
+    ...(layout ? ["## Odanın yapısı", "", layout, ""] : []),
     ...(toolchain && toolchain.length > 0
       ? ["## Ortamda ne var", "", toolchainNote(toolchain), ""]
       : []),
