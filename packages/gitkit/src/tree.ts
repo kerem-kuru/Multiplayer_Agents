@@ -27,6 +27,21 @@ export const DEFAULT_EXCLUDES = [
   ".next/",
   "coverage/",
   ".DS_Store",
+  /*
+   * Rol bağlamı dosyaları — runner'ın ALTYAPISI, agent'ın işi değil.
+   *
+   * Runner her başlangıçta rol YAML'ını çalışma alanına yazıyor
+   * (`GEMINI.md`, Claude tarafında `CLAUDE.md`). Taban checkpoint'i runner
+   * başlamadan ÖNCE alındığı için bu dosya "agent ekledi" gibi görünüyordu.
+   *
+   * 22 Eylül'de ölçülen sonucu: iki agentlı bir odada her ikisi de kendi
+   * `GEMINI.md`'sini yazdığı için ürün SAHTE bir çakışma üretti —
+   * "backend ve frontend aynı dosyayı değiştiriyor: GEMINI.md". Üstelik her
+   * kart "1 dosya" gösteriyordu, yani agent hiçbir şey yazmamışken bir şey
+   * yazmış gibi duruyordu.
+   */
+  "GEMINI.md",
+  "CLAUDE.md",
 ];
 
 const indexEnv = (cwd: string): Record<string, string> => ({

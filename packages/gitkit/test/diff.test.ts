@@ -233,3 +233,27 @@ describe("saf yardımcılar", () => {
     expect(fingerprint(f)).not.toBe(fingerprint({ ...f, status: "added" }));
   });
 });
+
+describe("rol baglami dosyalari diff'e GIRMEZ", () => {
+  /*
+   * Runner her baslangicta GEMINI.md / CLAUDE.md yaziyor — altyapi, agent'in
+   * isi degil. 22 Eylul'de iki agentli bir odada ikisi de kendi GEMINI.md'sini
+   * yazdigi icin urun SAHTE bir cakisma uretti ve her kart "1 dosya"
+   * gosterdi; agent hicbir sey yazmamisken bir sey yazmis gibi durdu.
+   */
+  it("GEMINI.md ve CLAUDE.md degisiklik sayilmaz", async () => {
+    await write("GEMINI.md", "# rol baglami\n");
+    await write("CLAUDE.md", "# rol baglami\n");
+    const tree = await currentTree(dir);
+    const files = await diffTrees(dir, baseTree, tree);
+    expect(files.map((f) => f.path)).toEqual([]);
+  });
+
+  it("ayni anda gercek bir degisiklik varsa YALNIZCA o gorunur", async () => {
+    await write("GEMINI.md", "# rol baglami\n");
+    await write("src/order.js", "function processOrder(o) {\n  return o.id;\n}\n");
+    const tree = await currentTree(dir);
+    const files = await diffTrees(dir, baseTree, tree);
+    expect(files.map((f) => f.path)).toEqual(["src/order.js"]);
+  });
+});
