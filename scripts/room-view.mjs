@@ -33,6 +33,12 @@ const base = flag("base", "http://localhost:8787");
 const session = flag("session", process.env.ROOMS_SESSION ?? "");
 const agent = flag("agent", "");
 
+// project() bilinmeyen event tipi gorunce console.debug ile UYARIR ve Node'da
+// console.debug STDOUT'a yazar — JSON ciktisini kirletip cagiranin
+// JSON.parse'ini dusurur. Uyari stderr'e alindi. (22 Eylul: Hafta 6 kapisinin
+// 11. kontrolu tam bu yuzden "?" dondu.)
+console.debug = (...a) => process.stderr.write(a.join(" ") + "\n");
+
 const get = async (path) => {
   const res = await fetch(`${base}${path}`, {
     headers: session ? { cookie: `rooms_session=${session}` } : {},

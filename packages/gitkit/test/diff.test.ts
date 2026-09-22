@@ -7,6 +7,7 @@ import {
   currentTree,
   diffTrees,
   fingerprint,
+  git,
   incremental,
   initWorkspace,
   isGeneratedPath,
@@ -36,6 +37,8 @@ const byPath = (files: FileDiff[], p: string): FileDiff | undefined =>
 
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), "gitkit-diff-"));
+  // Hafta 7: depoyu test kurar, gitkit degil.
+  await git(dir, ["init", "-b", "main"]);
   await write("src/order.js", ["function processOrder(o) {", "  return o;", "}", ""].join("\n"));
   await write("package.json", '{\n  "name": "fixture",\n  "version": "0.1.0"\n}\n');
   const init = await initWorkspace(dir);

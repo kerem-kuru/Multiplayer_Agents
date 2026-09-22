@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { NewRoomEvent } from "@agent-rooms/protocol";
-import { DiffPublisher, createCheckpoint, initWorkspace, newCheckpointId } from "../src/index.js";
+import { DiffPublisher, createCheckpoint, git, initWorkspace, newCheckpointId } from "../src/index.js";
 
 /**
  * Yayımcı testleri — gerçek git, sahte emit.
@@ -34,6 +34,8 @@ const diffs = (): Array<{ files: Array<{ path: string; status: string }> }> =>
 
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), "gitkit-pub-"));
+  // Hafta 7: depoyu test kurar, gitkit degil.
+  await git(dir, ["init", "-b", "main"]);
   await write("src/order.js", "function processOrder(o) {\n  return o;\n}\n");
   await write("package.json", '{\n  "version": "0.1.0"\n}\n');
   const init = await initWorkspace(dir);

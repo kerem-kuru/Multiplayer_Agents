@@ -102,7 +102,21 @@ export interface InitWorkspaceResult extends Checkpoint {
  */
 export async function initWorkspace(cwd: string): Promise<InitWorkspaceResult> {
   const existed = await isRepo(cwd);
-  if (!existed) await git(cwd, ["init", "-b", "main"]);
+  /*
+   * Hafta 7: gitkit ARTIK DEPO YARATMAZ.
+   *
+   * Depoyu `cloneForAgents` kuruyor (`git clone --shared` merkezden, agent'ın
+   * kendi kullanıcısıyla). Burada `git init` çağırmak, alternates'i ve doğru
+   * branch'i OLMAYAN bir depo yaratırdı: agent çalışmaya başlar, her şey
+   * yolunda görünür, sonra merkeze hiç bağlı olmadığı anlaşılırdı. Sessizce
+   * yanlış bir dünya kurmaktansa burada durmak doğru.
+   */
+  if (!existed) {
+    throw new Error(
+      `workspace bir git deposu değil: ${cwd} — Hafta 7'den beri depoyu oda açılışı ` +
+        `klonluyor (cloneForAgents). gitkit depo yaratmaz.`,
+    );
+  }
 
   // Yalnızca BU depo için. Global git konfigürasyonuna dokunulmuyor.
   await git(cwd, ["config", "user.name", "rooms"]);

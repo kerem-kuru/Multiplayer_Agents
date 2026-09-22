@@ -254,6 +254,34 @@ export const FileChanged = ev(
  * sıfırlanır), turn checkpoint'i OLMAZ — her turn sonunda tabanı kaydırmak
  * "bu oturumda ne değişti" sorusunu cevapsız bırakırdı.
  */
+/**
+ * Odanın merkez deposu kuruldu.
+ *
+ * Merkez depo `rooms-integrator` kullanıcısına aittir ve agent'lar için salt
+ * okunurdur. Her agent ondan `git clone --shared` ile kendi deposunu alır —
+ * `git worktree` DEĞİL (Hafta 7, Karar 3): worktree'de tüm çalışma ağaçları
+ * tek bir `.git` paylaşır ve bir agent diğerinin branch'ini silebilir ya da
+ * ortak config'e hook ekleyip diğerinin git komutlarında kod çalıştırabilirdi.
+ */
+export const RoomRepoInitialized = ev(
+  "room.repo_initialized",
+  z.object({
+    source: z.enum(["empty", "local", "git"]),
+    baseRef: z.string().min(1),
+    baseSha: z.string().min(1),
+  }),
+);
+
+/** Agent'ın kendi deposu klonlandı ve branch'i açıldı. */
+export const AgentWorkspaceReady = ev(
+  "agent.workspace_ready",
+  z.object({
+    ...AgentRef,
+    branch: z.string().min(1),
+    baseSha: z.string().min(1),
+  }),
+);
+
 export const CheckpointCreated = ev(
   "checkpoint.created",
   z.object({
@@ -558,6 +586,8 @@ const EVENT_SCHEMAS = [
   ToolDenied,
   FileChanged,
   CheckpointCreated,
+  RoomRepoInitialized,
+  AgentWorkspaceReady,
   DiffUpdated,
   JournalUpdated,
   TaskCreated,

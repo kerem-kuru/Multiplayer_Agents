@@ -42,6 +42,9 @@ const fileHash = async (rel: string): Promise<string | null> => {
 
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), "gitkit-cp-"));
+  // Hafta 7: gitkit artik depo YARATMIYOR — oda acilisinda merkezden
+  // klonlaniyor. Testler de depoyu kendileri kurar.
+  await git(dir, ["init", "-b", "main"]);
 });
 
 afterEach(async () => {
@@ -49,12 +52,23 @@ afterEach(async () => {
 });
 
 describe("initWorkspace", () => {
-  it("depo olmayan klasörü depoya çevirir ve taban checkpoint'i alır", async () => {
+  it("depo olmayan klasoru REDDEDER — sessizce git init etmez", async () => {
+    // Sessizce init etseydi alternates'i ve dogru branch'i olmayan bir depo
+    // kurulur, agent calisir ve merkeze hic bagli olmadigi cok sonra anlasilirdi.
+    const bos = await fs.mkdtemp(path.join(os.tmpdir(), "gitkit-bos-"));
+    try {
+      await expect(initWorkspace(bos)).rejects.toThrow(/git deposu degil|git deposu değil/);
+    } finally {
+      await fs.rm(bos, { recursive: true, force: true }).catch(() => undefined);
+    }
+  });
+
+  it("var olan depoda taban checkpoint'i alır", async () => {
     await write("src/order.js", "function processOrder() {}\n");
 
     const res = await initWorkspace(dir);
 
-    expect(res.created).toBe(true);
+    expect(res.created).toBe(false);
     expect(res.checkpointId).toMatch(/^cp_[0-9a-f]{12}$/);
     expect(res.commitSha).toMatch(/^[0-9a-f]{40}$/);
     // Taban, workspace'in O ANKİ hâli: takip edilmeyen dosya da ağaçta.

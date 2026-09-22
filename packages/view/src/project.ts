@@ -23,7 +23,7 @@ import { anchorOf, type AnchorState } from "./patch.js";
  * Projeksiyon sürümü. Bu dosyadaki üretim mantığı değiştiğinde ARTIRILIR:
  * eski sürümle üretilmiş snapshot'lar okunmaz, tam replay'e düşülür.
  */
-export const SNAPSHOT_VERSION = 4;
+export const SNAPSHOT_VERSION = 5;
 
 export type AgentStatus = "stopped" | "starting" | "idle" | "busy" | "crashed" | "failed";
 
@@ -129,6 +129,8 @@ export interface CommentView {
 export interface AgentView {
   status: AgentStatus;
   lastError: string | null;
+  /** Agent'ın kendi branch'i: room-<kısa-id>/<ad> (Hafta 7). */
+  branch: string | null;
   /** Eski → yeni. */
   turns: TurnView[];
   /**
@@ -176,11 +178,17 @@ export interface RoomView {
   agents: Record<string, AgentView>;
   /** Oda düzeyinde; agent'a bağlı değil. */
   access: AccessRequestView[];
+  /**
+   * Merkez deponun taban commit'i — tüm agent klonları bundan çıktı (Hafta 7).
+   * Depo kurulmadan önce null.
+   */
+  baseSha: string | null;
 }
 
 const emptyAgent = (): AgentView => ({
   status: "stopped",
   lastError: null,
+  branch: null,
   turns: [],
   queue: [],
   running: null,
@@ -224,8 +232,10 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
         agents: structuredClone(base.agents),
         // Eski snapshot'lar (sürüm < 4) bu alanı taşımıyor.
         access: structuredClone(base.access ?? []),
+        // Eski snapshot'lar (sürüm < 5) taban commit'i taşımıyor.
+        baseSha: base.baseSha ?? null,
       }
-    : { lastSeq: 0, agents: {}, access: [] };
+    : { lastSeq: 0, agents: {}, access: [], baseSha: null };
 
   // Tekrarı yut: aynı event iki kez gelirse sonuç değişmemeli.
   const applied = new Set<number>();
@@ -592,6 +602,21 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
         // ayrıca bir "inceleme" nesnesi tutmak aynı bilgiyi ikinci kez
         // saklamak olurdu.
         break;
+
+      case "room.repo_initialized": {
+        // Merkez depo kuruldu; tüm klonlar bu commit'ten çıktı.
+        const sha = (e.payload as { baseSha?: unknown }).baseSha;
+        if (typeof sha === "string") view.baseSha = sha;
+        break;
+      }
+
+      case "agent.workspace_ready": {
+        const p = e.payload as { agent?: unknown; branch?: unknown };
+        if (typeof p.agent === "string" && typeof p.branch === "string") {
+          agentOf(p.agent).branch = p.branch;
+        }
+        break;
+      }
 
       default:
         // İleride eklenecek event tipleri eski UI'ı ÇÖKERTMEMELİ.

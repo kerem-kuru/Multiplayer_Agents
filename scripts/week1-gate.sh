@@ -20,8 +20,9 @@ PORT="${GATE_PORT:-8790}"
 PORT2=$((PORT + 1))
 BASE="http://localhost:$PORT"
 export DATABASE_URL="${DATABASE_URL:-postgres://rooms:Kk2007..@localhost:5433/agent_rooms}"
-export ROOM_DATA_DIR="${ROOM_DATA_DIR:-./rooms-data}"
-DATA_DIR="$ROOT/${ROOM_DATA_DIR#./}"
+# Hafta 7: /room artik named volume. Host oda dosyalarini GOREMIYOR; klasor
+# kontrolleri container icinden yapiliyor.
+. "$ROOT/scripts/lib/room-exec.sh"
 TMP_YAML="$ROOT/.week1-gate.tmp.yaml"
 
 PASS=0
@@ -141,7 +142,6 @@ RUNNING=$(docker ps --filter "label=agent-rooms.room=$ROOM_ID" --filter "status=
 
 # --- 3 --------------------------------------------------------------------
 step "3) Klasör düzeni"
-ROOM_DIR="$DATA_DIR/$ROOM_ID"
 MISSING=""
 # Agent adları YAML'dan geliyor — script hiçbir ismi varsaymıyor.
 AGENT_NAMES=$(echo "$BODY" | node -e '
@@ -149,10 +149,10 @@ AGENT_NAMES=$(echo "$BODY" | node -e '
     JSON.parse(s).agents.forEach(a=>console.log(a.name));
   });')
 for a in $AGENT_NAMES; do
-  [ -d "$ROOM_DIR/worktrees/$a" ] || MISSING="$MISSING worktrees/$a"
+  room_sh "$ROOM_ID" root "test -d /room/worktrees/$a" >/dev/null || MISSING="$MISSING worktrees/$a"
 done
-[ -d "$ROOM_DIR/contracts" ] || MISSING="$MISSING contracts"
-[ -d "$ROOM_DIR/journal" ]   || MISSING="$MISSING journal"
+room_sh "$ROOM_ID" root "test -d /room/contracts" >/dev/null || MISSING="$MISSING contracts"
+room_sh "$ROOM_ID" root "test -d /room/journal"   >/dev/null || MISSING="$MISSING journal"
 if [ -z "$MISSING" ]; then
   ok "$(echo "$AGENT_NAMES" | wc -l | tr -d ' ') worktree + contracts + journal var"
 else
@@ -163,10 +163,18 @@ fi
 step "4) Event'ler since=0"
 EVENTS=$(curl -s "${AUTH[@]}" "$BASE/rooms/$ROOM_ID/events?since=0")
 E1=$(echo "$EVENTS" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const e=JSON.parse(s).events;console.log(e.map(x=>x.seq+":"+x.type).join(" "))});')
-if [ "$E1" = "1:room.created 2:session.started" ]; then
+# Hafta 7: oda acilisi artik merkez depoyu kuruyor ve her agent icin klon
+# aliyor. Sira: room.created -> room.repo_initialized -> agent.workspace_ready
+# (agent basina bir tane) -> session.started. session.started EN SONDA kalmali:
+# containerId'yi o tasiyor ve kurulum bitmeden yazilmamali.
+E_FIRST=$(echo "$E1" | awk '{print $1}' | cut -d: -f2)
+E_LAST=$(echo "$E1" | awk '{print $NF}' | cut -d: -f2)
+E_HAS_REPO=$(echo "$E1" | grep -c "room.repo_initialized" || true)
+E_READY=$(echo "$E1" | grep -o "agent.workspace_ready" | wc -l | tr -d ' ')
+if [ "$E_FIRST" = "room.created" ] && [ "$E_LAST" = "session.started" ]    && [ "$E_HAS_REPO" = "1" ] && [ "$E_READY" -ge 1 ]; then
   ok "$E1"
 else
-  no "beklenen '1:room.created 2:session.started', gelen '$E1'"
+  no "beklenen: room.created ... repo_initialized ... workspace_ready ... session.started, gelen '$E1'"
 fi
 
 # --- 5 --------------------------------------------------------------------
@@ -175,12 +183,15 @@ NOTE=$(curl -s "${AUTH[@]}" -w '\n%{http_code}' -X POST "$BASE/sessions/$SESSION
   -H 'content-type: application/json' \
   -d '{"type":"debug.note","payload":{"text":"kapi testi"}}')
 NCODE=$(echo "$NOTE" | tail -1)
-SINCE2=$(curl -s "${AUTH[@]}" "$BASE/rooms/$ROOM_ID/events?since=2")
+# Hafta 7: acilis event sayisi agent sayisina gore degisiyor; "since" sabit 2
+# olamaz. Not yazilmadan ONCEKI son seq'ten devam ediliyor.
+LAST_SEQ=$(echo "$EVENTS" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const e=JSON.parse(s).events;console.log(e.length?e[e.length-1].seq:0)});')
+SINCE2=$(curl -s "${AUTH[@]}" "$BASE/rooms/$ROOM_ID/events?since=$LAST_SEQ")
 S2=$(echo "$SINCE2" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const e=JSON.parse(s).events;console.log(e.length+" "+e.map(x=>x.type).join(","))});')
 if [ "$NCODE" = "201" ] && [ "$S2" = "1 debug.note" ]; then
-  ok "201 · since=2 sadece debug.note döndü"
+  ok "201 · since=$LAST_SEQ sadece debug.note döndü"
 else
-  no "yazma $NCODE, since=2 → '$S2'"
+  no "yazma $NCODE, since=$LAST_SEQ → '$S2'"
 fi
 
 # --- 6 --------------------------------------------------------------------
@@ -235,7 +246,10 @@ agents:
   - name: security
     systemPrompt: "security"
     workspace: worktrees/security
-    writable: [journal]
+    # Hafta 7: journal root:root 0755 — hicbir agent yazamaz. Yazilabilir olan
+    # tek iki sey: kendi worktree'si ve contracts.
+    writable: [worktrees/security, contracts]
+    readable: [worktrees/*]
 YAML
 
 AUTH_DEV_MODE=true PORT="$PORT2" ROOM_CONFIG=".week1-gate.tmp.yaml" node apps/api/dist/index.js \
@@ -247,10 +261,10 @@ if wait_health "http://localhost:$PORT2"; then
   ROOM3=$(echo "$BODY3" | jget room.id)
   ROOM_IDS+=("$ROOM3")
   HAS_SEC=$(echo "$BODY3" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{console.log(JSON.parse(s).agents.some(a=>a.name==="security"))});')
-  if [ "$HAS_SEC" = "true" ] && [ -d "$DATA_DIR/$ROOM3/worktrees/security" ]; then
+  if [ "$HAS_SEC" = "true" ] && room_sh "$ROOM3" root "test -d /room/worktrees/security" >/dev/null; then
     ok "3. agent YAML'a eklendi, worktrees/security açıldı, kod değişmedi"
   else
-    no "agents içinde security=$HAS_SEC, klasör=$([ -d "$DATA_DIR/$ROOM3/worktrees/security" ] && echo var || echo yok)"
+    no "agents içinde security=$HAS_SEC, klasör container'da yok"
   fi
   kill "$SERVER2_PID" 2>/dev/null
   SERVER2_PID=""

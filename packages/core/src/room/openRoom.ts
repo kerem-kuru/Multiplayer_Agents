@@ -11,6 +11,7 @@ import {
   stopRoomContainer,
 } from "../docker/container.js";
 import { applyFsPlan, assignUids, planRoomFs } from "../room-fs.js";
+import { cloneForAgents, initCentralRepo } from "../repo.js";
 import { ensureRuntimeRows, readUids, writeUids } from "../agents/runtime.js";
 import { ensureDriverRows } from "../driver.js";
 import { setRoomAllowPatterns } from "../redaction.js";
@@ -20,6 +21,7 @@ import {
   createSession,
   endSession,
   latestSession,
+  setBaseSha,
   type RoomRecord,
   type SessionRecord,
 } from "./rooms.js";
@@ -158,6 +160,54 @@ export async function openRoom(input: OpenRoomInput): Promise<OpenRoomResult> {
     // İzolasyonun kurulduğu yer. Buradan sonra her agent kendi Unix
     // kullanıcısıdır ve kendi klasörü dışına yazamaz.
     await applyFsPlan(containerId, plan);
+
+    /*
+     * Merkez depo ve agent klonları — izin planından SONRA.
+     *
+     * Sıra zorunlu: klonlar agent kullanıcılarıyla, kendi worktree
+     * klasörlerinin içine yapılıyor. O kullanıcılar ve klasörler plan
+     * uygulanmadan yok.
+     */
+    const repoInfo = await initCentralRepo({
+      container: containerId,
+      roomId: room.id,
+      config,
+      image,
+    });
+    await setBaseSha(room.id, config.repo, repoInfo.baseSha, pool);
+
+    events.push(
+      await appendEvent(
+        { ...base, type: "room.repo_initialized", payload: repoInfo },
+        pool,
+      ),
+    );
+
+    const clones = await cloneForAgents({
+      container: containerId,
+      roomId: room.id,
+      config,
+      baseSha: repoInfo.baseSha,
+    });
+    await writeUids(
+      room.id,
+      uids,
+      Object.fromEntries(clones.map((c) => [c.agent, c.branch])),
+      pool,
+    );
+
+    for (const c of clones) {
+      events.push(
+        await appendEvent(
+          {
+            ...base,
+            type: "agent.workspace_ready",
+            payload: { agent: c.agent, branch: c.branch, baseSha: repoInfo.baseSha },
+          },
+          pool,
+        ),
+      );
+    }
 
     events.push(
       await appendEvent(

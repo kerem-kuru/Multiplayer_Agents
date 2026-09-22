@@ -25,6 +25,8 @@ export MSYS_NO_PATHCONV=1
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# Hafta 7: /room named volume; oda dosyalarina container uzerinden erisilir.
+. "$ROOT/scripts/lib/room-exec.sh"
 
 PORT="${GATE_PORT:-8798}"
 BASE="http://localhost:$PORT"
@@ -61,12 +63,20 @@ psql_q() { docker compose exec -T postgres psql -U rooms -d agent_rooms -tA -c "
 # Container içinde git ve kabuk. `-u agent`: runner da o kullanıcıyla koşuyor;
 # root'la çalıştırmak .git altında root'a ait dosya bırakır ve bir sonraki
 # gitkit çağrısını bozar.
-# `safe.directory=*`: workspace bind mount üzerinden geliyor, sahiplik uid
-# eşleşmiyor. gitkit de git'i aynı bayrakla çağırıyor (packages/gitkit/src/git.ts);
-# kapının okuması ürünün okumasıyla aynı koşulda olmalı.
-cgit()  { docker exec -u agent "$CONTAINER" git -c safe.directory='*' -C "/room/$WS" "$@" 2>&1; }
-cexec() { docker exec -u agent "$CONTAINER" "$@" 2>&1; }
-csh()   { docker exec -u agent "$CONTAINER" sh -c "$1" 2>&1; }
+# Hafta 7: kullanici `agent` DEGIL `agent-<ad>`. safe.directory=* KALDIRILDI —
+# depo artik komutu kosan kullaniciya ait, git'in sahiplik kontrolu sorun
+# cikarmiyor. Cikariyorsa yanlis kullaniciyla calistigimizin isaretidir.
+# Kapinin KENDI git cagrilari da notr olmali.
+#
+# Kapi depoya kasten `core.fsmonitor = touch /tmp/pwned` ekiyor. Notr
+# olmayan bir `git status` o komutu KAPININ kendisi calistirir ve kapi
+# urunu degil kendini olcer (22 Eylul'de tam bu oldu: /tmp/pwned sayisi 1).
+# `GIT_OPTIONAL_LOCKS=0` ayrica salt okunur komutlarin index'i yeniden
+# yazmasini engelliyor — "checkpoint index'e dokundu mu" olcumu ancak boyle
+# anlamli. Bayraklar packages/gitkit/src/git.ts ile AYNI.
+cgit()  { docker exec -u "agent-$AGENT" -e GIT_OPTIONAL_LOCKS=0 "$CONTAINER" git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.untrackedCache=false -C "/room/$WS" "$@" 2>&1; }
+cexec() { docker exec -u "agent-$AGENT" "$CONTAINER" "$@" 2>&1; }
+csh()   { docker exec -u "agent-$AGENT" "$CONTAINER" sh -c "$1" 2>&1; }
 
 cleanup() {
   step "Temizlik"
@@ -104,7 +114,34 @@ fi
 npm run build >/dev/null 2>&1 || { echo "build başarısız"; trap - EXIT; exit 1; }
 npm run db:migrate >/dev/null 2>&1 || { echo "migration başarısız"; trap - EXIT; exit 1; }
 
-AUTH_DEV_MODE=true ROOM_CONFIG="$ROOM_CONFIG" PORT="$PORT" \
+# --- fixture -> gecici git deposu -> local repo kaynagi --------------------
+#
+# Hafta 7: workspace'e dosya KOPYALANMIYOR. /room named volume oldugu icin host
+# oraya yazamaz; ayrica depo artik merkezden klonlaniyor. Fixture once bir git
+# deposuna cevriliyor ve odaya `repo: {kind: local}` olarak veriliyor.
+#
+# Taban checkpoint'i yine dogru: klonun HEAD'i base_sha, yani fixture'in tamami
+# TABANDA — "agent'in degisikligi" gibi gorunmuyor.
+SRC_ROOT="$ROOT/$TMP/src"
+SRC="$SRC_ROOT/week6-repo"
+mkdir -p "$SRC"
+cp -r test/fixtures/week6-repo/. "$SRC/"
+git -C "$SRC" init -q -b main
+git -C "$SRC" -c user.name=gate -c user.email=gate@local add -A
+git -C "$SRC" -c user.name=gate -c user.email=gate@local commit -q -m "week6 fixture"
+if [ ! -f "$SRC/src/order.js" ]; then echo "fixture hazirlanamadi: $SRC"; trap - EXIT; exit 1; fi
+
+# Odanin YAML'i: mevcut config + local repo kaynagi.
+GATE_CONFIG="$ROOT/$TMP/room.yaml"
+node -e '
+  const fs = require("fs");
+  const YAML = require("yaml");
+  const cfg = YAML.parse(fs.readFileSync(process.argv[1], "utf8"));
+  cfg.repo = { kind: "local", path: process.argv[2], ref: "main" };
+  fs.writeFileSync(process.argv[3], YAML.stringify(cfg));
+' "$ROOM_CONFIG" "$SRC" "$GATE_CONFIG"
+
+AUTH_DEV_MODE=true ROOM_CONFIG="$GATE_CONFIG" ROOMS_SOURCE_ROOT="$SRC_ROOT" PORT="$PORT" \
   node apps/api/dist/index.js >"$TMP/server.log" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 40); do
@@ -132,15 +169,11 @@ CONTAINER="agent-rooms-room-$(echo "$ROOM" | tr -d '-' | cut -c1-8)"
 INV_V=$(acurl -X POST "$BASE/rooms/$ROOM/invites" -H 'content-type: application/json' -d '{"role":"viewer"}' | jget url)
 ccurl -o /dev/null -X POST "$BASE/invites/accept" -H 'content-type: application/json' \
   -d "{\"token\":\"${INV_V##*token=}\"}"
-
-# --- fixture agent'tan ÖNCE kopyalanır -------------------------------------
-# Taban checkpoint'i agent'ın ilk başlatılmasında alınıyor. Fixture sonradan
-# kopyalansaydı bütün proje "agent'ın değişikliği" gibi görünürdü — README'de
-# anlatılan tuzağın ta kendisi.
-WSDIR="rooms-data/$ROOM/$WS"
-mkdir -p "$WSDIR"
-cp -r test/fixtures/week6-repo/. "$WSDIR/"
-if [ ! -f "$WSDIR/src/order.js" ]; then echo "fixture kopyalanamadı: $WSDIR"; exit 1; fi
+# Fixture artik merkez depodan klonlandi; workspace agent baslamadan
+# once dolu ve tamami TABANDA.
+if ! room_sh "$ROOM" "agent-$AGENT" "test -f /room/$WS/src/order.js" >/dev/null; then
+  echo "klon beklenen dosyayi tasimiyor"; tail -20 "$TMP/server.log"; exit 1
+fi
 
 acurl -o /dev/null -X POST "$BASE/rooms/$ROOM/agents/$AGENT/start"
 ST="?"

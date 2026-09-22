@@ -80,6 +80,29 @@ ENV PATH=/opt/venv/bin:$PATH \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+# safe.directory — TEK BIR YOL icin, sistem duzeyinde.
+#
+# Degismez Kural 9 `safe.directory=*` yasakliyor ve o yasak duruyor. Ama Hafta
+# 7 mimarisi merkez depoyu `rooms-integrator`a veriyor ve her agent ondan
+# `git clone --shared` ile kendi deposunu aliyor. Git'in sahiplik kontrolu
+# (depo sahibi != komutu koşan kullanici) klonu reddediyor.
+#
+# Istisna komut satirindan VERILEMIYOR: git `safe.directory`yi yalnizca
+# korumali config'ten (sistem/global) okur, `-c` ile verileni bilerek yok
+# sayar — bir depo kendini beyaz listeye alamasin diye. Olculdu:
+#   duz klon            -> dubious ownership
+#   -c safe.directory   -> dubious ownership (yok sayiliyor)
+#   sistem duzeyi       -> calisiyor
+#
+# Neden guvenli: `*` "her depoya guven" demek; bu satir "su tek depoya guven"
+# diyor ve o deponun agent tarafindan YAZILAMAZ oldugu izin matrisinde ayrica
+# olculuyor (repo.git/config, hooks/, refs/ -> Permission denied). Guvenilen
+# sey, agent'in degistiremedigi bir depo. Dosya /etc/gitconfig root'a ait,
+# agent oraya yazamaz.
+#
+# Agent'larin KENDI depolari icin istisna YOK: onlar zaten kendi sahipleri.
+RUN git config --system safe.directory /room/repo.git
+
 # /room BOS kalir ve imajda hicbir sey tohumlanmaz.
 #
 # Hafta 7'den beri /room bir named volume. Docker, bos bir volume'u ilk

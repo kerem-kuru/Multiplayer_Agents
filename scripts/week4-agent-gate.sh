@@ -15,6 +15,8 @@ export MSYS_NO_PATHCONV=1
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# Hafta 7: /room named volume; oda dosyalarina container uzerinden erisilir.
+. "$ROOT/scripts/lib/room-exec.sh"
 
 PORT="${GATE_PORT:-8799}"
 BASE="http://localhost:$PORT"
@@ -100,15 +102,21 @@ if [ -z "$ROOM" ]; then echo "oda açılamadı: $CREATE"; exit 1; fi
 
 # --- 1: odaya SAHTE bir .env koy -------------------------------------------
 step "1) Odaya sahte .env yazıldı"
-WORKTREE="rooms-data/$ROOM/worktrees/$AGENT"
-mkdir -p "$WORKTREE"
-{
-  echo "ANTHROPIC_API_KEY=$S_ANT"
-  echo "AWS_ACCESS_KEY_ID=$S_AWS"
-  echo "DB_PASSWORD=$S_DB"
-  echo "PORT=8787"
-} > "$WORKTREE/.env"
-if [ -f "$WORKTREE/.env" ]; then ok "$WORKTREE/.env (sahte değerler)"; else no ".env yazılamadı"; fi
+# Hafta 7: dosya container ICINDE ve AGENTIN KENDI kullanicisiyla yaziliyor.
+# root ile yazilsaydi agent kendi worktree'sindeki dosyayi degistiremez ve
+# kapi urunu haksiz yere suclardi.
+WORKTREE="/room/worktrees/$AGENT"
+room_sh "$ROOM" "agent-$AGENT" "cat > $WORKTREE/.env <<'ENVEOF'
+ANTHROPIC_API_KEY=$S_ANT
+AWS_ACCESS_KEY_ID=$S_AWS
+DB_PASSWORD=$S_DB
+PORT=8787
+ENVEOF" >/dev/null
+if room_sh "$ROOM" "agent-$AGENT" "test -f $WORKTREE/.env" >/dev/null; then
+  ok "$WORKTREE/.env (sahte değerler)"
+else
+  no ".env yazılamadı"
+fi
 
 # --- 2: agent'a okut --------------------------------------------------------
 step "2) Agent dosyayı okuyor"

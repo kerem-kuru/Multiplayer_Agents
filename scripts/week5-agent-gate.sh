@@ -22,6 +22,8 @@ export MSYS_NO_PATHCONV=1
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# Hafta 7: /room named volume; oda dosyalarina container uzerinden erisilir.
+. "$ROOT/scripts/lib/room-exec.sh"
 
 PORT="${GATE_PORT:-8796}"
 BASE="http://localhost:$PORT"
@@ -144,8 +146,8 @@ fi
 ###############################################################################
 step "1b) Rol bağlamı: GEMINI.md modele ulaşıyor"
 # Dosya agent başlangıcında yazılıyor; önce diskte duruyor mu?
-CTX="rooms-data/$ROOM/worktrees/$AGENT/GEMINI.md"
-if [ -f "$CTX" ] && grep -q "ODA-KURULUMU-OK" "$CTX"; then
+CTX="/room/worktrees/$AGENT/GEMINI.md"
+if room_sh "$ROOM" "agent-$AGENT" "grep -q ODA-KURULUMU-OK $CTX" >/dev/null; then
   ok "$CTX yazıldı"
 else
   no "rol bağlam dosyası yok: $CTX"

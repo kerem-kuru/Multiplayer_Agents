@@ -15,8 +15,8 @@ PORT="${GATE_PORT:-8792}"
 PORT2=$((PORT + 1))
 BASE="http://localhost:$PORT"
 export DATABASE_URL="${DATABASE_URL:-postgres://rooms:Kk2007..@localhost:5433/agent_rooms}"
-export ROOM_DATA_DIR="${ROOM_DATA_DIR:-./rooms-data}"
-DATA_DIR="$ROOT/${ROOM_DATA_DIR#./}"
+# Hafta 7: /room named volume; dosyalar container icinden okunuyor.
+. "$ROOT/scripts/lib/room-exec.sh"
 TMP_YAML="$ROOT/.week2-gate.tmp.yaml"
 GATE_MODEL="${AGENT_MODEL:-haiku}"
 

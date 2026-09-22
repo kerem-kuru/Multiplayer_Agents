@@ -673,6 +673,65 @@ Dogfood sırasında runner `503 "This model is currently experiencing high deman
 kendi backoff'uyla toparladı; turn düşmedi. `429` (kota) ile karıştırılmamalı: 429 günlük
 hakkın bitmesi, 503 geçici. `summarizeGeminiError` ikisini de sebebi başa alarak gösteriyor.
 
+## Hafta 7 kararları
+
+Üç mimari karar ve görev tanımından ölçerek ayrıldığımız üç nokta.
+
+| Karar | Gerekçe |
+| --- | --- |
+| İzolasyon mount ile DEĞİL Unix kullanıcılarıyla | Bir container'daki mount'lar o container'daki tüm süreçler için aynıdır; süreç başına farklı mount görünümü `CAP_SYS_ADMIN` ister ve sandbox'ı deler. Agent başına ayrı uid + `0750` klasör aynı sonucu ayrıcalıksız veriyor. |
+| Bind mount yerine named volume | Docker Desktop'ta (Windows/macOS) bind mount üzerindeki `chown` ve izin bitleri güvenilir çalışmıyor. Bind mount'ta kalsaydık `chmod 0750` hatasız döner, `stat` beklediğimizi gösterir ve kapı yeşil yanardı — gerçek bir sınır olmadan. **Yeşil yanan ve yalan söyleyen bir güvenlik özelliği, hiç olmayanından kötüdür.** Bedeli: host oda dosyalarını göremiyor, her inceleme `docker exec` ile (`scripts/lib/room-exec.sh`). |
+| `git worktree` yerine `git clone --shared` | `worktree`de tüm çalışma ağaçları tek bir `.git` paylaşır: nesneler, ref'ler, config ve hook'lar ortak. Agent'ın commit atabilmesi için o ortak alana yazma yetkisi gerekir ve o yetkiyle diğerinin branch'ini silebilir ya da ortak config'e hook ekleyip diğerinin git komutlarında kod çalıştırabilir. `--shared` her agent'a kendi `.git`'ini verir, nesneleri merkezden salt okunur ödünç alır. |
+
+### `safe.directory`: yasak duruyor, istisna tek bir yolda
+
+Değişmez Kural 9 `safe.directory=*` yasaklıyor ve gitkit'ten kaldırıldı. Ama Hafta 7
+mimarisi merkez depoyu `rooms-integrator`a veriyor ve her agent ondan klonluyor — git'in
+sahiplik kontrolü (depo sahibi ≠ komutu koşan kullanıcı) klonu reddediyor.
+
+İstisna komut satırından **verilemiyor**. Ölçüldü:
+
+| Yöntem | Sonuç |
+| --- | --- |
+| düz `git clone` | `detected dubious ownership` |
+| `git -c safe.directory=<yol> clone` | `detected dubious ownership` — git `-c`'den okumuyor |
+| `/etc/gitconfig`'de tek yol | çalışıyor |
+
+Git `safe.directory`yi yalnızca **korumalı config'ten** (sistem/global) okur; bir deponun
+kendini beyaz listeye almasını engellemek için bu bilinçli. Bu yüzden istisna imajda,
+sistem düzeyinde ve **tek bir yol** için duruyor (`rooms/Dockerfile`):
+
+```
+git config --system safe.directory /room/repo.git
+```
+
+`*` "her depoya güven" demek; bu satır "agent'ın yazamadığı şu tek depoya güven" diyor ve
+yazamadığı izin matrisinde ayrıca ölçülüyor (`repo.git/config`, `hooks/`, `refs/` →
+Permission denied). `/etc/gitconfig` root'a ait. Agent'ların **kendi** depoları için
+istisna yok: onlar zaten kendi sahipleri, ve `root` bir agent deposunu açmaya kalkarsa
+`dubious ownership` alıyor — kapı bunu ölçüyor.
+
+**Kapı G6 buna göre okunmalı:** aranan şey "hiç `safe.directory` yok" değil, "`*` hiçbir
+yerde yok ve sistemdeki tek kayıt `/room/repo.git`".
+
+### Görev tanımından üç sapma
+
+| Sapma | Sebep |
+| --- | --- |
+| Migration `006` değil `007` | `006_diff_reviews.sql` Hafta 6'da alınmıştı. |
+| `rooms.status` DROP CONSTRAINT değil ADD COLUMN | Görev tanımı sütun varmış gibi yazıyor; `rooms` tablosunda `status` hiç yaratılmamıştı (001'deki CHECK `sessions`'a ait). Kısıtıyla birlikte eklendi, Hafta 7 öncesi 343 oda `archived` işaretlendi. |
+| `journal` artık yazılabilir değil | Mimari `journal`ı `root:root 0755` yapıyor ve kapı matrisi oraya yazmanın reddedilmesini istiyor. Eski şema `writable: [journal]`e izin veriyordu; şema daraldı. |
+
+### Kapı kendi ölçümünü kirletiyordu
+
+Hafta 6 kapısının 2. kontrolü depoya kasten `core.fsmonitor = touch /tmp/pwned` ekiyor ve
+"ürün bunu tetiklemiyor" diyor. Hafta 7'de klon sonrası index dolu olduğu için kapının
+**kendi** `git status` çağrısı fsmonitor'ü çalıştırdı ve `/tmp/pwned` oluştu — ürün doğru
+davranıyordu, ölçen yanlıştı. Kapının `cgit` yardımcısı artık `gitkit` ile aynı bayrakları
+taşıyor (`core.hooksPath=/dev/null`, `core.fsmonitor=false`, `GIT_OPTIONAL_LOCKS=0`).
+
+**Kural:** bir kapı ekilmiş kodu test ediyorsa, kapının kendi okuma komutları da nötr olmalı.
+
 ## Karar notları
 
 Hafta 1 görev tanımından bilinçli olarak ayrılan noktalar ve gerekçeleri.

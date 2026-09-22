@@ -41,6 +41,25 @@ export async function createRoom(
   };
 }
 
+/**
+ * Taban commit'i ve deponun kaynağını kaydeder (Hafta 7, Adım 4).
+ *
+ * `base_sha` yalnızca bir kayıt değil: agent klonlarının dayandığı commit bu.
+ * Merkezde `refs/rooms/base/<kısa-id>` aynı sha'yı korumalı bir ref olarak
+ * tutuyor; ikisi birbirinin kontrolü.
+ */
+export async function setBaseSha(
+  roomId: string,
+  repoSource: unknown,
+  baseSha: string,
+  pool: pg.Pool = getPool(),
+): Promise<void> {
+  await pool.query(
+    `UPDATE rooms SET base_sha = $2, repo_source = $3::jsonb, status = 'running' WHERE id = $1`,
+    [roomId, baseSha, JSON.stringify(repoSource)],
+  );
+}
+
 export async function createSession(
   roomId: string,
   pool: pg.Pool = getPool(),

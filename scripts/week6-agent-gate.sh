@@ -24,6 +24,8 @@ export MSYS_NO_PATHCONV=1
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+# Hafta 7: /room named volume; oda dosyalarina container uzerinden erisilir.
+. "$ROOT/scripts/lib/room-exec.sh"
 
 PORT="${GATE_PORT:-8799}"
 BASE="http://localhost:$PORT"
@@ -59,7 +61,7 @@ jget() {
 }
 
 psql_q() { docker compose exec -T postgres psql -U rooms -d agent_rooms -tA -c "$1" 2>&1 | tr -d '\r'; }
-csh()    { docker exec -u agent "$CONTAINER" sh -c "$1" 2>&1; }
+csh()    { docker exec -u "agent-$AGENT" "$CONTAINER" sh -c "$1" 2>&1; }
 
 cleanup() {
   step "Temizlik"
@@ -96,7 +98,27 @@ fi
 npm run build >/dev/null 2>&1 || { echo "build başarısız"; trap - EXIT; exit 1; }
 npm run db:migrate >/dev/null 2>&1 || { echo "migration başarısız"; trap - EXIT; exit 1; }
 
-AUTH_DEV_MODE=true ROOM_CONFIG="$ROOM_CONFIG" PORT="$PORT" \
+# --- fixture -> gecici git deposu -> local repo kaynagi --------------------
+# Hafta 7: workspace'e kopyalama yok; depo merkezden klonlaniyor ve fixture'in
+# tamami TABANDA kaliyor (diff yalnizca agent'in isini gosterir).
+SRC_ROOT="$ROOT/$TMP/src"
+SRC="$SRC_ROOT/week6-repo"
+mkdir -p "$SRC"
+cp -r test/fixtures/week6-repo/. "$SRC/"
+git -C "$SRC" init -q -b main
+git -C "$SRC" -c user.name=gate -c user.email=gate@local add -A
+git -C "$SRC" -c user.name=gate -c user.email=gate@local commit -q -m "week6 fixture"
+
+GATE_CONFIG="$ROOT/$TMP/room.yaml"
+node -e '
+  const fs = require("fs");
+  const YAML = require("yaml");
+  const cfg = YAML.parse(fs.readFileSync(process.argv[1], "utf8"));
+  cfg.repo = { kind: "local", path: process.argv[2], ref: "main" };
+  fs.writeFileSync(process.argv[3], YAML.stringify(cfg));
+' "$ROOM_CONFIG" "$SRC" "$GATE_CONFIG"
+
+AUTH_DEV_MODE=true ROOM_CONFIG="$GATE_CONFIG" ROOMS_SOURCE_ROOT="$SRC_ROOT" PORT="$PORT" \
   node apps/api/dist/index.js >"$TMP/server.log" 2>&1 &
 SERVER_PID=$!
 for _ in $(seq 1 40); do
@@ -124,10 +146,10 @@ B_ID=$(bcurl "$BASE/auth/me" | jget id)
 # İnceleme başlığı "Ayse · N yorumluk inceleme" olarak görünsün.
 psql_q "UPDATE users SET name='Ayse' WHERE id='$B_ID'" >/dev/null
 
-# Fixture agent'tan ÖNCE: taban onu içersin, diff sadece agent'ın işini göstersin.
-WSDIR="rooms-data/$ROOM/$WS"
-mkdir -p "$WSDIR"
-cp -r test/fixtures/week6-repo/. "$WSDIR/"
+# Fixture merkez depodan klonlandi; taban onu iceriyor.
+if ! room_sh "$ROOM" "agent-$AGENT" "test -f /room/$WS/src/order.js" >/dev/null; then
+  echo "klon beklenen dosyayi tasimiyor"; tail -20 "$TMP/server.log"; exit 1
+fi
 
 acurl -o /dev/null -X POST "$BASE/rooms/$ROOM/agents/$AGENT/start"
 ST="?"
