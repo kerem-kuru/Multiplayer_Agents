@@ -3,7 +3,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { DiffPublisher } from "@agent-rooms/gitkit";
+import { ContractsWatcher, DiffPublisher } from "@agent-rooms/gitkit";
 import type { NewRoomEvent } from "@agent-rooms/protocol";
 import {
   AgentConfig,
@@ -134,6 +134,22 @@ const diff = new DiffPublisher({
   base: baseCheckpointId && baseTree ? { checkpointId: baseCheckpointId, treeSha: baseTree } : null,
   log: (level, msg) => out({ kind: "log", level, msg }),
 });
+/**
+ * `contracts/` takibi (Hafta 7, Adim 7).
+ *
+ * Diff yayimcisi agent'in KENDI deposunu izliyor; contracts onun disinda.
+ * Ilk tarama TABANI kuruyor: agent baslamadan once orada olan dosyalar
+ * "agent degistirdi" diye yayimlanmiyor.
+ */
+const contracts = new ContractsWatcher({
+  roomId,
+  sessionId,
+  agent: agent.name,
+  emit: (event) => emit(event),
+  log: (level, msg) => out({ kind: "log", level, msg }),
+});
+await contracts.scan(null);
+
 if (!diff.enabled) {
   out({
     kind: "log",
@@ -150,8 +166,34 @@ if (!diff.enabled) {
  * bir tool çalıştıysa diff yeniden hesaplanır. Hesap zaten artımlı, boşuna
  * koşarsa hiçbir event üretmez.
  */
+/**
+ * Izin denetimi (Hafta 7, Adim 9) — runner OLCER, DUZELTMEZ.
+ * Gerekce ve sozlesme packages/runner/src/runner.ts ile ayni.
+ */
+async function reportIsolationDrift(): Promise<void> {
+  const expected = process.env.ISOLATION_EXPECTED;
+  if (!expected) return;
+  try {
+    const res = spawnSync("stat", ["-c", "%U:%G %a", process.cwd()], { encoding: "utf8" });
+    const actual = (res.stdout ?? "").trim();
+    if (!actual || actual === expected) return;
+    out({ kind: "isolation_drift", path: process.cwd(), actual });
+  } catch {
+    // Sunucudaki 5 dakikalik denetim yedegi.
+  }
+}
+
 const markDirtyFrom = (event: NewRoomEvent, messageId: string): void => {
-  if (event.type === "tool.result" || event.type === "tool.call") diff.markDirty(messageId);
+  if (event.type === "tool.result" || event.type === "tool.call") {
+    diff.markDirty(messageId);
+    /*
+     * Gemini CLI tool GIRDISININ yolunu vermiyor (yalnizca `status`), bu
+     * yuzden Claude yolundaki "yolu bilinen aracta dogrudan bak" kisayolu
+     * burada yok: her tool cagrisindan sonra tam tarama. Tarama ucuz —
+     * icerik yalnizca damga degisen dosyalar icin okunuyor.
+     */
+    void contracts.scan(messageId).catch(() => undefined);
+  }
 };
 
 function runTurn(messageId: string, text: string): Promise<void> {
@@ -310,6 +352,8 @@ function runTurn(messageId: string, text: string): Promise<void> {
               }),
             );
         }
+        await contracts.scan(messageId).catch(() => undefined);
+        await reportIsolationDrift();
         out({ kind: "turn_end", messageId, sdkSessionId: geminiSessionId, ok });
         child = null;
         resolve();

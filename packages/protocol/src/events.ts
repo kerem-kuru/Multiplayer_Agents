@@ -368,6 +368,76 @@ export const TaskUpdated = ev(
  *
  * İstenen rol yalnızca `member`: `owner` istemek bir yetki devri, istek değil.
  */
+/**
+ * `contracts/` altinda bir dosya degisti.
+ *
+ * Neden ayri bir event (Hafta 6 diff'i yetmiyor): `contracts/` agent'in cwd'si
+ * DISINDA. Hafta 6'nin canli diff yayimi agent'in worktree'sini izliyor ve
+ * contracts'i hic gormuyor.
+ *
+ * ICERIK EVENT'E GIRMEZ — yalnizca hash ve boyut. Sozlesme dosyalari buyuyebilir
+ * ve her degisiklikte tam icerigi log'a yazmak log'u sisirirdi; icerigi gormek
+ * isteyen UI ayri bir uctan okur (redaction'dan gecerek).
+ */
+export const ContractChanged = ev(
+  "contract.changed",
+  z.object({
+    ...AgentRef,
+    messageId: z.string().uuid().nullable(),
+    /** `contracts/` altinda goreli yol. */
+    path: z.string().min(1),
+    sha256: z.string().min(1),
+    size: z.number().int().nonnegative(),
+    deleted: z.boolean(),
+  }),
+);
+
+/**
+ * Cakisma tespit edildi.
+ *
+ * `conflictId` DETERMINISTIK: tur + sirali agent adlari + yol. Rastgele olsaydi
+ * ayni cakisma her olcumde "yeni" sayilir ve ekran surekli yanip sonerdi.
+ *
+ * Bu bir ENGELLEME degil, bir GORUNURLUK. Dosyalar kilitli degil; amac insanin
+ * durumu gormesi. Gercek birlestirme cakismasi kontrolu (`merge-tree`) Hafta 9.
+ */
+export const ConflictDetected = ev(
+  "conflict.detected",
+  z.object({
+    conflictId: z.string().min(1),
+    kind: z.enum(["path_overlap", "contracts_race"]),
+    agents: z.array(AgentName).min(2),
+    paths: z.array(z.string().min(1)).min(1),
+  }),
+);
+
+export const ConflictCleared = ev(
+  "conflict.cleared",
+  z.object({ conflictId: z.string().min(1) }),
+);
+
+/**
+ * Izin kaymasi: agent kendi klasorunun iznini gevsetti.
+ *
+ * Agent kendi worktree dizininin SAHIBI oldugu icin `chmod 777 .` yapabilir. Bu
+ * yalnizca kendi izolasyonunu zayiflatir ama sessiz kalmamali.
+ *
+ * Duzeltmeyi runner YAPAMAZ (agent kullanicisiyla kosuyor, chown yetkisi yok);
+ * AgentManager root exec ile duzeltir ve TEK bir event yazar. Bu bilincli:
+ * duzeltebilen taraf ile kayan taraf ayri olmali.
+ */
+export const IsolationViolation = ev(
+  "isolation.violation",
+  z.object({
+    ...AgentRef,
+    path: z.string().min(1),
+    /** "agent-frontend:wtr-frontend 0750" bicimi. */
+    expected: z.string().min(1),
+    actual: z.string().min(1),
+    fixed: z.boolean(),
+  }),
+);
+
 export const AccessRequested = ev(
   "access.requested",
   z.object({
@@ -594,6 +664,10 @@ const EVENT_SCHEMAS = [
   TaskUpdated,
   AccessRequested,
   AccessResolved,
+  ContractChanged,
+  ConflictDetected,
+  ConflictCleared,
+  IsolationViolation,
   ApprovalRequested,
   ApprovalResolved,
   CommentOnLine,

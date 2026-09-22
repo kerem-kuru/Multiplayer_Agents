@@ -131,6 +131,8 @@ export interface AgentView {
   lastError: string | null;
   /** Agent'ın kendi branch'i: room-<kısa-id>/<ad> (Hafta 7). */
   branch: string | null;
+  /** Son 5 izin kaymasi — hepsi degil: kart ve detay yalnizca son durumu gosteriyor. */
+  isolationViolations: IsolationViolationView[];
   /** Eski → yeni. */
   turns: TurnView[];
   /**
@@ -173,6 +175,31 @@ export interface AccessRequestView {
   seq: number;
 }
 
+/** Acik bir cakisma. `id` deterministik: ayni cakisma tekrar "yeni" sayilmaz. */
+export interface ConflictView {
+  id: string;
+  kind: "path_overlap" | "contracts_race";
+  agents: string[];
+  paths: string[];
+}
+
+/** `contracts/` altindaki bir dosyanin son bilinen hali. Icerik YOK. */
+export interface ContractView {
+  sha256: string;
+  size: number;
+  lastAgent: string;
+  at: string;
+  deleted: boolean;
+}
+
+export interface IsolationViolationView {
+  path: string;
+  expected: string;
+  actual: string;
+  fixed: boolean;
+  at: string;
+}
+
 export interface RoomView {
   lastSeq: number;
   agents: Record<string, AgentView>;
@@ -183,12 +210,17 @@ export interface RoomView {
    * Depo kurulmadan önce null.
    */
   baseSha: string | null;
+  /** Acik cakismalar — kapanan (`conflict.cleared`) listeden dusuyor. */
+  conflicts: ConflictView[];
+  /** `contracts/` altindaki dosyalar: yol -> son durum. */
+  contracts: Record<string, ContractView>;
 }
 
 const emptyAgent = (): AgentView => ({
   status: "stopped",
   lastError: null,
   branch: null,
+  isolationViolations: [],
   turns: [],
   queue: [],
   running: null,
@@ -234,8 +266,10 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
         access: structuredClone(base.access ?? []),
         // Eski snapshot'lar (sürüm < 5) taban commit'i taşımıyor.
         baseSha: base.baseSha ?? null,
+        conflicts: structuredClone(base.conflicts ?? []),
+        contracts: structuredClone(base.contracts ?? {}),
       }
-    : { lastSeq: 0, agents: {}, access: [], baseSha: null };
+    : { lastSeq: 0, agents: {}, access: [], baseSha: null, conflicts: [], contracts: {} };
 
   // Tekrarı yut: aynı event iki kez gelirse sonuç değişmemeli.
   const applied = new Set<number>();
@@ -602,6 +636,60 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
         // ayrıca bir "inceleme" nesnesi tutmak aynı bilgiyi ikinci kez
         // saklamak olurdu.
         break;
+
+      case "contract.changed": {
+        const p = e.payload as {
+          agent?: unknown; path?: unknown; sha256?: unknown; size?: unknown; deleted?: unknown;
+        };
+        if (typeof p.path === "string" && typeof p.agent === "string") {
+          view.contracts[p.path] = {
+            sha256: typeof p.sha256 === "string" ? p.sha256 : "",
+            size: typeof p.size === "number" ? p.size : 0,
+            lastAgent: p.agent,
+            at: e.ts,
+            deleted: p.deleted === true,
+          };
+        }
+        break;
+      }
+
+      case "conflict.detected": {
+        const p = e.payload as { conflictId?: unknown; kind?: unknown; agents?: unknown; paths?: unknown };
+        if (typeof p.conflictId === "string" && !view.conflicts.some((c) => c.id === p.conflictId)) {
+          view.conflicts.push({
+            id: p.conflictId,
+            kind: p.kind === "contracts_race" ? "contracts_race" : "path_overlap",
+            agents: Array.isArray(p.agents) ? (p.agents as string[]) : [],
+            paths: Array.isArray(p.paths) ? (p.paths as string[]) : [],
+          });
+        }
+        break;
+      }
+
+      case "conflict.cleared": {
+        const id = (e.payload as { conflictId?: unknown }).conflictId;
+        if (typeof id === "string") view.conflicts = view.conflicts.filter((c) => c.id !== id);
+        break;
+      }
+
+      case "isolation.violation": {
+        const p = e.payload as {
+          agent?: unknown; path?: unknown; expected?: unknown; actual?: unknown; fixed?: unknown;
+        };
+        if (typeof p.agent === "string" && typeof p.path === "string") {
+          const a = agentOf(p.agent);
+          a.isolationViolations.push({
+            path: p.path,
+            expected: typeof p.expected === "string" ? p.expected : "",
+            actual: typeof p.actual === "string" ? p.actual : "",
+            fixed: p.fixed === true,
+            at: e.ts,
+          });
+          // Son 5: tamami tutulsaydi uzun suren bir oda snapshot'i sisirirdi.
+          if (a.isolationViolations.length > 5) a.isolationViolations.shift();
+        }
+        break;
+      }
 
       case "room.repo_initialized": {
         // Merkez depo kuruldu; tüm klonlar bu commit'ten çıktı.

@@ -11,4 +11,9 @@ export * from "./runner-protocol.js";
 export * from "./stream.js";
 
 /** Protokol sürümü. İstemci ve sunucu bu numarada anlaşmazsa bağlanmaz. */
-export const PROTOCOL_VERSION = 3;
+/**
+ * Hafta 7'de 4'e cikti: runner protokolune `isolation_drift` ciktisi ve
+ * contracts takibi girdi. Bayat imajla agent `stopped`da kalir ve sunucu
+ * logunda "imaj protokol surumu uyusmuyor" yazar → `npm run room:build`.
+ */
+export const PROTOCOL_VERSION = 4;

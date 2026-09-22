@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import readline from "node:readline";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { DiffPublisher } from "@agent-rooms/gitkit";
+import { ContractsWatcher, DiffPublisher } from "@agent-rooms/gitkit";
 import type { NewRoomEvent } from "@agent-rooms/protocol";
 import {
   AgentConfig,
@@ -109,12 +109,53 @@ const diff = new DiffPublisher({
   base: baseCheckpointId && baseTree ? { checkpointId: baseCheckpointId, treeSha: baseTree } : null,
   log: (level, msg) => out({ kind: "log", level, msg }),
 });
+/**
+ * `contracts/` takibi (Hafta 7, Adim 7).
+ *
+ * Diff yayimcisi agent'in KENDI deposunu izliyor; contracts onun disinda.
+ * Ilk tarama TABANI kuruyor: agent baslamadan once orada olan dosyalar
+ * "agent degistirdi" diye yayimlanmiyor.
+ */
+const contracts = new ContractsWatcher({
+  roomId,
+  sessionId,
+  agent: agent.name,
+  emit: (event) => emit(event),
+  log: (level, msg) => out({ kind: "log", level, msg }),
+});
+await contracts.scan(null);
+
 if (!diff.enabled) {
   out({
     kind: "log",
     level: "warn",
     msg: "diff tabanı yok (DIFF_BASE_*) — canlı diff yayımlanmayacak",
   });
+}
+
+/**
+ * Izin denetimi (Hafta 7, Adim 9) — runner OLCER, DUZELTMEZ.
+ *
+ * Agent kendi worktree dizininin sahibi oldugu icin `chmod 777 .` yapabilir.
+ * Runner duzeltemez: agent kullanicisiyla kosuyor ve `chown`/`chmod` geri
+ * alma yetkisi ayricalik ister. Bu yuzden yalnizca bildiriyor; AgentManager
+ * root exec ile duzeltip TEK bir `isolation.violation` event'i yaziyor.
+ *
+ * Beklenen deger ortamdan geliyor (ISOLATION_EXPECTED); sunucu izin planindan
+ * uretiyor. Runner kendi "dogru izin" tanimini tasisaydi plan ile iki kopya
+ * olurdu ve biri digerinden kayardi.
+ */
+async function reportIsolationDrift(): Promise<void> {
+  const expected = process.env.ISOLATION_EXPECTED;
+  if (!expected) return;
+  try {
+    const res = spawnSync("stat", ["-c", "%U:%G %a", process.cwd()], { encoding: "utf8" });
+    const actual = (res.stdout ?? "").trim();
+    if (!actual || actual === expected) return;
+    out({ kind: "isolation_drift", path: process.cwd(), actual });
+  } catch {
+    // stat yoksa sessiz gec: denetimin ikinci kopyasi sunucuda 5 dakikada bir kosuyor.
+  }
 }
 
 async function runTurn(messageId: string, text: string, ac: AbortController): Promise<void> {
@@ -206,6 +247,16 @@ async function runTurn(messageId: string, text: string, ac: AbortController): Pr
                    * kendi aletinin içinde bekletirdi.
                    */
                   diff.markDirty(messageId);
+                  /*
+                   * contracts/ agent'in cwd'si DISINDA; diff yayimcisi onu
+                   * gormuyor. Yolu bilinen aracta dogrudan, Bash'te tam
+                   * tarama ile bakiyoruz.
+                   */
+                  if (typeof path === "string" && path.length > 0) {
+                    await contracts.onToolPath(path, messageId).catch(() => undefined);
+                  } else {
+                    await contracts.scan(messageId).catch(() => undefined);
+                  }
                   return {};
                 },
               ],
@@ -279,6 +330,18 @@ async function runTurn(messageId: string, text: string, ac: AbortController): Pr
           out({ kind: "log", level: "warn", msg: `turn checkpoint'i alınamadı: ${String(err)}` }),
         );
     }
+
+    /*
+     * Turn sonunda contracts taramasi (Hafta 7, Adim 7).
+     *
+     * Tool girdisinden okunamayan degisiklikleri burada yakaliyoruz:
+     * `sed -i`, `cat >` ve kod ureticileri sozlesmeyi tool yolunu
+     * bildirmeden degistirebiliyor.
+     */
+    await contracts.scan(messageId).catch(() => undefined);
+
+    // Izin denetimi: agent kendi klasorunun iznini gevsetmis olabilir.
+    await reportIsolationDrift();
 
     // Her durumda gönderilir — host bunu görmeden agent'ı idle'a almaz.
     out({ kind: "turn_end", messageId, sdkSessionId, ok });

@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { Actor } from "@agent-rooms/protocol";
 import { NewRoomEvent, PROTOCOL_VERSION } from "@agent-rooms/protocol";
 import { SNAPSHOT_VERSION } from "@agent-rooms/view";
+import { redactValue } from "@agent-rooms/redact";
 import {
   AgentManager,
   AgentQueue,
@@ -32,7 +33,9 @@ import {
   readEvents,
   setViewing,
   readJournal,
-} from "@agent-rooms/core";
+  archiveRoom,
+  execCapture,
+  getAllowPatterns,} from "@agent-rooms/core";
 import { loadApiConfig, resolveConfigPath, type ApiConfig } from "./config.js";
 import { HttpError } from "./http-error.js";
 import {
@@ -225,6 +228,64 @@ export function createApp(
       },
       201,
     );
+  });
+
+  /**
+   * Odayı arşivle (Hafta 7, Adım 10).
+   *
+   * Container ve volume gider; `rooms` satırı ve event log DURUR — append-only
+   * kuralı. Odanın tarihi okunmaya devam eder.
+   *
+   * Yalnızca `owner`: bu geri alınamaz ve odadaki herkesin işini bitirir.
+   */
+  app.delete("/rooms/:id", async (c) => {
+    await requireRoom(c, c.req.param("id"), "owner");
+    const { room } = await mustFindRoom(c.req.param("id"));
+
+    // Önce runner'lara kapanma sinyali: süreçler container'la birlikte
+    // öldürülürse yarım kalan turn'ün sebebi log'a yazılmaz.
+    // Agent yöneticisi yoksa (anahtarsız kurulum) zaten koşan runner yok.
+    await manager?.shutdownRoom(room.id).catch(() => undefined);
+    await archiveRoom(room.id, getPool(), (level, message) => {
+      if (level === "warn") console.warn(message);
+      else console.log(message);
+    });
+    return c.json({ ok: true, roomId: room.id, status: "archived" });
+  });
+
+  /**
+   * Bir sözleşme dosyasının İÇERİĞİ (Hafta 7, Adım 7).
+   *
+   * İçerik event log'a girmiyor (orada yalnızca sha256 ve boyut var); görmek
+   * isteyen buradan okuyor. Redaction'dan GEÇER: workspace içeriği sunan her
+   * yol geçer.
+   *
+   * Dosya container içinde root ile okunuyor — agent'ların hiçbirinin
+   * kimliğini kullanmıyoruz: hangi agent'ın okuma yetkisi olduğu sorusu
+   * sözleşme dosyaları için anlamsız, hepsi zaten ortak alanda.
+   */
+  app.get("/rooms/:id/contracts/*", async (c) => {
+    await requireRoom(c, c.req.param("id"));
+    const { room } = await mustFindRoom(c.req.param("id"));
+    const session = await latestSession(room.id);
+    if (!session?.containerId) throw new HttpError(409, "oda çalışmıyor");
+
+    const rel = c.req.path.split("/contracts/")[1] ?? "";
+    // Yol kaçışı: `..` ile contracts dışına çıkılamaz.
+    if (!rel || rel.includes("..")) throw new HttpError(400, "geçersiz sözleşme yolu");
+
+    const res = await execCapture({
+      container: session.containerId,
+      user: "root",
+      cmd: ["cat", `/room/contracts/${rel}`],
+      timeoutMs: 15_000,
+    });
+    if (res.exitCode !== 0) throw new HttpError(404, "sözleşme dosyası bulunamadı");
+
+    return c.json({
+      path: rel,
+      content: redactValue(res.stdout, { allowPatterns: getAllowPatterns(room.id) }).text,
+    });
   });
 
   app.get("/rooms/:id", async (c) => {

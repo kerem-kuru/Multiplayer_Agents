@@ -182,3 +182,21 @@ export async function listRoomContainers(roomId?: string): Promise<Docker.Contai
   if (roomId) filters.label!.push(`${ROOM_LABEL}=${roomId}`);
   return getDocker().listContainers({ all: true, filters: JSON.stringify(filters) });
 }
+
+/**
+ * Odaya ait etiketi taşıyan volume'lar. Sweeper sahipsizleri bununla buluyor.
+ *
+ * Volume container'dan UZUN yaşar: container silinse bile volume kalır ve
+ * kimse temizlemezse diskte birikir.
+ */
+export async function listRoomVolumes(): Promise<Array<{ name: string; roomId: string }>> {
+  const res = await getDocker().listVolumes({
+    filters: JSON.stringify({ label: [`${MANAGED_LABEL}=true`] }),
+  });
+  const out: Array<{ name: string; roomId: string }> = [];
+  for (const v of res.Volumes ?? []) {
+    const roomId = (v.Labels ?? {})[ROOM_LABEL];
+    if (roomId) out.push({ name: v.Name, roomId });
+  }
+  return out;
+}

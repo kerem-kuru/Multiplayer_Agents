@@ -8,7 +8,10 @@ import {
   configureSnapshots,
   createRedactingLogger,
   getDriverWatcher,
+  startIsolationAudit,
+  startSweeper,
   sweepAbsentDrivers,
+  sweepOrphans,
 } from "@agent-rooms/core";
 import { collectProviderEnv, hasProviderBackend } from "@agent-rooms/protocol";
 import { createApp } from "./app.js";
@@ -124,6 +127,42 @@ getDriverWatcher({
   graceMs: process.env.DRIVER_GRACE_MS ? Number(process.env.DRIVER_GRACE_MS) : undefined,
   log: (level, msg) => console[level === "info" ? "log" : level](msg),
 });
+
+/**
+ * Sahipsiz container ve volume temizligi (Hafta 7, Adim 10).
+ *
+ * Acilista bir kez + saatte bir. Docker yeniden baslatildiginda ya da bir oda
+ * elle silindiginde geride kalan container/volume'lar birikmesin. Event log'a
+ * YAZMAZ: silinen oda artik yok.
+ */
+const sweepNotice = (level: "info" | "warn", message: string): void =>
+  level === "warn" ? console.warn(message) : console.log(message);
+const firstSweep = await sweepOrphans(undefined, sweepNotice).catch((err) => {
+  console.error("sweeper acilista dustu:", err);
+  return null;
+});
+if (firstSweep) {
+  const n =
+    firstSweep.removedContainers.length +
+    firstSweep.removedVolumes.length +
+    firstSweep.failedRooms.length;
+  if (n > 0) {
+    console.log(
+      `sweeper: ${firstSweep.removedContainers.length} container, ` +
+        `${firstSweep.removedVolumes.length} volume silindi, ` +
+        `${firstSweep.failedRooms.length} oda failed`,
+    );
+  }
+}
+startSweeper(undefined, undefined, sweepNotice);
+
+/**
+ * Izin denetimi (Hafta 7, Adim 9): 5 dakikada bir tum odalar.
+ *
+ * Runner turn sonunda kendi klasorunu zaten olcuyor; bu ikinci kopya agent
+ * BOSTAYKEN yapilan degisiklikleri yakaliyor.
+ */
+startIsolationAudit(undefined, undefined, (msg) => console.warn(msg));
 
 const app = createApp(cfg, manager, queue);
 

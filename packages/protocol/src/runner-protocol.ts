@@ -83,11 +83,26 @@ export const RunnerOutput = z.discriminatedUnion("kind", [
     level: z.enum(["info", "warn", "error"]),
     msg: z.string(),
   }),
+  /**
+   * Izin kaymasi (Hafta 7, Adim 9).
+   *
+   * Runner event YAZMAZ, bildirir. Sebep: duzeltmeyi yapamaz — agent
+   * kullanicisiyla kosuyor ve `chown` root ister. AgentManager once root exec
+   * ile duzeltir, SONRA tek bir `isolation.violation` event'i yazar; boylece
+   * event "kaydi ve duzeltildi mi" bilgisini birlikte tasir.
+   */
+  z.object({
+    kind: z.literal("isolation_drift"),
+    path: z.string().min(1),
+    /** "<sahip>:<grup> <mod>" — ornegin "agent-frontend:wtr-frontend 777". */
+    actual: z.string().min(1),
+  }),
 ]);
 export type RunnerOutput =
   | { kind: "ready"; pid: number; protocolVersion?: number }
   | { kind: "heartbeat"; busy: boolean }
   | { kind: "event"; event: NewRoomEvent }
+  | { kind: "isolation_drift"; path: string; actual: string }
   | { kind: "turn_end"; messageId: string; sdkSessionId: string | null; ok: boolean }
   | { kind: "log"; level: "info" | "warn" | "error"; msg: string };
 

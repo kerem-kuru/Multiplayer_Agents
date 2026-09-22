@@ -23,8 +23,10 @@ import {
 } from "../diff.js";
 import { containerStatus, roomContainerName } from "../docker/container.js";
 import { getRoomConfig, latestSession } from "../room/rooms.js";
-import { killStrayRunners, startRunnerExec, type RunnerExec } from "./exec.js";
-import { agentUser } from "../room-fs.js";
+import { execCapture, killStrayRunners, startRunnerExec, type RunnerExec } from "./exec.js";
+import { detectConflicts, diffConflicts } from "../conflicts.js";
+import { currentView } from "../snapshot.js";
+import { agentUser, wtrGroup } from "../room-fs.js";
 import {
   ensureRuntimeRows,
   forceStopped,
@@ -372,6 +374,13 @@ export class AgentManager {
       AGENT_MODEL: modelFor(agent, this.opts.modelOverrides, this.opts.modelOverride),
       AGENT_MAX_TURNS: String(this.opts.maxTurns),
       AGENT_MAX_BUDGET_USD: String(this.opts.maxBudgetUsd),
+      /*
+       * Beklenen izin — runner bunu OLCER, uretmez (Hafta 7, Adim 9).
+       *
+       * Runner kendi "dogru izin" tanimini tasisaydi izin planiyla iki kopya
+       * olur ve biri digerinden kayardi. Tek kaynak plan.
+       */
+      ISOLATION_EXPECTED: `${agentUser(agent.name)}:${wtrGroup(agent.name)} 750`,
     };
     // Her koşum ortamı KENDİ anahtarını alır; diğerininkini görmez.
     if (agent.runtime === "gemini") {
@@ -685,6 +694,15 @@ export class AgentManager {
           return;
         }
         await appendEvent(output.event, this.pool);
+        /*
+         * Cakisma tespiti (Hafta 7, Adim 8).
+         *
+         * Yalnizca diff ve sozlesme degisince: her event'te calistirmak
+         * projeksiyonu turn basina onlarca kez kurmak olurdu.
+         */
+        if (output.event.type === "diff.updated" || output.event.type === "contract.changed") {
+          void this.refreshConflicts(handle.roomId, handle.sessionId);
+        }
         return;
       case "turn_end": {
         const rt = await getRuntime(handle.roomId, handle.agent.name, this.pool);
@@ -713,7 +731,111 @@ export class AgentManager {
       case "log":
         this.opts.log(output.level, `[${handle.agent.name}] ${output.msg}`);
         return;
+
+      /*
+       * Izin kaymasi (Hafta 7, Adim 9).
+       *
+       * Runner olctu ve bildirdi; duzeltmeyi O YAPAMAZ (agent kullanicisiyla
+       * kosuyor). Once root exec ile duzeltiyoruz, SONRA tek bir event
+       * yaziyoruz: `fixed` alani duzeltmenin tutup tutmadigini soyluyor.
+       * Iki ayri event (kaydi / duzeltildi) yazmak, ekranda hep "kaydi"
+       * gorunup duzeltmenin kaybolmasi riskini tasirdi.
+       */
+      case "isolation_drift": {
+        void this.handleIsolationDrift(handle, output.path, output.actual);
+        return;
+      }
     }
+  }
+
+  /**
+   * Cakismalari yeniden hesaplar ve YALNIZCA FARKI event olarak yazar.
+   *
+   * Ayni cakisma icin ikinci bir `conflict.detected` yazilmaz: `conflictId`
+   * deterministik, onceki durumla karsilastiriliyor. Aksi halde her turn
+   * sonunda ayni uyari tekrar yazilir ve ekran yanip sonerdi.
+   */
+  private async refreshConflicts(roomId: string, sessionId: string): Promise<void> {
+    try {
+      const { view } = await currentView(sessionId, this.pool);
+      const current = detectConflicts(view);
+      const previous = view.conflicts.map((c) => ({
+        id: c.id,
+        kind: c.kind,
+        agents: c.agents,
+        paths: c.paths,
+      }));
+      const { detected, cleared } = diffConflicts(previous, current);
+
+      for (const c of detected) {
+        await appendEvent(
+          {
+            roomId,
+            sessionId,
+            actor: { kind: "system" },
+            type: "conflict.detected",
+            payload: { conflictId: c.id, kind: c.kind, agents: c.agents, paths: c.paths },
+          },
+          this.pool,
+        );
+      }
+      for (const id of cleared) {
+        await appendEvent(
+          {
+            roomId,
+            sessionId,
+            actor: { kind: "system" },
+            type: "conflict.cleared",
+            payload: { conflictId: id },
+          },
+          this.pool,
+        );
+      }
+    } catch (err) {
+      this.opts.log("warn", `cakisma tespiti dustu: ${String(err)}`);
+    }
+  }
+
+  private async handleIsolationDrift(
+    handle: { roomId: string; sessionId: string; container: string; agent: { name: string } },
+    path: string,
+    actual: string,
+  ): Promise<void> {
+    const expected = `${agentUser(handle.agent.name)}:${wtrGroup(handle.agent.name)} 750`;
+    let fixed = false;
+    try {
+      await execCapture({
+        container: handle.container,
+        user: "root",
+        cmd: [
+          "sh",
+          "-c",
+          `chown ${agentUser(handle.agent.name)}:${wtrGroup(handle.agent.name)} ${path} && chmod 0750 ${path}`,
+        ],
+        timeoutMs: 30_000,
+      });
+      // Duzeltme tuttu mu: OLC, varsayma.
+      const after = await execCapture({
+        container: handle.container,
+        user: "root",
+        cmd: ["stat", "-c", "%U:%G %a", path],
+        timeoutMs: 30_000,
+      });
+      fixed = after.stdout.trim() === expected;
+    } catch {
+      fixed = false;
+    }
+
+    await appendEvent(
+      {
+        roomId: handle.roomId,
+        sessionId: handle.sessionId,
+        actor: { kind: "system" },
+        type: "isolation.violation",
+        payload: { agent: handle.agent.name, path, expected, actual, fixed },
+      },
+      this.pool,
+    ).catch(() => undefined);
   }
 
   // --- mesaj --------------------------------------------------------------
@@ -1062,6 +1184,21 @@ export class AgentManager {
       await forceStopped(row.roomId, row.agentName, "server restart", this.pool);
     }
     return rows.length;
+  }
+
+  /**
+   * Bir ODANIN tüm runner'larına kibar kapanma (Hafta 7, Adım 10).
+   *
+   * Container silinmeden önce çağrılır: süreçler container'la birlikte
+   * öldürülürse yarım kalan turn'ün SEBEBİ event log'a yazılmaz ve ekranda
+   * açıklamasız bir "çalışıyor" kalır.
+   */
+  async shutdownRoom(roomId: string): Promise<void> {
+    await Promise.all(
+      [...this.handles.values()]
+        .filter((h) => h.roomId === roomId)
+        .map((h) => this.stop(h.roomId, h.agent.name).catch(() => undefined)),
+    );
   }
 
   /** Sunucu kapanırken: tüm runner'lara kibar kapanma. */
