@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CARD_LINE_MAX, firstSentence, oneLine, toCard, toCards } from "../src/card.js";
+import { CARD_LINE_MAX, firstSentence, oneLine, summarizeTurn, toCard, toCards } from "../src/card.js";
 import type { AgentView, RoomView, TurnView } from "../src/project.js";
 
 /**
@@ -264,5 +264,24 @@ describe("yardımcılar", () => {
 
   it("noktası olmayan metin olduğu gibi döner", () => {
     expect(firstSentence("nokta yok")).toBe("nokta yok");
+  });
+});
+
+describe("Özet sekmesi: kapalı turn satırı", () => {
+  it("ilk dolu satırı alır ve tek satıra indirir", () => {
+    const t = turn({ prompt: "\n  api ucunu yaz\nayrıntı: şu şu" });
+    expect(summarizeTurn(t).firstLine).toBe("api ucunu yaz");
+  });
+
+  it("uzun ilk satır kart sınırında kırpılır", () => {
+    const t = turn({ prompt: "x".repeat(300) });
+    expect(summarizeTurn(t).firstLine.length).toBe(CARD_LINE_MAX);
+  });
+
+  it("aynı dosyaya iki yazım tek dosya sayılır", () => {
+    const a = { ...toolItem("Edit", { file_path: "a.js" }), files: ["a.js"] };
+    const b = { ...toolItem("Write", { file_path: "a.js" }), seq: 11, files: ["a.js", "b.js"] };
+    const t = turn({ items: [a, b, toolItem("Bash", { command: "ls" })] });
+    expect(summarizeTurn(t).changedFiles).toBe(2);
   });
 });

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CommentView, TurnItem, TurnView } from "@agent-rooms/view";
-import { formatTool, stripAnsi } from "@agent-rooms/view";
+import { formatTool, stripAnsi, summarizeTurn } from "@agent-rooms/view";
 
 /**
  * Küratörlü akış — kağıt malzemesi.
@@ -234,58 +234,128 @@ export function ActivityFeed({
   return (
     <div style={{ padding: "8px 16px 24px", maxWidth: 900 }}>
       {turns.map((turn) => (
-        <section key={turn.messageId} style={{ margin: "0 0 22px" }}>
-          <header
-            style={{
-              display: "flex",
-              gap: 10,
-              alignItems: "baseline",
-              paddingBottom: 6,
-              borderBottom: "1px solid var(--ink)",
-            }}
-          >
-            {/*
-              İNCELEME TURN'Ü: başlıkta on iki satırlık ham prompt yerine
-              "Ayşe'nin 3 yorumluk incelemesi" yazar. Ham metin title'da durur;
-              tıklayınca Diff sekmesinde yorumlara gidilir.
-            */}
-            {turn.reviewId ? (
-              <button
-                onClick={() => onOpenReview?.(turn.reviewId!)}
-                disabled={!onOpenReview}
-                title={turn.prompt}
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  padding: 0,
-                  font: "inherit",
-                  fontSize: 15,
-                  fontWeight: 700,
-                  color: onOpenReview ? "var(--run)" : "inherit",
-                  textDecoration: onOpenReview ? "underline" : "none",
-                  cursor: onOpenReview ? "pointer" : "default",
-                }}
-              >
-                {turn.actor}'nin{" "}
-                {comments.filter((c) => c.reviewId === turn.reviewId).length || "?"} yorumluk
-                incelemesi
-              </button>
-            ) : (
-              <strong style={{ fontSize: 15 }}>{turn.prompt}</strong>
-            )}
-            <span style={{ color: "var(--ink-soft)", fontSize: 12 }}>{turn.actor}</span>
-            <span style={{ marginLeft: "auto", fontSize: 12 }}>
-              <Outcome turn={turn} />
-            </span>
-          </header>
-          {/* Soldaki ince ray: turn'ün içindekiler buraya girintilenir. */}
-          <div style={{ borderLeft: "1px solid var(--rule)", paddingLeft: 12, marginLeft: 3 }}>
-            {turn.items.map((item) => (
-              <Item key={`${item.kind}-${item.seq}`} item={item} onOpenFile={onOpenFile} />
-            ))}
-          </div>
-        </section>
+        <TurnBlock
+          key={turn.messageId}
+          turn={turn}
+          onOpenFile={onOpenFile}
+          comments={comments}
+          onOpenReview={onOpenReview}
+        />
       ))}
     </div>
+  );
+}
+
+/**
+ * Hafta 7, Adım 14 — Özet sekmesi.
+ *
+ * Turn'ler KAPALI başlar; kapalı turn tek satırdır: kim istedi · ilk satır ·
+ * sonuç · değişen dosya sayısı · süre. Koşan turn AÇIK başlar — o an olan
+ * biteni görmek için tıklamak gerekmesin. Açılınca Hafta 3'teki tool
+ * satırları görünür; tool çıktısı yine ancak satıra tıklayınca açılır.
+ *
+ * Açık/kapalı yalnızca İLK render'da seçilir: koşan turn bitince kullanıcının
+ * gözünün önünde kapanmaz.
+ */
+function TurnBlock({
+  turn,
+  onOpenFile,
+  comments,
+  onOpenReview,
+}: {
+  turn: TurnView;
+  onOpenFile?: (path: string) => void;
+  comments: CommentView[];
+  onOpenReview?: (reviewId: string) => void;
+}) {
+  const [open, setOpen] = useState(turn.outcome.kind === "running");
+  const summary = summarizeTurn(turn);
+
+  return (
+    <section style={{ margin: "0 0 14px" }}>
+      <header
+        style={{
+          display: "flex",
+          gap: 10,
+          alignItems: "baseline",
+          paddingBottom: 6,
+          borderBottom: open ? "1px solid var(--ink)" : "1px solid var(--rule)",
+        }}
+      >
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-label={open ? "turn'ü kapat" : "turn'ü aç"}
+          style={{ border: "none", background: "transparent", padding: 0, width: 14 }}
+        >
+          {open ? "▾" : "▸"}
+        </button>
+        {/*
+          İNCELEME TURN'Ü: başlıkta on iki satırlık ham prompt yerine
+          "Ayşe'nin 3 yorumluk incelemesi" yazar. Ham metin title'da durur;
+          tıklayınca Diff sekmesinde yorumlara gidilir.
+        */}
+        {turn.reviewId ? (
+          <button
+            onClick={() => onOpenReview?.(turn.reviewId!)}
+            disabled={!onOpenReview}
+            title={turn.prompt}
+            style={{
+              border: "none",
+              background: "transparent",
+              padding: 0,
+              font: "inherit",
+              fontSize: 15,
+              fontWeight: 700,
+              color: onOpenReview ? "var(--run)" : "inherit",
+              textDecoration: onOpenReview ? "underline" : "none",
+              cursor: onOpenReview ? "pointer" : "default",
+            }}
+          >
+            {turn.actor}'nin{" "}
+            {comments.filter((c) => c.reviewId === turn.reviewId).length || "?"} yorumluk
+            incelemesi
+          </button>
+        ) : (
+          <strong
+            style={{
+              fontSize: 15,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              minWidth: 0,
+            }}
+            title={turn.prompt}
+          >
+            {summary.firstLine}
+          </strong>
+        )}
+        <span style={{ color: "var(--ink-soft)", fontSize: 12, whiteSpace: "nowrap" }}>
+          {turn.actor}
+        </span>
+        {summary.changedFiles > 0 && (
+          <span style={{ color: "var(--run)", fontSize: 12, whiteSpace: "nowrap" }}>
+            {summary.changedFiles} dosya
+          </span>
+        )}
+        <span style={{ marginLeft: "auto", fontSize: 12, whiteSpace: "nowrap" }}>
+          <Outcome turn={turn} />
+        </span>
+      </header>
+      {/* Soldaki ince ray: turn'ün içindekiler buraya girintilenir.
+          Kapalıyken HİÇ render edilmez (DOM şişmesin). */}
+      {open && (
+        <div style={{ borderLeft: "1px solid var(--rule)", paddingLeft: 12, marginLeft: 3 }}>
+          {turn.prompt.includes("\n") && (
+            <div style={{ padding: "5px 0", whiteSpace: "pre-wrap", color: "var(--ink-soft)" }}>
+              {turn.prompt}
+            </div>
+          )}
+          {turn.items.map((item) => (
+            <Item key={`${item.kind}-${item.seq}`} item={item} onOpenFile={onOpenFile} />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

@@ -376,17 +376,19 @@ export function RoomPage({
             </div>
           )}
 
-          <div style={{ display: "flex", gap: 4, padding: "6px 14px 0" }}>
+          <div role="tablist" style={{ display: "flex", gap: 4, padding: "6px 14px 0" }}>
             {(["feed", "diff", "terminal"] as const).map((t) => (
               <button
                 key={t}
+                role="tab"
+                aria-selected={tab === t}
                 onClick={() => setTab(t)}
                 style={{
                   borderBottom: tab === t ? "2px solid var(--ink)" : "1px solid var(--rule)",
                   background: tab === t ? "#fff" : "transparent",
                 }}
               >
-                {t === "feed" ? "Etkinlik" : t === "diff" ? "Diff" : "Terminal"}
+                {t === "feed" ? "Özet" : t === "diff" ? "Diff" : "Terminal"}
                 {/* Sekme başlığında açık dosya ve açık yorum sayısı: hangi
                     sekmede iş olduğunu görmek için sekmeyi açmak gerekmesin. */}
                 {t === "diff" && (openFiles > 0 || openComments > 0) && (

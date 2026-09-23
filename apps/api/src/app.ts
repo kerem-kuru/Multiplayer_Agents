@@ -25,6 +25,7 @@ import {
   latestSession,
   listRooms,
   loadRoomConfig,
+  RoomConfigError,
   openRoom,
   listRoomsOverview,
   listPresence,
@@ -194,8 +195,22 @@ export function createApp(
       );
     }
 
-    const configPath = resolveConfigPath(cfg, parsed.data.configPath);
-    const { config, digest } = await loadRoomConfig(configPath);
+    // Geçersiz config İSTEMCİ hatasıdır (400), sunucu hatası değil: Hafta 7
+    // kuralları ("her worktree'nin tek yazarı sahibidir") burada reddediliyor
+    // ve mesaj kullanıcıya olduğu gibi ulaşmalı.
+    let loaded: Awaited<ReturnType<typeof loadRoomConfig>>;
+    try {
+      loaded = await loadRoomConfig(resolveConfigPath(cfg, parsed.data.configPath));
+    } catch (err) {
+      // Mesajın başı sunucudaki dosya yolu ("C:\...\room.yaml: ..."); istemciye gitmez.
+      if (err instanceof RoomConfigError) {
+        throw new HttpError(400, err.message.slice(err.message.lastIndexOf(": ") + 2), err.issues);
+      }
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code === "ENOENT") throw new HttpError(400, "konfigürasyon dosyası bulunamadı");
+      throw new HttpError(400, err instanceof Error ? err.message : String(err));
+    }
+    const { config, digest } = loaded;
 
     const result = await openRoom({
       config,

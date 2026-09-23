@@ -199,3 +199,26 @@ export function toCards(view: RoomView): AgentCard[] {
     .sort()
     .map((name) => toCard(name, view.agents[name]!, view));
 }
+
+/**
+ * Agent detayı, Özet sekmesi (Adım 14): KAPALI bir turn'ün tek satırı.
+ *
+ * "kim istedi · ilk satır · sonuç · değişen dosya sayısı · süre" — kim ve
+ * sonuç/süre zaten TurnView'da; burada türetilen iki şey var. Tool çıktısı
+ * buraya da girmez: özet satırı akışın kapalı hâlidir, terminalin değil.
+ */
+export interface TurnSummary {
+  /** İsteğin ilk dolu satırı, tek satıra indirilmiş. */
+  firstLine: string;
+  /** Turn boyunca değişen FARKLI dosya sayısı (aynı dosyaya iki yazım = 1). */
+  changedFiles: number;
+}
+
+export function summarizeTurn(turn: TurnView): TurnSummary {
+  const first = turn.prompt.split(/\r?\n/).find((l) => l.trim().length > 0) ?? "";
+  const files = new Set<string>();
+  for (const item of turn.items) {
+    if (item.kind === "tool") for (const f of item.files) files.add(f);
+  }
+  return { firstLine: oneLine(first), changedFiles: files.size };
+}
