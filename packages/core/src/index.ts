@@ -16,6 +16,7 @@ export * from "./diff.js";
 export * from "./room-fs.js";
 export * from "./repo.js";
 export * from "./conflicts.js";
+export * from "./contracts-read.js";
 export * from "./sweeper.js";
 export * from "./isolation.js";
 export * from "./reads.js";

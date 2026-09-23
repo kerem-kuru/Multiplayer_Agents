@@ -35,6 +35,7 @@ import {
   readJournal,
   archiveRoom,
   execCapture,
+  readContract,
   getAllowPatterns,
   markSeen,
   readMarks,} from "@agent-rooms/core";
@@ -158,7 +159,7 @@ export function createApp(
       ok: true,
       db: true,
       protocolVersion: PROTOCOL_VERSION,
-      week: 3,
+      week: 7,
       roomImage: cfg.roomImage,
       spawnContainer: cfg.spawnContainer,
       /**
@@ -263,9 +264,10 @@ export function createApp(
    * isteyen buradan okuyor. Redaction'dan GEÇER: workspace içeriği sunan her
    * yol geçer.
    *
-   * Dosya container içinde root ile okunuyor — agent'ların hiçbirinin
-   * kimliğini kullanmıyoruz: hangi agent'ın okuma yetkisi olduğu sorusu
-   * sözleşme dosyaları için anlamsız, hepsi zaten ortak alanda.
+   * Dosya root ile DEĞİL, ayrıcalıksız `nobody:rooms-contracts` ile okunuyor:
+   * contracts/ içindeki symlink agent'ın elinden çıkmış veridir. Root ile
+   * okuyan ilk sürüm başka agent'ın dosyasını ve /etc/shadow'u sızdırdı.
+   * Ayrıntı: packages/core/src/contracts-read.ts.
    */
   app.get("/rooms/:id/contracts/*", async (c) => {
     await requireRoom(c, c.req.param("id"));
@@ -274,20 +276,14 @@ export function createApp(
     if (!session?.containerId) throw new HttpError(409, "oda çalışmıyor");
 
     const rel = c.req.path.split("/contracts/")[1] ?? "";
-    // Yol kaçışı: `..` ile contracts dışına çıkılamaz.
-    if (!rel || rel.includes("..")) throw new HttpError(400, "geçersiz sözleşme yolu");
-
-    const res = await execCapture({
-      container: session.containerId,
-      user: "root",
-      cmd: ["cat", `/room/contracts/${rel}`],
-      timeoutMs: 15_000,
-    });
-    if (res.exitCode !== 0) throw new HttpError(404, "sözleşme dosyası bulunamadı");
+    // Symlink ve `..` kaçışı readContract içinde: ayrıcalıksız kimlik + realpath.
+    const res = await readContract(session.containerId, rel);
+    if (!res.ok && res.reason === "outside") throw new HttpError(400, "geçersiz sözleşme yolu");
+    if (!res.ok) throw new HttpError(404, "sözleşme dosyası bulunamadı");
 
     return c.json({
       path: rel,
-      content: redactValue(res.stdout, { allowPatterns: getAllowPatterns(room.id) }).text,
+      content: redactValue(res.content, { allowPatterns: getAllowPatterns(room.id) }).text,
     });
   });
 
