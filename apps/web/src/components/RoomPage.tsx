@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   fetchRoom,
   listAgents,
@@ -148,17 +148,31 @@ export function RoomPage({
    * planda duran bir sekmenin okundu işaretlemesi, kullanıcı bakmadığı hâlde
    * okunmamış noktasını söndürürdü.
    *
-   * 5 sn debounce: koşan bir agent saniyede birkaç event üretiyor; her birinde
-   * POST atmak sunucuya gereksiz yük.
+   * En fazla 5 sn'de bir POST (throttle): koşan bir agent saniyede birkaç
+   * event üretiyor. İlk sürüm DEBOUNCE'du ve her yeni event'te sayacı
+   * sıfırlıyordu — odada BAŞKA bir agent koşarken 5 sn'lik sessizlik hiç
+   * olmuyor, işaret detay açıkken bile sönmüyordu. Zamanlayıcı ilk event'te
+   * kurulur ve süre dolunca O ANKİ en son seq'i gönderir.
    */
+  const seenSeq = useRef(lastSeq);
+  seenSeq.current = lastSeq;
+  const seenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!selected || lastSeq <= 0) return;
+    if (!selected || lastSeq <= 0 || seenTimer.current) return;
     if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
-    const t = setTimeout(() => {
-      void markSeen(roomId, selected, lastSeq).catch(() => undefined);
+    seenTimer.current = setTimeout(() => {
+      seenTimer.current = null;
+      void markSeen(roomId, selected, seenSeq.current).catch(() => undefined);
     }, 5000);
-    return () => clearTimeout(t);
   }, [roomId, selected, lastSeq]);
+  // Agent ya da oda değişince bekleyen işaretleme eski agent'a gitmesin.
+  useEffect(
+    () => () => {
+      if (seenTimer.current) clearTimeout(seenTimer.current);
+      seenTimer.current = null;
+    },
+    [roomId, selected],
+  );
 
   // Agent listesi config'ten gelir; sayı hiçbir yerde sabit değil.
   useEffect(() => {

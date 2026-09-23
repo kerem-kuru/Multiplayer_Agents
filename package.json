@@ -41,7 +41,8 @@
     "gate:w5:agent": "bash scripts/week5-agent-gate.sh",
     "gate:w6": "bash scripts/week6-gate.sh",
     "gate:w6:agent": "bash scripts/week6-agent-gate.sh",
-    "gate:w7": "bash scripts/week7-gate.sh"
+    "gate:w7": "bash scripts/week7-gate.sh",
+    "gate:w7:agent": "bash scripts/week7-agent-gate.sh"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
