@@ -732,6 +732,138 @@ taşıyor (`core.hooksPath=/dev/null`, `core.fsmonitor=false`, `GIT_OPTIONAL_LOC
 
 **Kural:** bir kapı ekilmiş kodu test ediyorsa, kapının kendi okuma komutları da nötr olmalı.
 
+### İzin tablosu
+
+`/room` bir Docker named volume'u (`room-<id>`). Her agent'ın runner'ı **kendi Unix
+kullanıcısıyla** koşar (`agent-<ad>`, uid 10001+, oda yaratılırken bir kez atanır ve
+`agent_runtime.uid`'de durur; YAML yeniden sıralansa da değişmez).
+
+```
+/room                     root              : root              0755
+├── repo.git/             rooms-integrator  : rooms-integrator  0755   merkez bare depo, agent'lar yalnızca okur
+├── worktrees/            root              : root              0755
+│   ├── frontend/         agent-frontend    : wtr-frontend      0750   branch room-<kısa>/frontend
+│   └── backend/          agent-backend     : wtr-backend       0750   branch room-<kısa>/backend
+├── contracts/            root              : rooms-contracts   2775   TEK ortak yazılabilir alan (setgid)
+└── journal/              root              : root              0755   Hafta 8
+/home/agents/<ad>         agent-<ad>        : agent-<ad>        0700   SDK oturum dosyaları
+```
+
+| Kim | Kendi worktree'si | Başka worktree | `contracts/` | `repo.git` | `journal/` |
+| --- | --- | --- | --- | --- | --- |
+| agent (varsayılan) | okur + yazar | **göremez** (dizine giremez) | okur + yazar | okur | okur |
+| agent, `readable: [worktrees/<ad>]` | okur + yazar | **okur**, yazamaz | okur + yazar | okur | okur |
+| `rooms-integrator` | — | — | — | sahibi | — |
+
+Kural config yüklenirken zorlanıyor: `writable` yalnızca `worktrees/<kendi adı>` ve
+`contracts` olabilir. Başka bir worktree yazılırsa oda **açılmaz** (`400`, *"her
+worktree'nin tek yazarı sahibidir"*). System prompt'ta "şuraya dokunma" cümlesi yok; agent'a
+yalnızca nerede olduğu ve ortak alanın `contracts/` olduğu söyleniyor (`roomLayoutNote`).
+
+`gate:w7` bu tabloyu kodda **tablo olarak** tutuyor ve her satırı ayrı kontrol olarak koşuyor
+(16 satır + `.git`/hook/ref yazma denemeleri).
+
+### Depo kaynağı: `repo` ve `ROOMS_SOURCE_ROOT`
+
+```yaml
+repo: { kind: empty }                                  # varsayılan: boş depo + başlangıç commit'i
+repo: { kind: local, path: /srv/projeler/x, ref: main } # sunucu makinesindeki yerel depo
+repo: { kind: git, url: https://github.com/o/r, ref: HEAD }  # herkese açık uzak depo
+```
+
+`local` kaynak yalnızca sunucudaki **`ROOMS_SOURCE_ROOT`** altından kabul edilir; değişken
+tanımlı değilse `local` tamamen reddedilir. Böylece bir oda YAML'ı sunucu makinesinde keyfi
+bir klasörü okutamaz. Kaynak ana oda container'ına hiç bağlanmaz: salt okunur olarak kısa
+ömürlü ikinci bir container'a bağlanır ve `rooms-integrator` olarak klonlanır. Özel (auth
+isteyen) uzak depolar bu hafta kapsam dışı.
+
+### `clone --shared`'in iki bedeli ve önlemleri
+
+1. **Alternates ile gc birbirini sevmez.** Klonlar nesneleri merkezden ödünç alıyor; merkezde
+   budama veya geçmiş yeniden yazma klonları sessizce bozar. Önlem tek fonksiyonda
+   (`hardenCentralRepo`, oda her açıldığında yeniden uygulanıyor): `gc.auto 0`,
+   `gc.pruneExpire never`, reflog süreleri `never`, `core.logAllRefUpdates always`,
+   `receive.denyDeletes true`, `receive.denyNonFastForwards true` ve taban commit'i tutan
+   korumalı `refs/rooms/base/<kısa-id>`. **Merkezde `gc --prune=now`, `repack -a -d`, branch
+   silme veya force güncelleme yapan kod yazılmaz** (kodda da yorumla yazılı). Kapı G4
+   merkezde gc koşturup her klonda `fsck --connectivity-only` ölçüyor; G5 `--force`'lu
+   non-ff push'un ve silme push'unun alıcı tarafta reddedildiğini ölçüyor.
+2. **Git katmanını ayırmak, dosya sistemi ortaksa işe yaramaz.** Bu yüzden agent başına uid
+   `clone --shared`'in **önkoşulu**, ayrı bir iyileştirme değil.
+
+### Hafta 9–10 entegrasyon modeli (karar, kodu o hafta)
+
+Agent branch'lerini merkeze taşımak, sunucunun **agent'ın kontrol ettiği bir depoya**
+dokunması demek; agent kendi `config`'ini, hook'larını, `.git` yapısını istediği gibi
+değiştirebilir. Model şimdiden sabit:
+
+- **Agent deposu depo olarak açılmaz, veri olarak okunur.** Branch, **agent'ın kendi
+  kullanıcısıyla** kendi deposunda `git bundle create` ile paketlenir ve
+  `/room/outbox/<ad>/`'a (agent yazar, integrator okur) bırakılır.
+- **Entegrasyon kısa ömürlü ayrı bir container'da, `rooms-integrator` ile.** Bu container
+  yalnızca merkez depoyu (yazılabilir) ve bırakma klasörünü (salt okunur) görür; agent
+  worktree'lerini hiç görmez.
+- İçeride `git bundle verify` → `git fetch <bundle> <branch>:refs/rooms/incoming/<ad>/<n>`.
+  Force refspec (`+`) hiç kullanılmaz; ana branch'e yazma ayrı ve onaylı bir adım (Hafta 10).
+- Her git çağrısı `-c core.hooksPath=/dev/null -c core.fsmonitor=false
+  -c protocol.file.allow=never -c submodule.recurse=false` ile. `safe.directory=*` yok.
+- **Ayrıcalıklı bir kimlik (root, integrator) bir agent deposunu hiçbir zaman git deposu
+  olarak açmaz** (Değişmez Kural 11). `gate:w7` G7 bunun tersini de ölçüyor: root bir agent
+  deposunda `git status` çalıştırırsa `dubious ownership` alıyor.
+
+### İmajdaki git ve açık CVE'ler
+
+`rooms/Dockerfile` her build'de `apt-get upgrade -y` koşuyor. 23 Eylül 2026 ölçümü:
+
+```
+git version 2.39.5
+dpkg: 1:2.39.5-0+deb12u3   (Debian 12 bookworm)
+```
+
+Debian güvenlik yamalarını sürüm numarasını değiştirmeden geri taşıdığı için "sürüm ≥ X"
+kontrolü yanıltıcı; bunun yerine security-tracker.debian.org'daki `git` sayfası okundu.
+Bookworm için açık üç kayıt var ve üçü de **unimportant**: CVE-2024-52005 (kötü niyetli uzak
+sunucunun yan bant mesajları), CVE-2022-24975 (`--mirror` belgelemesi), CVE-2018-1000021
+(uzak sunucunun terminal kaçış dizileri). Üçü de kötü niyetli bir **uzak** sunucu gerektiriyor;
+Hafta 7'de tek uzak yol `repo.kind: git` ve Hafta 9'daki bundle akışı ağ kullanmıyor.
+
+### Oda silme ve temizlik
+
+`DELETE /rooms/:id` (yalnızca owner): runner'lara kapanma sinyali → container durdurulur ve
+silinir → volume silinir → `rooms.status = 'archived'`. **Event log ve DB kayıtları
+silinmez**; odanın tarihi okunmaya devam eder. Merkezdeki branch'ler volume'la birlikte
+gidiyor. Bu hafta birleştirme olmadığı için kaybedilecek iş yok; **Hafta 10'da silme öncesi
+dışa aktarma eklenecek.**
+
+Sweeper (açılışta ve saatte bir): `agent-rooms.room` etiketi taşıyıp DB'de canlı bir odaya
+karşılık gelmeyen container ve volume'ları siler; container'ı olmayan `running` odaları
+`failed` yapar. Silmeleri sunucu loguna yazar, event log'a değil (oda artık yok).
+
+**Hafta 7 öncesi açılmış odalar desteklenmiyor.** Migration 007 hepsini `archived` işaretledi;
+sweeper container'larını topluyor. Eski `rooms-data/` klasörü artık kullanılmıyor, elle
+silinebilir.
+
+### Kapılar
+
+```bash
+npm run gate:w7                       # 93 kontrol, MODEL İSTEĞİ HARCAMAZ
+GATE_W7_REGRESSION=1 npm run gate:w7  # + Hafta 1–6 kapıları, volume tabanlı
+npm run gate:w7:agent                 # model ister: 5, 8–13, Playwright 17/18/21
+```
+
+`gate:w7:agent` ~11 turn koşuyor; Gemini ücretsiz katmanında tek modelin günlük 20 isteğini
+aşar. Bu yüzden iki agent'a **ayrı** modeller veriyor (`GATE_FRONTEND_MODEL`,
+`GATE_BACKEND_MODEL`, kotaları ayrı) ve `.env`'deki `AGENT_MODEL`'i bu koşumda boşaltıyor.
+
+### 23 Eylül: kapı yazılırken bulunan dört hata
+
+| Hata | Nasıl bulundu | Düzeltme |
+| --- | --- | --- |
+| **Sözleşme okuma ucu izolasyonu deliyordu.** `GET /rooms/:id/contracts/*` dosyayı container içinde ROOT ile `cat` ediyor, yalnızca `..` arıyordu. `contracts/` herkese yazılabilir: frontend `ln -s /room/worktrees/backend/secret.txt /room/contracts/leak` yapınca uç backend'in dosyasını — ve `/etc/shadow`'u — döndürdü. | Canlı odada denendi; frontend dosyayı doğrudan okuyamıyordu (`Permission denied`), uç okuyordu. | Okuma `nobody:rooms-contracts` ile ve `realpath` sınırıyla (`contracts-read.ts`). Kapıda ayrı kontrol. **Ders: izolasyon dosya sisteminde kuruluysa, onu root olarak okuyan her sunucu yolu bir delik.** |
+| Geçersiz config `500` dönüyordu | Kontrol 7 yazılırken: `RoomConfigError` `onError`'da tanınmıyordu. | `400` + kuralın kendi cümlesi; mesajdaki sunucu dosya yolu istemciye gitmiyor. |
+| Özet sekmesi Adım 14'ü karşılamıyordu | Görev tanımıyla karşılaştırıldı: sekmenin adı "Etkinlik"ti ve turn'ler hep açık render ediliyordu. | Sekme "Özet", `role=tab`; turn'ler kapalı başlıyor (tek satır: ilk satır · kim · N dosya · sonuç/süre), koşan turn açık. |
+| **Okunmamış işareti başka agent koşarken sönmüyordu** | Kontrol 21'in zamanlaması düşünülürken: `seen` her yeni event'te sıfırlanan bir debounce'du. İki agent'lı odada 5 sn sessizlik neredeyse hiç olmuyor. | En fazla 5 sn'de bir giden throttle. |
+
 ## Karar notları
 
 Hafta 1 görev tanımından bilinçli olarak ayrılan noktalar ve gerekçeleri.

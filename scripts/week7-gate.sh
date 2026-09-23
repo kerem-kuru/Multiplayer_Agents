@@ -70,7 +70,7 @@ kill_tree() {
   [ -z "$pid" ] && return
   local win; win=$(ps -p "$pid" -o winpid= 2>/dev/null | tr -d ' ')
   kill "$pid" 2>/dev/null
-  [ -n "$win" ] && taskkill //F //T //PID "$win" >/dev/null 2>&1
+  [ -n "$win" ] && taskkill /F /T /PID "$win" >/dev/null 2>&1
 }
 
 # Portu dinleyen Windows sürecini öldürür. Vite alt kabukta (`cd apps/web &&
@@ -78,7 +78,7 @@ kill_tree() {
 kill_port() {
   local p
   for p in $(netstat -ano 2>/dev/null | grep -E "[:.]$1 " | grep LISTEN | awk '{print $5}' | sort -u); do
-    taskkill //F //T //PID "$p" >/dev/null 2>&1
+    taskkill /F /T /PID "$p" >/dev/null 2>&1
   done
 }
 
@@ -598,8 +598,11 @@ if [ "$RUN_REGRESSION" = "1" ]; then
   step "Regresyon  [22]"
   kill_tree "$SERVER_PID"; SERVER_PID=""
   for g in gate gate:w3 gate:w4 gate:w5 gate:w6; do
-    if npm run "$g" >"$TMP/reg-$g.log" 2>&1; then
-      ok "[22] $g: $(grep -E 'kapısı: [0-9]+ geçti' "$TMP/reg-$g.log" | tail -1)"
+    # MSYS_NO_PATHCONV alt kapılara SIZMAMALI: npm bash'i bu değişkenle
+    # başlatınca pwd "/c/Users/..." dönüyor ve Hafta 6 kapısının node'a verdiği
+    # mutlak yol "C:\c\Users\..." olarak çözülüyor (23 Eylül, ölçüldü).
+    if env -u MSYS_NO_PATHCONV npm run "$g" >"$TMP/reg-$g.log" 2>&1; then
+      ok "[22] $g: $(grep -E 'kapısı: [0-9]+ geçti|Geçen: [0-9]+' "$TMP/reg-$g.log" | tail -1 | tr -s ' ')"
     else
       no "[22] $g düştü"; tail -15 "$TMP/reg-$g.log" | sed 's/^/      /'
     fi

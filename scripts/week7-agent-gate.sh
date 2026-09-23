@@ -62,7 +62,7 @@ psql_q() { docker compose exec -T postgres psql -U rooms -d agent_rooms -tA -c "
 kill_port() {
   local p
   for p in $(netstat -ano 2>/dev/null | grep -E "[:.]$1 " | grep LISTEN | awk '{print $5}' | sort -u); do
-    taskkill //F //T //PID "$p" >/dev/null 2>&1
+    taskkill /F /T /PID "$p" >/dev/null 2>&1
   done
 }
 
