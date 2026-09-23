@@ -44,7 +44,19 @@ değiştirir.
 | 3 | README "Hafta 7 dogfood notları" (4 soru görev tanımında) + yol haritasında Hafta 7 ✓ | 1 ve 2 |
 | 4 | **Push** — 23 Eylül gecesinin 6 commit'i yerel, `origin/main` hâlâ `0c060fa` | Kerem'in onayı |
 
-**Model kararı hâlâ Kerem'de:** dogfood `gemini-3.5-flash` ile mi (öneri — `flash-lite` araç
+**Açık bulgu (24 Eylül 00:45, elle test): Google'ın 503'ü ekranda GÖRÜNMÜYOR.** Model
+`gemini-3.5-flash`'a alındıktan hemen sonra iki agent'ın turn'ü de "çalışıyor"da asılı kaldı.
+Sebep kod değil: Google her isteğe `503 This model is currently experiencing high demand`
+(arada `fetch failed`) döndü; Gemini CLI hata vermek yerine backoff'la tekrar deniyor.
+Container'ın ağı sağlamdı, `429` yoktu. **Kusur bizde:** "Attempt N failed with status 503"
+satırları yalnızca sunucu logunda (runner stderr). Kullanıcı 4+ dakika boyunca sebebini
+bilmeden bekledi — Hafta 4'teki "sebep ekranda yazar" dersinin aynısı. Düzeltme (Kerem
+"sonra" dedi): runner stderr'deki deneme satırlarını bir event'e çevir, kartta ve Özet'te
+"Google yoğun (503) · 3. deneme" yaz. Runner değişeceği için `npm run room:build` gerekir.
+
+**Model kararı:** Kerem 24 Eylül gecesi `.env`'i `AGENT_MODEL=gemini-3.5-flash` ve
+`ROOM_CONFIG=config/room.week7.yaml` yaptı (API ve arayüz bununla yeniden başlatıldı).
+Önceki not: dogfood `gemini-3.5-flash` ile mi (öneri — `flash-lite` araç
 çağırmak yerine metin yazıyordu), `flash-lite` ile mi. `.env`'deki `AGENT_MODEL` YAML'ı ezer.
 
 ### Yarının ilk işi: `gate:w7:agent`
