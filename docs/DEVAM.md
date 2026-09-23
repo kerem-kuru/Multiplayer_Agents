@@ -1,4 +1,4 @@
-# Kaldığımız yer — 22 Eylül 2026, gece
+# Kaldığımız yer — 24 Eylül 2026, gece yarısı
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
 
@@ -20,55 +20,81 @@ değiştirir.
 
 | Hafta | Konu | Durum |
 | --- | --- | --- |
-| 1 | İskelet ve event log | ✅ `gate` 10/10 (volume dünyasında yeniden geçti) |
+| 1 | İskelet ve event log | ✅ `gate` 10/10 (volume) |
 | 2 | Tek agent, headless koşum | ⏳ `gate:w2` **koşulmadı** (Claude anahtarı yok) |
 | 3 | Stream ve terminal görünümü | ✅ `gate:w3` 11/11 |
 | 4 | Redaction ve ikinci izleyici | ✅ `gate:w4` 22/22 |
 | 5 | Yazma yetkisi, kuyruk, kesme | ✅ `gate:w5` 25/25 |
-| 6 | Diff görünümü ve satır yorumu | ✅ `gate:w6` 13/13 · dogfood ✅ (notlar README'de) |
-| 7 | **İkinci agent ve worktree izolasyonu** | 🔶 **Gün 1–5 bitti · Gün 6–7 kaldı** |
+| 6 | Diff görünümü ve satır yorumu | ✅ `gate:w6` 13/13 · dogfood ✅ |
+| 7 | **İkinci agent ve worktree izolasyonu** | 🔶 **`gate:w7` 93/93 · agent kapısı + dogfood kaldı** |
 
-**429 test**, `npm run typecheck` temiz. Paketler: `protocol`, `redact`, `view`, `gitkit`,
+**436 test**, `npm run typecheck` temiz. Paketler: `protocol`, `redact`, `view`, `gitkit`,
 `core`, `runner`, `runner-gemini`.
 
 ---
 
 ## Hafta 7 — nerede kaldık
 
-Gün gün ilerledik. **Adım 1–14 bitti; kalan: Adım 15 (kapı), 16 (dogfood), 17 (README).**
+**Adım 1–15 ve 17 kod olarak bitti.** Kalanlar:
 
-| Gün | Adımlar | Durum |
+| # | İş | Neye bağlı |
 | --- | --- | --- |
-| 1 | 1, 2, 11 — config kuralları, izin planı, migration | ✅ |
-| 2 | 3, 5 — volume, plan uygulayıcı, agent kimliği | ✅ |
-| 3 | 4, 13 — merkez depo + kapıları volume'a taşıma | ✅ |
-| 4 | 6, 7, 8, 9, 10 — event'ler, contracts, çakışma, denetim, sweeper | ✅ |
-| 5 | 12, 14 — kart modeli, okunmamış, iki seviyeli UI | ✅ |
-| **6** | **15 — `scripts/week7-gate.sh`** | ⏳ **sıradaki iş** |
-| **7** | **16 dogfood + 17 README** | ⏳ |
+| 1 | **`npm run gate:w7:agent`** koşulacak — yazıldı, HİÇ KOŞULMADI | Gemini kotası (TSİ ~10:00 sıfırlanır) |
+| 2 | **Adım 16 dogfood** — iki kişi, API ucu backend'de, ekran frontend'de, sözleşme `contracts/`'ta | Kerem + ikinci kişi |
+| 3 | README "Hafta 7 dogfood notları" (4 soru görev tanımında) + yol haritasında Hafta 7 ✓ | 1 ve 2 |
+| 4 | **Push** — 23 Eylül gecesinin 6 commit'i yerel, `origin/main` hâlâ `0c060fa` | Kerem'in onayı |
 
-### Yarının ilk işi: Adım 15, kapı script'i
+**Model kararı hâlâ Kerem'de:** dogfood `gemini-3.5-flash` ile mi (öneri — `flash-lite` araç
+çağırmak yerine metin yazıyordu), `flash-lite` ile mi. `.env`'deki `AGENT_MODEL` YAML'ı ezer.
 
-Görev tanımında 22 numaralı kontrol + G1–G7 git katmanı + Playwright (16–21).
-**G1, G3, G4, G7 zaten kanıtlandı** — `scripts/week7-repo-probe.mjs` içinde koşuyorlar,
-kapıya taşınacaklar. `scripts/week7-fs-probe.mjs` izin matrisinin çoğunu zaten ölçüyor.
+### Yarının ilk işi: `gate:w7:agent`
 
-Yani kapı sıfırdan yazılmayacak: iki probe'un içindekiler `scripts/lib/room-exec.sh`
-yardımcılarıyla tek script'te toplanacak, üstüne şunlar eklenecek:
+```bash
+# TSİ 10:00'dan sonra, kota tazeyken. İki agent'a AYRI model veriyor (kotaları ayrı):
+npm run gate:w7:agent
+# varsayılanlar: GATE_FRONTEND_MODEL=gemini-3.5-flash GATE_BACKEND_MODEL=gemini-3.1-flash-lite
+```
 
-- İzin matrisinin kalan satırları (tabloyu **kod içinde tablo olarak tut, döngüyle koştur**)
-- G2 (hook sızmıyor), G5 (geçmiş yeniden yazma reddediliyor), G6 (`safe.directory`)
-- Agent düzeyinde 5–7 (izin hatası, üçüncü agent, geçersiz config → 400)
-- Paralellik ve çökme 8–9
-- Çakışma 10–12, izin kayması 13, temizlik 14–15
-- Playwright 16–21
-
-**G6 dikkat:** aranan şey "hiç `safe.directory` yok" DEĞİL. Sistem düzeyinde tam olarak
-bir kayıt var ve olmalı: `/room/repo.git`. Gerekçe README "Hafta 7 kararları"nda.
+~11 turn, ~20+ model isteği. Ölçtükleri: [5] agent'ın kendisi izin hatası alıyor, [8]
+örtüşen turn'ler, [9] turn ortasında kill -9, [10] path_overlap + cleared, [11-12]
+contracts_race + içeriksiz event, [13] turn sonu denetimi, Playwright [17, 18, 21].
+Script'te `warn` = model araç çağırmadı (model davranışı, geçti SAYILMAZ, kaldı da sayılmaz);
+turn `429` ile düşerse kapı bunu ayrıca yazıyor. **İlk koşuda kapının kendi hataları
+çıkabilir** — `gate:w7` ilk koşusunda 3 tane çıktı (hepsi ölçüm hatası, ürün değil).
 
 ---
 
-## Hafta 7'de ne yapıldı
+## 23 Eylül gecesi ne yapıldı
+
+### `gate:w7` — 93 kontrol, model isteği harcamaz
+
+`scripts/week7-gate.sh`. İzin matrisi kodda tablo (16 satır, döngü). Kurulum 1-3, matris +
+G3, sözleşme ucunda symlink, G1-G7, [6] üçüncü agent, [7] geçersiz config → 400, [9] kill
+-9 ile çökme yalıtımı (modelsiz: frontend aynı süreç kalıyor), [13] sunucu denetimi, [14-15]
+silme + sweeper, Playwright [16, 17, 19, 20] (`apps/web/tests/week7.spec.ts`).
+
+`GATE_W7_REGRESSION=1 npm run gate:w7` → **98 geçti, 0 kaldı** (93 + gate 10/10, w3 11/11,
+w4 22/22, w5 25/25, w6 13/13 — hepsi volume tabanlı). Windows Docker Desktop'ta koştu, yani
+DoD'deki "Linux dışı makinede" maddesi de ölçüldü.
+
+### Bulunan ve düzeltilen hatalar
+
+| Hata | Sonuç |
+| --- | --- |
+| **Sözleşme okuma ucu symlink ile izolasyonu deliyordu** (`GET /rooms/:id/contracts/*` root ile `cat`). Frontend `contracts/leak -> backend/secret.txt` yapınca uç backend'in dosyasını ve `/etc/shadow`'u döndürdü — canlı ölçüldü. | `nobody:rooms-contracts` + realpath (`packages/core/src/contracts-read.ts`), kapıda kontrol |
+| Geçersiz config 500 dönüyordu | 400 + kural cümlesi, sunucu yolu sızmıyor |
+| Özet sekmesi Adım 14'e uymuyordu ("Etkinlik" adı, turn'ler hep açık) | "Özet", turn'ler kapalı başlıyor, koşan açık; `summarizeTurn` |
+| **Okunmamış işareti başka agent koşarken hiç sönmüyordu** (seen debounce'u her event'te sıfırlanıyordu) | throttle |
+| Kapı: `taskkill //PID` NO_PATHCONV altında reddediliyordu → vite sızıp sonraki kapının build'ini düşürdü | `taskkill /PID` + port bazlı temizlik |
+| Kapı: `MSYS_NO_PATHCONV` alt kapılara sızınca Hafta 6 kapısı `C:\c\Users\...` yoluna yazmaya çalıştı | alt kapılar `env -u MSYS_NO_PATHCONV` ile |
+
+**Eskiyen probe:** `scripts/week7-fs-probe.mjs` 8. kontrolü "sistemde safe.directory YOK"
+bekliyor; imajda artık bilinçli olarak tek kayıt var (`/room/repo.git`). Probe'lar kapıya
+taşındı, yeniden koşulmaları gerekmiyor; koşulursa o satır düşer.
+
+---
+
+## Hafta 7, Gün 1–5'te ne yapıldı (22 Eylül ve öncesi)
 
 ### Üç mimari karar (README "Hafta 7 kararları"nda gerekçeleriyle)
 
@@ -184,28 +210,20 @@ beklemede.**
 
 ---
 
-## Makinede ne kaldı (22 Eylül gecesi)
+## Makinede ne kaldı (24 Eylül, gece yarısı)
 
-- **Push edildi:** çalışma ağacı temiz, `origin/main` = `f40cabf`. Hafta 7'nin Gün 1–5'i
-  (7 commit + devir notu) public repoda.
+- **Push EDİLMEDİ:** 6 commit yerel (`origin/main` = `0c060fa`). Çalışma ağacı temiz.
 - `postgres` (5433) + `redis` (6380) ayakta.
-- **API 8787 ve arayüz 5173 ayakta** ve GÜNCEL kodu koşuyor
-  (`ROOM_CONFIG=config/room.week7.yaml`, koşum ortamı gemini).
-- Birkaç oda container'ı ve **7 volume** `Up`. Sweeper bunları saatte bir topluyor;
-  `DELETE /rooms/:id` ile tek tek de silinebilir.
-- DB: `archived` 344, `failed` 191, `creating` 7, `running` 7.
-- **`rooms-data/` (196 klasör, 29 MB) hâlâ duruyor ve artık ÖLÜ.** Kapı script'lerinde tek
-  satır kalmadı ve hepsi geçiyor. Kerem "silme" dedi; silinecekse önce container'lar
-  durdurulmalı. Dogfood odasının `index.html`'i orada (`79639649-.../worktrees/backend/`).
+- **API 8787 ve arayüz 5173 ayakta ama BAYAT.** Makine 23 Eylül akşamı yeniden başlamış; bu
+  süreçler bu gecenin düzeltmelerinden (symlink, 400, Özet, throttle) önce kalkmış ve
+  `.env`'deki **tek agent'lı** `config/room.gemini.yaml` ile koşuyor olabilir. Elle test
+  öncesi ikisini de yeniden başlat, API'yi `ROOM_CONFIG=config/room.week7.yaml` ile.
+- 22 Eylül'deki "hazır oda" (`e58e8619…`) ÖLDÜ — container'ı yok. Yeni oda aç.
+- 10 `room-*` volume duruyor; sweeper saatte bir topluyor.
+- DB: `archived` 353, `failed` 323, `running` 8, `creating` 7.
+- **`rooms-data/` (29 MB) hâlâ duruyor ve ÖLÜ.** Kerem "silme" dedi, dokunulmadı.
 
-### Hazır oda (elle denemek için)
-
-```
-http://localhost:5173/rooms/e58e8619-9772-49ea-a420-b8f7b895d2c8
-```
-
-İki agent (`frontend`, `backend`), `config/room.week7.yaml`, rol bağlamında oda yapısı notu
-var. Yeni giriş bağlantısı gerekirse:
+Yeni giriş bağlantısı gerekirse:
 
 ```bash
 curl -s -X POST http://localhost:8787/auth/request \
@@ -224,9 +242,9 @@ ROOM_CONFIG=config/room.week7.yaml node apps/api/dist/index.js    # API 8787
 WEB_HOST=1 WEB_ALLOWED_HOSTS="192.168.1.114,localhost" npm run dev:web   # arayüz 5173
 
 npm run gate / gate:w3 / gate:w4 / gate:w5 / gate:w6   # modelsiz, model isteği harcamaz
-node scripts/week7-fs-probe.mjs                        # izin planı, canlı container
-node scripts/week7-repo-probe.mjs                      # merkez depo + G1/G3/G4/G7
-node scripts/week7-day4-probe.mjs                      # izin kayması, silme, sweeper
+npm run gate:w7                                        # Hafta 7, 93 kontrol, modelsiz
+GATE_W7_REGRESSION=1 npm run gate:w7                   # + Hafta 1-6 kapıları
+npm run gate:w7:agent                                  # MODEL İSTER (~20 istek, iki model)
 node scripts/room-view.mjs <oda> --base <url> --session <çerez>   # CANLI durum
 ```
 
@@ -258,6 +276,15 @@ Hafta 1–6 tuzakları geçerliliğini koruyor. Bu hafta eklenenler:
 6. **Kabuk heredoc'u backslash yiyor.** `python - <<'PY'` içine `\\n` ya da `\\` yazmak
    dosyada tek backslash bırakıyor ve TS/JS dosyasını sessizce bozuyor. Bugün altı kez
    ısırdı. **Kaçış içeren dosyaları Write aracıyla yaz**, heredoc'la değil.
+7. **Windows'ta `MSYS_NO_PATHCONV=1` iki şeyi değiştirir.** (a) `taskkill //PID` artık
+   `/PID`'e çevrilmez ve reddedilir — tek eğik çizgi yaz. (b) Bu değişken dışa aktarılmışken
+   npm'in başlattığı bash `pwd`'yi `/c/Users/...` verir; node o yolu `C:\c\Users\...` okur.
+   Bir kapıdan başka bir kapıyı `env -u MSYS_NO_PATHCONV npm run ...` ile çağır.
+8. **Python heredoc'u Türkçe karakterleri bozuyor** (Windows kod sayfası). `ı`, `ş` içeren bir
+   metni heredoc'taki Python ile aramak eşleşmiyor. Metni dosyaya Write ile yaz, satır
+   numarasıyla `sed 'Nr dosya'` ile ekle. Python `open(..., 'w')` Windows'ta CRLF yazar;
+   `.sh` dosyası CRLF olursa bash bozulur (`.gitattributes` repoda düzeltir, çalışma
+   kopyasında düzeltmez).
 
 ---
 
@@ -282,7 +309,7 @@ Hafta 1–6 tuzakları geçerliliğini koruyor. Bu hafta eklenenler:
 1. Bu dosya
 2. `README.md` — özellikle **"Hafta 7 kararları"** bölümü (üç karar, `safe.directory`
    istisnası, sapmalar, "kapı kendi ölçümünü kirletiyordu")
-3. `Downloads/HAFTA-7-GOREV (1).md` — Adım 15, 16, 17 hâlâ yapılacak
+3. `Downloads/HAFTA-7-GOREV (1).md` — Adım 16 (dogfood) ve DoD listesi
 4. `docs/roadmap.md` — 12 haftalık plan
 5. `docs/week-01.md` … `docs/week-06.md` — hafta hafta ne yapıldı ve **neden**
 
