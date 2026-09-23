@@ -54,6 +54,17 @@ bilmeden bekledi — Hafta 4'teki "sebep ekranda yazar" dersinin aynısı. Düze
 "sonra" dedi): runner stderr'deki deneme satırlarını bir event'e çevir, kartta ve Özet'te
 "Google yoğun (503) · 3. deneme" yaz. Runner değişeceği için `npm run room:build` gerekir.
 
+**Ve bu denemeler KOTAYI YİYOR (ölçüldü):** 21:55'te iki turn de `429 ... limit: 20, model:
+gemini-3.5-flash` ile düştü. Logda tam **20** "Attempt N failed" satırı var; son sıfırlamadan
+beri DB'de başka gerçek model turn'ü yok (kapılar modelsizdi, 52 `fake` turn). Yani 503 ile
+reddedilen istekler de sayılıyor ve iki agent aynı modelde olduğu için aynı 20'yi paylaştı.
+Sonuç: bir 503 fırtınasında BEKLEMEK kotayı yakar. Düzeltmeyle birlikte Gemini CLI'ın tekrar
+deneme sayısını sınırlamaya bak (ayarı var mı, ölçülmedi).
+
+**24 Eylül bütçesi (TSİ 10:00'da sıfırlanır):** elle test ve `gate:w7:agent` aynı kotayı
+yer. İki agent'a ayrı model ver (kotaları ayrı): YAML'da agent başına `model:` ve `.env`'de
+`AGENT_MODEL` boş — yoksa `AGENT_MODEL` ikisini de ezer.
+
 **Model kararı:** Kerem 24 Eylül gecesi `.env`'i `AGENT_MODEL=gemini-3.5-flash` ve
 `ROOM_CONFIG=config/room.week7.yaml` yaptı (API ve arayüz bununla yeniden başlatıldı).
 Önceki not: dogfood `gemini-3.5-flash` ile mi (öneri — `flash-lite` araç
