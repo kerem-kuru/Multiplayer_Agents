@@ -10,6 +10,7 @@ dist/
 .gate-tmp*/
 .gate4-tmp*/
 .gate4a-tmp*/
+.gate7-tmp*/
 
 # Playwright çıktıları
 test-results/
