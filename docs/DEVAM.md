@@ -35,14 +35,23 @@ değiştirir.
 
 ## Hafta 7 — nerede kaldık
 
-**Adım 1–15 ve 17 kod olarak bitti.** Kalanlar:
+**Adım 1–15 ve 17 kod olarak bitti, hepsi push edildi.** 24 Eylül'ün sırası (Kerem ile
+kararlaştırıldı):
 
-| # | İş | Neye bağlı |
+| # | İş | Not |
 | --- | --- | --- |
-| 1 | **`npm run gate:w7:agent`** koşulacak — yazıldı, HİÇ KOŞULMADI | Gemini kotası (TSİ ~10:00 sıfırlanır) |
-| 2 | **Adım 16 dogfood** — iki kişi, API ucu backend'de, ekran frontend'de, sözleşme `contracts/`'ta | Kerem + ikinci kişi |
-| 3 | README "Hafta 7 dogfood notları" (4 soru görev tanımında) + yol haritasında Hafta 7 ✓ | 1 ve 2 |
-| 4 | **Push** — 23 Eylül gecesinin 6 commit'i yerel, `origin/main` hâlâ `0c060fa` | Kerem'in onayı |
+| 1 | **TSİ 10:00'dan sonra** iki agent'a AYRI model ayarla | `.env`: `AGENT_MODEL=` (boş) · `config/room.week7.yaml`: frontend `model: gemini-3.5-flash`, backend `model: gemini-3.1-flash-lite`. API'yi yeniden başlat. Kotalar ayrı → 40 istek, biri 503'e düşerse diğeri çalışır |
+| 2 | **Elle test** (Kerem) | Tek adımlık görevler. **503 görülürse bekleme** — o modeli değiştir, beklemek kotayı yakıyor (aşağıda ölçüm) |
+| 3 | **503/tekrar deneme ekranda görünsün** + Gemini CLI'ın deneme sayısını sınırla | Kerem "sonra" dedi; ayrıntı aşağıda. Runner değişir → `npm run room:build` |
+| 4 | **`npm run gate:w7:agent`** — yazıldı, HİÇ KOŞULMADI | ~20 istek; elle testle aynı kotayı yer. Aynı gün kalmazsa ertesi güne |
+| 5 | **Adım 16 dogfood** — iki kişi, API ucu backend'de, ekran frontend'de, sözleşme `contracts/`'ta | Kerem + ikinci kişi |
+| 6 | README "Hafta 7 dogfood notları" (4 soru görev tanımında) + yol haritasında Hafta 7 ✓ | 4 ve 5'ten sonra |
+
+**Makinede 24 Eylül 01:00 itibarıyla:** API 8787 ve arayüz 5173 GÜNCEL kodla ayakta (bu
+oturum başlattı, oturum kapanınca kapanabilirler — kapalıysa "Çalıştırma" bölümündeki
+komutlarla aç). `.env` şu an `AGENT_MODEL=gemini-3.5-flash` + `ROOM_CONFIG=config/room.week7.yaml`.
+Kerem'in test odası: `594ec21d-d538-4d25-85cc-5635af54c8c9` (iki turn 429 ile düştü; yeni
+görev verilebilir ya da yeni oda açılabilir).
 
 **Açık bulgu (24 Eylül 00:45, elle test): Google'ın 503'ü ekranda GÖRÜNMÜYOR.** Model
 `gemini-3.5-flash`'a alındıktan hemen sonra iki agent'ın turn'ü de "çalışıyor"da asılı kaldı.
@@ -70,7 +79,7 @@ yer. İki agent'a ayrı model ver (kotaları ayrı): YAML'da agent başına `mod
 Önceki not: dogfood `gemini-3.5-flash` ile mi (öneri — `flash-lite` araç
 çağırmak yerine metin yazıyordu), `flash-lite` ile mi. `.env`'deki `AGENT_MODEL` YAML'ı ezer.
 
-### Yarının ilk işi: `gate:w7:agent`
+### `gate:w7:agent` nasıl koşulur (sıradaki 4. iş)
 
 ```bash
 # TSİ 10:00'dan sonra, kota tazeyken. İki agent'a AYRI model veriyor (kotaları ayrı):
@@ -235,12 +244,9 @@ beklemede.**
 
 ## Makinede ne kaldı (24 Eylül, gece yarısı)
 
-- **Push EDİLMEDİ:** 6 commit yerel (`origin/main` = `0c060fa`). Çalışma ağacı temiz.
+- **Push edildi:** 23-24 Eylül gecesinin tüm commit'leri `origin/main`'de. Çalışma ağacı temiz.
 - `postgres` (5433) + `redis` (6380) ayakta.
-- **API 8787 ve arayüz 5173 ayakta ama BAYAT.** Makine 23 Eylül akşamı yeniden başlamış; bu
-  süreçler bu gecenin düzeltmelerinden (symlink, 400, Özet, throttle) önce kalkmış ve
-  `.env`'deki **tek agent'lı** `config/room.gemini.yaml` ile koşuyor olabilir. Elle test
-  öncesi ikisini de yeniden başlat, API'yi `ROOM_CONFIG=config/room.week7.yaml` ile.
+- API 8787 ve arayüz 5173 güncel kodla yeniden başlatıldı (`.env`: week7 config, 3.5-flash).
 - 22 Eylül'deki "hazır oda" (`e58e8619…`) ÖLDÜ — container'ı yok. Yeni oda aç.
 - 10 `room-*` volume duruyor; sweeper saatte bir topluyor.
 - DB: `archived` 353, `failed` 323, `running` 8, `creating` 7.
