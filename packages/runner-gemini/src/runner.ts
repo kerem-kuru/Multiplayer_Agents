@@ -14,7 +14,13 @@ import {
   geminiContextFile,
   roomLayoutNote,
 } from "@agent-rooms/protocol";
-import { mapStreamLine, resolveGeminiTools } from "./map-stream.js";
+import {
+  createRetryTracker,
+  geminiIncludeDirectories,
+  mapStreamLine,
+  resolveGeminiTools,
+  type RetrySignal,
+} from "./map-stream.js";
 
 /**
  * Gemini CLI koşum ortamı — Claude runner'ın kardeşi, aynı NDJSON'u konuşur.
@@ -87,6 +93,8 @@ let currentMessageId: string | null = null;
 let interrupting = false;
 /** Kibar sinyalden sonra süreç ölmezse ne kadar beklenir. */
 const SIGKILL_AFTER_MS = 5_000;
+/** Turn başına en fazla başarısız sağlayıcı isteği — sunucudan (`AGENT_RETRY_BUDGET`). */
+const RETRY_BUDGET = Math.max(1, Math.floor(Number(process.env.AGENT_RETRY_BUDGET) || 3));
 
 /**
  * Süreci VE çocuklarını durdur.
@@ -191,6 +199,12 @@ async function reportIsolationDrift(): Promise<void> {
  * config'inden). Runner kendi peer listesini cikarsaydi rol YAML'i ile iki
  * kopya olur ve biri digerinden kayardi.
  */
+/** CLI çalışma alanına eklenen dizinler — `roomLayout` ile aynı ortamdan. */
+const includeDirs = geminiIncludeDirectories({
+  contracts: process.env.ROOM_CONTRACTS ?? "/room/contracts",
+  readable: (process.env.ROOM_READABLE ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+});
+
 function roomLayout(): string {
   const peers = (process.env.ROOM_PEERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const readable = (process.env.ROOM_READABLE ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -233,6 +247,9 @@ function runTurn(messageId: string, text: string): Promise<void> {
       // biçiminde yargs dizinin sonunu bulamayıp prompt'u pozisyonel argümana
       // çeviriyor ve "Cannot use both a positional prompt and --prompt" diyor.
       ...tools.allow.flatMap((t) => ["--allowed-tools", t]),
+      // contracts/ ve readable klasorleri CLI'in calisma alanina: yoksa araclar
+      // "Path not in workspace" diyor. Yetki degil — yetki Unix kullanicisinda.
+      ...includeDirs.flatMap((d) => ["--include-directories", d]),
       /**
        * `AGENT_MODEL` YAML'ı EZER — Claude runner'ı da böyle davranıyor
        * (`model: process.env.AGENT_MODEL`). Burada sadece `agent.model`'e
@@ -274,6 +291,36 @@ function runTurn(messageId: string, text: string): Promise<void> {
     const STDERR_TAIL_MAX = 800;
     /** Gemini asistan metnini `delta:true` parçalarıyla yolluyor; birleştir. */
     let textParts: string[] = [];
+    /**
+     * Başarısız sağlayıcı istekleri (503/429). Her biri ekranda bir
+     * `turn.retrying`; bütçe dolunca süreç durdurulur çünkü her deneme
+     * kotadan düşüyor ve CLI kendi başına durmuyor (map-stream.ts).
+     */
+    const retries = createRetryTracker(RETRY_BUDGET);
+    let retryExhausted: RetrySignal | null = null;
+    let lastRetry: RetrySignal | null = null;
+    /**
+     * `turn.started` yazıldı mı. Deneme event'i ondan ÖNCE yazılamaz
+     * (validate-events: message.received'ı turn.started izler). Ölçümde
+     * init satırı hep ilk isteğin önünde geldi; yine de sıra garanti değil.
+     */
+    let started = false;
+    const pendingRetries: RetrySignal[] = [];
+    const emitRetry = (s: RetrySignal): void => {
+      emit({
+        ...envelope,
+        actor: agentActor,
+        type: "turn.retrying",
+        payload: {
+          ...turnRef(messageId),
+          provider: "Google",
+          attempt: s.attempt,
+          budget: s.budget,
+          status: s.status,
+          detail: s.detail,
+        },
+      } as NewRoomEvent);
+    };
 
     /**
      * `detached: true` — süreç KENDİ grubunda başlar.
@@ -318,7 +365,16 @@ function runTurn(messageId: string, text: string): Promise<void> {
       finished = true;
       flushText();
       // Bitiş event'i zaten yazıldıysa ikincisini YAZMA.
+      // Süreç turn.started'dan önce öldüyse bekleyen denemeler yazılamaz:
+      // sıra kuralı bozulurdu. Sebep yine de turn.failed metninde.
       if (!ok && !sawTerminal) {
+        /*
+         * Sebep sırası: kullanıcı kestiyse "interrupted" (bütçe o sırada
+         * dolmuş olsa bile — durduran insandı); runner bütçe yüzünden
+         * durdurduysa "retry_exhausted" ve metin stack trace değil cümle.
+         */
+        const exhausted = !interrupting ? retryExhausted : null;
+        const status = exhausted?.status ? ` (${exhausted.status})` : "";
         emit({
           ...envelope,
           actor: agentActor,
@@ -327,12 +383,21 @@ function runTurn(messageId: string, text: string): Promise<void> {
             ...turnRef(messageId),
             // Kesildiyse sebep "interrupted": kullanıcı durdurdu, süreç
             // kendi kendine ölmedi.
-            reason: interrupting ? "interrupted" : sawAnything ? "sdk_error" : "crash",
+            reason: interrupting
+              ? "interrupted"
+              : exhausted
+                ? "retry_exhausted"
+                : sawAnything
+                  ? "sdk_error"
+                  : "crash",
             // Sebebi taşı: "tamamlamadan çıktı" tek başına hiçbir şey anlatmıyor.
-            error: ["gemini süreci turn'ü tamamlamadan çıktı", stderrTail.trim()]
-              .filter((s) => s.length > 0)
-              .join(" · ")
-              .slice(0, 2000),
+            error: exhausted
+              ? `Google yanıt vermedi${status}: ${exhausted.attempt} deneme başarısız, ` +
+                `runner durdurdu (her deneme kotadan düşer). ${exhausted.detail}`.trim()
+              : ["gemini süreci turn'ü tamamlamadan çıktı", lastRetry?.detail ?? "", stderrTail.trim()]
+                  .filter((s) => s.length > 0)
+                  .join(" · ")
+                  .slice(0, 2000),
           },
         } as NewRoomEvent);
       }
@@ -409,6 +474,10 @@ function runTurn(messageId: string, text: string): Promise<void> {
       for (const event of mapped.events) {
         emit(event);
         markDirtyFrom(event, messageId);
+        if (event.type === "turn.started" && !started) {
+          started = true;
+          for (const s of pendingRetries.splice(0)) emitRetry(s);
+        }
       }
       if (mapped.finished) {
         ok = mapped.finished.ok;
@@ -428,6 +497,22 @@ function runTurn(messageId: string, text: string): Promise<void> {
       process.stderr.write(chunk);
       // Son N karakteri sakla: hata sebebi genelde en sondadır.
       stderrTail = (stderrTail + chunk.toString("utf8")).slice(-STDERR_TAIL_MAX);
+
+      // Başarısız istekler: sayı sınırlı (bütçe), protokol kanalını sel basmaz.
+      for (const s of retries.feed(chunk.toString("utf8"))) {
+        if (retryExhausted) break;
+        lastRetry = s;
+        if (started) emitRetry(s);
+        else pendingRetries.push(s);
+        if (s.exhausted && child) {
+          retryExhausted = s;
+          const target = child;
+          killTree(target, "SIGTERM");
+          setTimeout(() => {
+            if (target.exitCode === null && target.signalCode === null) killTree(target, "SIGKILL");
+          }, SIGKILL_AFTER_MS).unref?.();
+        }
+      }
     });
 
     child.on("error", (err) => {

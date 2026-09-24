@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { NewRoomEvent } from "@agent-rooms/protocol";
 import { roomRelativePath, truncate, truncateJson } from "@agent-rooms/protocol";
 
@@ -39,6 +40,97 @@ export const GEMINI_ALWAYS_DENIED = ["task"];
  * `save_memory` bu listede DEĞİL: kalıcı veri yazıyor, yetkiye tabidir.
  */
 export const GEMINI_INTERNAL_TOOLS = new Set(["update_topic", "write_todos"]);
+
+/**
+ * Gemini CLI'ın çalışma alanına eklenecek dizinler (`--include-directories`).
+ *
+ * CLI dosya araçlarını yalnızca `cwd`'ye izin veriyor; `contracts/` ve
+ * `readable` klasörleri Unix izniyle açık olsa bile araç "Path not in
+ * workspace" diye reddediyordu (24 Eylül elle test: backend `contracts/`a hiç
+ * yazamadı). Bu bayrak bir YETKİ değil: yazma izni hâlâ Unix kullanıcısından
+ * geliyor, `readable` bir klasöre yazma denemesi işletim sisteminde düşer.
+ *
+ * `readable` YAML'daki gibi oda köküne göre (`worktrees/frontend`) gelir.
+ */
+export function geminiIncludeDirectories(opts: {
+  contracts: string;
+  readable: readonly string[];
+  roomRoot?: string;
+}): string[] {
+  const root = opts.roomRoot ?? "/room";
+  const abs = (p: string): string =>
+    (path.posix.isAbsolute(p) ? path.posix.normalize(p) : path.posix.join(root, p)).replace(
+      /(.)\/+$/,
+      "$1",
+    );
+  return [...new Set([opts.contracts, ...opts.readable].filter(Boolean).map(abs))];
+}
+
+/** Bir başarısız sağlayıcı isteği — stderr'deki tek `Attempt N failed` satırından. */
+export interface RetrySignal {
+  /** Bu turn'deki başarısız istek sayısı (1'den başlar). CLI'ın sayacı DEĞİL. */
+  attempt: number;
+  budget: number;
+  status: number | null;
+  detail: string;
+  /** Bütçe doldu: runner süreci durdurmalı. */
+  exhausted: boolean;
+}
+
+/**
+ * Gemini CLI stderr'inden başarısız istekleri sayar (24 Eylül, ölçüldü).
+ *
+ * CLI 503/429'da sessizce tekrar deniyor ve her deneme kotadan düşüyor. İki
+ * satır biçimi var (0.60.0, sahte 503 sunucusuyla ölçüldü):
+ *
+ *   Attempt 1 failed with status 503. Retrying with backoff... _ApiError: {...}
+ *   Attempt 3 failed: This model is currently experiencing high demand. ... Max attempts reached
+ *
+ * `general.maxAttempts` ayarı bunu SINIRLAMIYOR: "Max attempts reached"ten
+ * sonra CLI model fallback'ine gidip sayacı sıfırlıyor ve baştan başlıyor
+ * (maxAttempts=3 ile 400 sn'de 80 istek). Bu yüzden sayaç CLI'ın numarasına
+ * değil satır SAYISINA bakar ve bütçe runner'da uygulanır.
+ *
+ * Parçalar satır ortasından bölünebilir: yarım satır bir sonraki parçayı bekler.
+ */
+export function createRetryTracker(budget: number): { feed(chunk: string): RetrySignal[] } {
+  let partial = "";
+  let count = 0;
+  const LINE = /Attempt (\d+) failed(?: with status (\d{3}))?[.:]?\s*(.*)$/;
+  return {
+    feed(chunk: string): RetrySignal[] {
+      const lines = (partial + chunk).split(/\r?\n/);
+      partial = lines.pop() ?? "";
+      const signals: RetrySignal[] = [];
+      for (const line of lines) {
+        const m = LINE.exec(line);
+        if (!m) continue;
+        count += 1;
+        const rest = (m[3] ?? "")
+          // Stack trace ve JSON gövdesi ekrana gitmez.
+          .replace(/\s*_?ApiError:.*$/, "")
+          .replace(/\s*Retrying with backoff\.*\s*/, "")
+          .replace(/\.*\s*Max attempts reached\s*$/, "")
+          .trim();
+        const status = m[2]
+          ? Number(m[2])
+          : /high demand|overloaded|unavailable/i.test(rest)
+            ? 503
+            : /quota|rate limit|resource.?exhausted/i.test(rest)
+              ? 429
+              : null;
+        signals.push({
+          attempt: count,
+          budget,
+          status,
+          detail: rest.slice(0, 300),
+          exhausted: count >= budget,
+        });
+      }
+      return signals;
+    },
+  };
+}
 
 export function resolveGeminiTools(agent: {
   toolsAllow: string[];

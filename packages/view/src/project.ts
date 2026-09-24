@@ -31,8 +31,10 @@ import { anchorOf, type AnchorState } from "./patch.js";
  * sürüm 5'te kaldı, bu yüzden eski (hatalı) snapshot'lar taban olarak
  * kullanılmaya devam etti ve düzeltme hiç görünmedi — kod doğruydu, veri
  * bayattı. Sürüm artınca eski snapshot'lar yok sayılıp log baştan oynatılıyor.
+ *
+ * 7: `TurnView.retry` (24 Eylül, `turn.retrying`).
  */
-export const SNAPSHOT_VERSION = 6;
+export const SNAPSHOT_VERSION = 7;
 
 export type AgentStatus = "stopped" | "starting" | "idle" | "busy" | "crashed" | "failed";
 
@@ -84,6 +86,20 @@ export interface TurnView {
   sdkSessionId: string | null;
   items: TurnItem[];
   outcome: TurnOutcome;
+  /**
+   * Sağlayıcıya yapılan son başarısız istek (`turn.retrying`). Null: hiç yok.
+   *
+   * `active`: model o denemeden SONRA henüz bir şey üretmedi, yani turn
+   * şu an sağlayıcıyı bekliyor. Ekran "çalışıyor" yerine sebebini yazar.
+   */
+  retry: {
+    provider: string;
+    attempt: number;
+    budget: number;
+    status: number | null;
+    detail: string;
+    active: boolean;
+  } | null;
 }
 
 /** Kuyrukta bekleyen bir mesaj. Sıra = dizideki sıra (enqueue sırası). */
@@ -461,6 +477,7 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
           sdkSessionId: null,
           items: [],
           outcome: { kind: "running" },
+          retry: null,
         };
         turnIndex.set(messageId, created);
         agent.turns.push(created);
@@ -470,7 +487,21 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
       case "turn.started":
         if (turn) turn.sdkSessionId = typeof payload.sdkSessionId === "string" ? payload.sdkSessionId : null;
         break;
+      case "turn.retrying":
+        if (turn) {
+          turn.retry = {
+            provider: String(payload.provider ?? ""),
+            attempt: Number(payload.attempt ?? 0),
+            budget: Number(payload.budget ?? 0),
+            status: typeof payload.status === "number" ? payload.status : null,
+            detail: String(payload.detail ?? ""),
+            active: true,
+          };
+        }
+        break;
       case "agent.text":
+        // Model cevap verdi: bekleme bitti. Sayı Özet için kalır.
+        if (turn?.retry) turn.retry.active = false;
         if (turn) {
           turn.items.push({
             kind: "text",
@@ -480,6 +511,7 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
         }
         break;
       case "tool.call":
+        if (turn?.retry) turn.retry.active = false;
         if (turn) {
           turn.items.push({
             kind: "tool",

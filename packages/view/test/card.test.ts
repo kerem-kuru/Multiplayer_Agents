@@ -40,6 +40,7 @@ function turn(over: Partial<TurnView> = {}): TurnView {
     sdkSessionId: null,
     items: [],
     outcome: { kind: "running" },
+    retry: null,
     ...over,
   } as TurnView;
 }

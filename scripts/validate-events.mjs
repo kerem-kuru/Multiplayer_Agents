@@ -56,6 +56,7 @@ const TURN_TYPES = new Set([
   "file.changed",
   "turn.completed",
   "turn.failed",
+  "turn.retrying",
 ]);
 
 const byMessage = new Map();

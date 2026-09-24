@@ -53,6 +53,11 @@ export interface AgentSettings {
   modelOverrides: { claude?: string; gemini?: string };
   maxTurns: number;
   maxBudgetUsd: number;
+  /**
+   * Turn başına en fazla kaç başarısız sağlayıcı isteği (503/429). Dolunca
+   * runner turn'ü bitirir: her deneme kotadan düşüyor (24 Eylül, ölçüldü).
+   */
+  retryBudget: number;
   heartbeatTimeoutMs: number;
   /**
    * SAHTE koşum ortamı (`AGENT_FAKE_RUNTIME=1`) — yalnızca kapı testleri.
@@ -89,6 +94,7 @@ export function loadApiConfig(): ApiConfig {
         gemini: process.env.AGENT_MODEL_GEMINI || undefined,
       },
       maxTurns: Number(process.env.AGENT_MAX_TURNS ?? 30),
+      retryBudget: Number(process.env.AGENT_RETRY_BUDGET || 3),
       maxBudgetUsd: Number(process.env.AGENT_MAX_BUDGET_USD ?? 1),
       heartbeatTimeoutMs: Number(process.env.AGENT_HEARTBEAT_TIMEOUT_MS ?? 20_000),
       fakeRuntime: process.env.AGENT_FAKE_RUNTIME === "1" && process.env.NODE_ENV !== "production",

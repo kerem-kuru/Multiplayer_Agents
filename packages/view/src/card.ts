@@ -66,7 +66,27 @@ const FAIL_REASONS: Record<string, string> = {
   error_max_budget: "bütçe sınırına takıldı",
   timeout: "zaman aşımına uğradı",
   server_restart: "sunucu yeniden başladı",
+  retry_exhausted: "sağlayıcı yanıt vermedi",
 };
+
+/**
+ * Başarısız sağlayıcı isteğinin tek satırı: "Google yoğun (503) · 2/3. deneme".
+ *
+ * 24 Eylül: kullanıcı 4+ dakika "çalışıyor" gördü, sebep (503) sunucu
+ * logundaydı. Kart ve akış aynı cümleyi kullansın diye tek yerde.
+ */
+export function retryLabel(retry: NonNullable<TurnView["retry"]>): string {
+  const who = retry.provider || "sağlayıcı";
+  const what =
+    retry.status === 503
+      ? `${who} yoğun (503)`
+      : retry.status === 429
+        ? `${who} kota/hız sınırı (429)`
+        : retry.status !== null
+          ? `${who} hata verdi (${retry.status})`
+          : `${who} bağlantı hatası`;
+  return `${what} · ${retry.attempt}/${retry.budget}. deneme`;
+}
 
 /** Tek satıra indirger: ANSI temizlenir, satır sonları boşluğa döner, kırpılır. */
 export function oneLine(text: string, max = CARD_LINE_MAX): string {
@@ -152,7 +172,11 @@ export function toCard(
      * bir dosyanın içeriği). Oda görünümüne ham çıktı girmez.
      */
     const call = lastToolCall(turn);
-    if (call) {
+    if (turn?.outcome.kind === "running" && turn.retry?.active) {
+      // Sağlayıcıyı bekliyor: son tool çağrısı değil, NEDEN beklediği.
+      line = oneLine(retryLabel(turn.retry));
+      lineKind = "status";
+    } else if (call) {
       line = oneLine(`${call.tool} · ${formatTool(call.tool, call.input)}`);
       lineKind = "tool";
     }
@@ -212,6 +236,8 @@ export interface TurnSummary {
   firstLine: string;
   /** Turn boyunca değişen FARKLI dosya sayısı (aynı dosyaya iki yazım = 1). */
   changedFiles: number;
+  /** Başarısız sağlayıcı isteği sayısı — her biri kotadan düştü. */
+  failedRequests: number;
 }
 
 export function summarizeTurn(turn: TurnView): TurnSummary {
@@ -220,5 +246,9 @@ export function summarizeTurn(turn: TurnView): TurnSummary {
   for (const item of turn.items) {
     if (item.kind === "tool") for (const f of item.files) files.add(f);
   }
-  return { firstLine: oneLine(first), changedFiles: files.size };
+  return {
+    firstLine: oneLine(first),
+    changedFiles: files.size,
+    failedRequests: turn.retry?.attempt ?? 0,
+  };
 }

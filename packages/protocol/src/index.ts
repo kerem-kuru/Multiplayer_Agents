@@ -16,4 +16,8 @@ export * from "./stream.js";
  * contracts takibi girdi. Bayat imajla agent `stopped`da kalir ve sunucu
  * logunda "imaj protokol surumu uyusmuyor" yazar → `npm run room:build`.
  */
-export const PROTOCOL_VERSION = 4;
+/**
+ * 5: `turn.retrying` event'i ve `turn.failed` icin `retry_exhausted` sebebi
+ * (24 Eylul — saglayici 503'u ekranda gorunmuyordu ve denemeler kotayi yiyordu).
+ */
+export const PROTOCOL_VERSION = 5;

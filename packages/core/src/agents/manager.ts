@@ -67,6 +67,8 @@ export interface AgentManagerOptions {
    * kılıyordu.
    */
   modelOverrides?: Partial<Record<RuntimeKind, string>>;
+  /** Turn başına en fazla başarısız sağlayıcı isteği (runner uygular). Varsayılan 3. */
+  retryBudget?: number;
   /** Gemini koşum ortamı için anahtar. Claude'unkinden bağımsız. */
   geminiApiKey?: string;
   /**
@@ -244,6 +246,7 @@ export class AgentManager {
       geminiApiKey: options.geminiApiKey ?? "",
       maxTurns: options.maxTurns ?? 30,
       maxBudgetUsd: options.maxBudgetUsd ?? 1,
+      retryBudget: options.retryBudget ?? 3,
       heartbeatTimeoutMs: options.heartbeatTimeoutMs ?? 20_000,
       readyTimeoutMs: options.readyTimeoutMs ?? 30_000,
       log: options.log ?? (() => undefined),
@@ -374,6 +377,7 @@ export class AgentManager {
       AGENT_MODEL: modelFor(agent, this.opts.modelOverrides, this.opts.modelOverride),
       AGENT_MAX_TURNS: String(this.opts.maxTurns),
       AGENT_MAX_BUDGET_USD: String(this.opts.maxBudgetUsd),
+      AGENT_RETRY_BUDGET: String(this.opts.retryBudget),
       /*
        * Beklenen izin — runner bunu OLCER, uretmez (Hafta 7, Adim 9).
        *

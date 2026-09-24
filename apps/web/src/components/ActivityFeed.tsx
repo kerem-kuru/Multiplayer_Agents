@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CommentView, TurnItem, TurnView } from "@agent-rooms/view";
-import { formatTool, stripAnsi, summarizeTurn } from "@agent-rooms/view";
+import { formatTool, retryLabel, stripAnsi, summarizeTurn } from "@agent-rooms/view";
 
 /**
  * Küratörlü akış — kağıt malzemesi.
@@ -17,6 +17,17 @@ const dur = (ms: number): string => (ms < 1000 ? `${ms} ms` : `${(ms / 1000).toF
 function Outcome({ turn }: { turn: TurnView }) {
   const o = turn.outcome;
   if (o.kind === "running") {
+    /*
+     * Sağlayıcıyı bekliyorsa SEBEBİ yaz (24 Eylül: 4+ dakika sebepsiz
+     * "çalışıyor"). Renk tek başına bilgi taşımaz; cümle yazar.
+     */
+    if (turn.retry?.active) {
+      return (
+        <span style={{ color: "var(--fail)" }} title={turn.retry.detail}>
+          ● bekliyor · {retryLabel(turn.retry)}
+        </span>
+      );
+    }
     return <span style={{ color: "var(--run)" }}>● çalışıyor</span>;
   }
   if (o.kind === "failed") {
@@ -336,6 +347,15 @@ function TurnBlock({
         {summary.changedFiles > 0 && (
           <span style={{ color: "var(--run)", fontSize: 12, whiteSpace: "nowrap" }}>
             {summary.changedFiles} dosya
+          </span>
+        )}
+        {/* Bitmiş turn'de boşa giden istekler: her biri kotadan düştü. */}
+        {summary.failedRequests > 0 && turn.outcome.kind !== "running" && (
+          <span
+            style={{ color: "var(--fail)", fontSize: 12, whiteSpace: "nowrap" }}
+            title="Sağlayıcıya giden ama başarısız olan istekler — her biri günlük kotadan düşer."
+          >
+            {summary.failedRequests} başarısız istek
           </span>
         )}
         <span style={{ marginLeft: "auto", fontSize: 12, whiteSpace: "nowrap" }}>

@@ -66,6 +66,7 @@ const manager = cfg.agent.fakeRuntime
       providerEnv,
       maxTurns: cfg.agent.maxTurns,
       maxBudgetUsd: cfg.agent.maxBudgetUsd,
+      retryBudget: cfg.agent.retryBudget,
       heartbeatTimeoutMs: cfg.agent.heartbeatTimeoutMs,
       // Secret'ı event log'dan temizleyip stdout'a basmak bir şey kazandırmaz:
       // runner stderr'i de buradan geçiyor.

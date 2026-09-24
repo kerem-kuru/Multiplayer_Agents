@@ -9,7 +9,7 @@ agents:
     systemPrompt: "Sen bu odanin frontend gelistiricisisin. Kisa cevap ver."
     workspace: worktrees/frontend
     runtime: gemini
-    model: auto
+    model: gemini-3.5-flash
     toolsAllow: [read, edit, bash]
     writable: [worktrees/frontend, contracts]
 
@@ -17,6 +17,6 @@ agents:
     systemPrompt: "Sen bu odanin backend gelistiricisisin. Kisa cevap ver."
     workspace: worktrees/backend
     runtime: gemini
-    model: auto
+    model: gemini-3.1-flash-lite
     toolsAllow: [read, edit, bash]
     writable: [worktrees/backend, contracts]

@@ -196,9 +196,40 @@ export const TurnFailed = ev(
   "turn.failed",
   z.object({
     ...TurnRef,
-    /** `interrupted`: sürücü kesti (Hafta 5). Kesilen mesaj tekrar koşmaz. */
-    reason: z.enum(["aborted", "crash", "sdk_error", "stopped", "interrupted"]),
+    /**
+     * `interrupted`: sürücü kesti (Hafta 5). Kesilen mesaj tekrar koşmaz.
+     * `retry_exhausted`: sağlayıcı cevap vermedi (503/429), runner deneme
+     * bütçesi dolunca turn'ü kendisi bitirdi.
+     */
+    reason: z.enum(["aborted", "crash", "sdk_error", "stopped", "interrupted", "retry_exhausted"]),
     error: z.string(),
+  }),
+);
+
+/**
+ * Sağlayıcıya yapılan bir istek başarısız oldu, CLI tekrar deniyor.
+ *
+ * 24 Eylül elle testi: Google her isteğe 503 döndü, Gemini CLI sessizce
+ * tekrar denedi ve kullanıcı 4+ dakika "çalışıyor" gördü. Sebep yalnızca
+ * sunucu logundaydı. Ayrıca her deneme kotadan düşüyor (ölçüldü: 20 deneme =
+ * günlük 20 limit). Bu event ekranda "Google yoğun (503) · 2/3" yazdırır.
+ *
+ * `attempt` bu turn'deki başarısız istek SAYISI — CLI'ın kendi sayacı değil:
+ * CLI model fallback'inde sayacını sıfırlıyor (ölçüldü), kota ise sıfırlanmıyor.
+ */
+export const TurnRetrying = ev(
+  "turn.retrying",
+  z.object({
+    ...TurnRef,
+    /** Kullanıcıya gösterilen sağlayıcı adı: "Google", "Anthropic". */
+    provider: z.string().min(1).max(40),
+    attempt: z.number().int().positive(),
+    /** Runner bu sayıya ulaşınca turn'ü `retry_exhausted` ile bitirir. */
+    budget: z.number().int().positive(),
+    /** HTTP durumu; ağ hatasında (`fetch failed`) null. */
+    status: z.number().int().nullable(),
+    /** Sağlayıcının kısa hata metni. Stack trace değil. */
+    detail: z.string().max(300),
   }),
 );
 
@@ -651,6 +682,7 @@ const EVENT_SCHEMAS = [
   AgentText,
   TurnCompleted,
   TurnFailed,
+  TurnRetrying,
   ToolCall,
   ToolResult,
   ToolDenied,

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { NewRoomEvent, roomRelativePath } from "@agent-rooms/protocol";
-import { mapStreamLine, resolveGeminiTools, type MapContext } from "../src/map-stream.js";
+import {
+  createRetryTracker,
+  geminiIncludeDirectories,
+  mapStreamLine,
+  resolveGeminiTools,
+  type MapContext,
+} from "../src/map-stream.js";
 
 /**
  * Gerçek Gemini CLI çıktısıyla ölçülmüş satırlar (docs/runtime-gemini.md).
@@ -219,5 +225,66 @@ describe("oda-göreli yol", () => {
     expect(roomRelativePath("/room/worktrees/backend/a.js")).toBe("worktrees/backend/a.js");
     expect(roomRelativePath("/room")).toBe("");
     expect(roomRelativePath("/baska/yer.js")).toBe("/baska/yer.js");
+  });
+});
+
+describe("geminiIncludeDirectories", () => {
+  it("contracts her zaman calisma alaninda (24 Eylul: 'Path not in workspace')", () => {
+    expect(geminiIncludeDirectories({ contracts: "/room/contracts", readable: [] })).toEqual([
+      "/room/contracts",
+    ]);
+  });
+
+  it("readable oda kokune gore mutlak yola cevrilir, tekrarlar dusuluyor", () => {
+    expect(
+      geminiIncludeDirectories({
+        contracts: "/room/contracts",
+        readable: ["worktrees/frontend", "/room/contracts", "worktrees/frontend/"],
+      }),
+    ).toEqual(["/room/contracts", "/room/worktrees/frontend"]);
+  });
+});
+
+describe("createRetryTracker", () => {
+  /** Gemini CLI 0.60.0 stderr'i — sahte 503 sunucusuyla ölçüldü (24 Eylül). */
+  const RETRYING =
+    'Attempt 1 failed with status 503. Retrying with backoff... _ApiError: {"error":{"code":503}}';
+  const MAXED =
+    "Attempt 2 failed: This model is currently experiencing high demand. Please try again later.. Max attempts reached";
+
+  it("iki satır biçimini de sayar, stack trace ekrana gitmez", () => {
+    const t = createRetryTracker(3);
+    const out = t.feed([RETRYING, "    at throwErrorIfNotOK (file:///x.js:1:1)", "  status: 503", MAXED, ""].join(NEWLINE));
+    expect(out).toEqual([
+      { attempt: 1, budget: 3, status: 503, detail: "", exhausted: false },
+      {
+        attempt: 2,
+        budget: 3,
+        status: 503,
+        detail: "This model is currently experiencing high demand. Please try again later",
+        exhausted: false,
+      },
+    ]);
+  });
+
+  it("CLI sayacı sıfırlasa da (model fallback) sayı artmaya devam eder ve bütçe dolar", () => {
+    const t = createRetryTracker(3);
+    t.feed(RETRYING + NEWLINE + MAXED + NEWLINE);
+    // Fallback sonrası CLI yeniden "Attempt 1" diyor — kota yine düşüyor.
+    const [third] = t.feed(RETRYING + NEWLINE);
+    expect(third).toMatchObject({ attempt: 3, exhausted: true });
+  });
+
+  it("satır ortasından bölünen parçayı birleştirir", () => {
+    const t = createRetryTracker(3);
+    expect(t.feed("Attempt 1 failed with sta")).toEqual([]);
+    expect(t.feed("tus 429. Retrying with backoff..." + NEWLINE)).toMatchObject([
+      { attempt: 1, status: 429 },
+    ]);
+  });
+
+  it("ağ hatasında durum kodu yok", () => {
+    const [s] = createRetryTracker(3).feed("Attempt 1 failed: fetch failed" + NEWLINE);
+    expect(s).toMatchObject({ status: null, detail: "fetch failed" });
   });
 });
