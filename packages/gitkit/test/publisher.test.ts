@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NewRoomEvent } from "@agent-rooms/protocol";
 import { DiffPublisher, createCheckpoint, git, initWorkspace, newCheckpointId } from "../src/index.js";
 
@@ -96,8 +96,9 @@ describe("DiffPublisher", () => {
     pub.markDirty(MID);
     expect(diffs()).toHaveLength(0); // hemen değil
 
-    await new Promise((r) => setTimeout(r, 400));
-    expect(diffs()).toHaveLength(1);
+    // Sabit bekleme DEĞİL: bir yayım birkaç git süreci demek ve yük altında
+    // 400 ms'yi aşıyordu. Ölçülen şey "sonunda tek event geliyor".
+    await vi.waitFor(() => expect(diffs()).toHaveLength(1), { timeout: 5000, interval: 20 });
   });
 
   it("set_base haritayı sıfırlar ve yeni tabana göre TAM diff yayımlar", async () => {

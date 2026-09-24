@@ -337,7 +337,10 @@ describe.runIf(process.env.SKIP_DB !== "1")("agent kuyruğu", () => {
 
   it("agent failed olunca kuyruk temizleniyor", async () => {
     if (!alive) return;
-    const runner = new FakeRunner(10);
+    // İlk turn test boyunca BİTMEMELİ: 10 ms'lik turn yük altında
+    // `agentFailed`'dan önce bitiyor, "iki" teslim ediliyor ve iptal edilecek
+    // `queued` kayıt kalmıyordu. Zamanlayıcıyı afterAll temizliyor.
+    const runner = new FakeRunner(60_000);
     const queue = new AgentQueue({ pool: getPool(), deliverer: runner });
     runner.queue = queue;
 
