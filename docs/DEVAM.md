@@ -1,6 +1,82 @@
-# Kaldığımız yer — 24 Eylül 2026, gece yarısı
+# Kaldığımız yer — 24 Eylül 2026, ~18:00 (PC yeniden başlatıldı)
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
+
+## ⚠️ EN SON DURUM — 24 Eylül ~20:00 (önce bunu oku)
+
+**Kotasız işler bitti, commit edildi (push EDİLMEDİ):**
+- `52aa7b0` test: yük altında düşen 3 test (queue "agent failed", publisher debounce, redact perf)
+  zamandan bağımsız hâle getirildi. Hepsi TEST kusuruydu (10 ms'lik sahte turn yarışı, sabit
+  400 ms bekleme, tek turluk duvar saati). Tam paket üst üste iki kez **446/446**.
+- `b563274` Sorun 1 + 2 kodu. **Sorun 1 uçtan uca ölçüldü ✅** (sahte 503, `--network none`):
+  3 istek, 3 `turn.retrying` (1/3..3/3), `turn.failed retry_exhausted` 20 sn'de, canlı gemini süreci 0.
+  Probe koşumu (Git Bash): `MSYS_NO_PATHCONV=1 docker run --rm --network none --tmpfs /room:mode=1777
+  -v "$(pwd -W)/scripts/probes:/m:ro" --entrypoint sh agent-rooms/room:dev /m/e2e-runner.sh 3`
+  (`--tmpfs /room` şart; betik eskiydi, `systemPrompt` eklendi).
+- typecheck + web tsc temiz. İmaj `room:dev` (17:45) güncel kodla.
+
+### Yarın (25 Eylül, TSİ 10:00 kota sıfırlandıktan sonra) — hepsi kota yer
+1. `npm run db:up` → API + arayüz (`.env` `AGENT_MODEL=` boş, `ROOM_CONFIG=config/room.week7.yaml`).
+2. **Sorun 2 doğrulaması:** TEK backend turn'ü "contracts'a api.md yaz" → `/room/contracts/api.md`
+   oluşmalı, sahibi `agent-backend:rooms-contracts`. 503 gelirse artık ekranda görünür ve 3 denemede durur.
+3. `npm run gate:w7:agent` (~20 istek, hiç koşulmadı; ilk koşuda kapının kendi hataları çıkabilir).
+4. Adım 16 dogfood (iki kişi) → README "Hafta 7 dogfood notları" + roadmap'te Hafta 7 ✓.
+
+---
+
+## Önceki durum — 24 Eylül ~18:00
+
+### (18:00 notu — yukarıdaki güncel)
+
+**Hepsi diskte, COMMIT EDİLMEDİ** (`git status`: 14 dosya değişik + `packages/view/test/retry.test.ts` yeni).
+İmaj (`agent-rooms/room:dev`, 17:45) bu kodla derlendi. PC yeniden başladığı için API/arayüz KAPALI.
+
+**Makine kuralı (Kerem, 24 Eylül):** ağır işleri (`room:build`, tüm test paketi, Docker ölçümleri)
+ASLA paralel/üst üste koşma — Ryzen 9'u tam yükte kilitledi. Tek tek, sırayla.
+
+### Sorun 2 — Gemini agent `contracts/`a erişemiyordu → KOD BİTTİ, uçtan uca doğrulanmadı
+- Elle testte backend: `Path not in workspace: /room/contracts`. Unix izinleri DOĞRUYDU
+  (agent-backend `rooms-contracts` grubunda, 2775). Engel Gemini CLI'ın kendi çalışma alanı kısıtıydı.
+- Düzeltme: runner CLI'a `--include-directories` veriyor (`geminiIncludeDirectories()`,
+  `packages/runner-gemini/src/map-stream.ts`; contracts + readable, `/room` altında mutlak).
+- Canlı süreçte bayrak doğrulandı. **Eksik:** bir backend turn'ünün `/room/contracts/api.md`
+  yazdığını görmek (Google 503 yüzünden olmadı). Dosya sahibi `agent-backend:rooms-contracts` olmalı.
+
+### Sorun 1 — 503 ekranda görünmüyor + denemeler kotayı yiyor → KOD BİTTİ, son ölçüm kaldı
+- **Ölçüldü (sahte 503 sunucusu, `--network none`, kota harcamadan):** Gemini CLI
+  `general.maxAttempts` İŞE YARAMIYOR — "Max attempts reached" sonrası model fallback'e gidip
+  sayacı sıfırlıyor, sonsuza dek deniyor (maxAttempts=3 → 400 sn'de 80 istek; 10 → 18 istek ve sürüyor).
+- Çözüm: bütçeyi RUNNER uyguluyor. `createRetryTracker()` stderr'deki `Attempt N failed` satırlarını
+  sayar; her biri `turn.retrying` event'i; `AGENT_RETRY_BUDGET` (vars. 3) dolunca süreç grubu
+  öldürülür, `turn.failed` reason `retry_exhausted`.
+- Değişenler: protocol (`TurnRetrying`, `retry_exhausted`, **PROTOCOL_VERSION 5**), api config +
+  manager (`AGENT_RETRY_BUDGET`), view (`TurnView.retry`, **SNAPSHOT_VERSION 7**, `retryLabel`,
+  `summarizeTurn.failedRequests`), web ActivityFeed ("● bekliyor · Google yoğun (503) · 2/3. deneme"),
+  `scripts/validate-events.mjs`.
+- 8 yeni birim test geçiyor, typecheck temiz.
+- **KALAN:** `scripts/probes/e2e-runner.sh` + `fake503.mjs` ile gerçek runner'ı sahte 503'e karşı
+  koş (tek container, ~1 dk): beklenen 3 istek, 3 `turn.retrying`, `turn.failed retry_exhausted`,
+  canlı gemini süreci 0. Koşum: `docker run --rm --network none -v "$PWD/scripts/probes:/m:ro" --entrypoint sh agent-rooms/room:dev /m/e2e-runner.sh 3`. Notlar:
+  sahte sunucu her isteğe Google biçiminde 503 JSON döner; `GOOGLE_GEMINI_BASE_URL` ile yönlendirilir
+  ve bu durumda `~/.gemini/settings.json`'a `security.auth.selectedType: gemini-api-key` gerekir
+  (yoksa "Invalid auth method" — yalnız ölçüm ortamı sorunu, üründe yok).
+
+### Diğer
+- `.env`: `AGENT_MODEL=` boş. `config/room.week7.yaml`: frontend `gemini-3.5-flash`, backend
+  `gemini-3.1-flash-lite` (commit edilmedi). Bugün İKİ model de Google'dan 503 aldı; ~10 + ~8 istek yandı.
+- `queue.test.ts` ("agent failed olunca kuyruk temizleniyor") ve `publisher.test.ts` (debounce)
+  değişikliklerim OLMADAN da düşüyor — ortam kaynaklı olabilir (ayakta API aynı DB'yi kullanıyordu), bakılmadı.
+- `redact/perf.test.ts` yük altında düştü, tek başına geçiyor.
+
+### Sıradaki
+1. `npm run db:up` → API + arayüz (aşağıda "Çalıştırma").
+2. Sorun 1 son ölçümü (tek başına) → geçerse Sorun 1 + 2 için commit.
+3. Google sakinken TEK backend turn'ü: "contracts'a api.md yaz" → Sorun 2 doğrulaması.
+4. Sonra eski sıra: `gate:w7:agent` → dogfood → README + roadmap.
+
+---
+
+# Önceki not — 24 Eylül 2026, gece yarısı
 
 ## Proje ne, neden
 
