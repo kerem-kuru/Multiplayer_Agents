@@ -1,10 +1,10 @@
-# Kaldığımız yer — 24 Eylül 2026, ~18:00 (PC yeniden başlatıldı)
+# Kaldığımız yer — 24 Eylül 2026, ~20:00
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
 
 ## ⚠️ EN SON DURUM — 24 Eylül ~20:00 (önce bunu oku)
 
-**Kotasız işler bitti, commit edildi (push EDİLMEDİ):**
+**Kotasız işler bitti, hepsi commit + push edildi (`origin/main`). Çalışma ağacı temiz.**
 - `52aa7b0` test: yük altında düşen 3 test (queue "agent failed", publisher debounce, redact perf)
   zamandan bağımsız hâle getirildi. Hepsi TEST kusuruydu (10 ms'lik sahte turn yarışı, sabit
   400 ms bekleme, tek turluk duvar saati). Tam paket üst üste iki kez **446/446**.
@@ -16,7 +16,8 @@ Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
 - typecheck + web tsc temiz. İmaj `room:dev` (17:45) güncel kodla.
 
 ### Yarın (25 Eylül, TSİ 10:00 kota sıfırlandıktan sonra) — hepsi kota yer
-1. `npm run db:up` → API + arayüz (`.env` `AGENT_MODEL=` boş, `ROOM_CONFIG=config/room.week7.yaml`).
+1. Docker kapalıysa aç: `%LOCALAPPDATA%\Programs\DockerDesktop\Docker Desktop.exe`
+   (Program Files altında DEĞİL). Sonra `npm run db:up` → API + arayüz (`.env` `AGENT_MODEL=` boş, `ROOM_CONFIG=config/room.week7.yaml`).
 2. **Sorun 2 doğrulaması:** TEK backend turn'ü "contracts'a api.md yaz" → `/room/contracts/api.md`
    oluşmalı, sahibi `agent-backend:rooms-contracts`. 503 gelirse artık ekranda görünür ve 3 denemede durur.
 3. `npm run gate:w7:agent` (~20 istek, hiç koşulmadı; ilk koşuda kapının kendi hataları çıkabilir).
