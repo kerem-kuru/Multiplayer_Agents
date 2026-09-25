@@ -1,8 +1,53 @@
-# Kaldığımız yer — 24 Eylül 2026, ~20:00
+# Kaldığımız yer — 25 Eylül 2026, ~23:55
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
 
-## ⚠️ EN SON DURUM — 24 Eylül ~20:00 (önce bunu oku)
+## ⚠️ EN SON DURUM — 25 Eylül ~23:55 (önce bunu oku)
+
+**Yapılanlar (commit `40535cd`, bu not ayrı commit):**
+- ✅ **Sorun 2 uçtan uca doğrulandı.** Tek backend turn'ü "contracts'a api.md yaz" →
+  `/room/contracts/api.md` `agent-backend:rooms-contracts 664`, `contract.changed` (yalnız sha256 + size).
+  Diff ekranında görünmemesi DOĞRU: `contracts/` worktree dışında (görev tanımı Adım 7).
+  Arayüzde sözleşmeyi gösteren bir yer YOK (`useEventStream`'de `contracts` tutuluyor, basan bileşen yok) —
+  Kerem "şu an gerek yok" dedi; dogfood 1. soruya not olarak düşülecek.
+- ✅ **503 bütçesi art arda sayılıyor** (`40535cd`). Ölçülen kusur: backend 503, 503, araç çağırdı,
+  sonra TEK 503 → sayaç 3 → ilerleyen turn öldü. Şimdi model metin/`tool_use` ürettiğinde sayaç sıfırlanıyor
+  (`createRetryTracker().success()`), turn başına toplam sınır `budget * 3` (9). Özet toplamı
+  `TurnView.retry.failed`'dan sayar, **SNAPSHOT_VERSION 8**. Protokol değişmedi. Birim test + sahte 503
+  ölçümü geçti; gerçek Google'da da görüldü (frontend 503,503,↺,503,fetch failed,↺,503,503 ile sürdü).
+  İmaj `room:dev` bu kodla derlendi, API yeniden başlatıldı.
+
+**Yapılamayan — kendiliğinden sözleşme testi (EN KRİTİK açık soru):** Agent'lar görevde "contracts"
+geçmeden `contracts/`'ı kullanıyor mu? `gate:w7:agent` bunu ÖLÇMÜYOR (orada açık komutla yazdırılıyor).
+- Betik hazır: `bash .gate7a-tmp-contracts/run.sh` (gitignore'lu klasör; ayrı sunucu 8797, AUTH_DEV_MODE,
+  fixture depo, agent başına model; çıktılar `.gate7a-tmp-contracts/out/`). Görevler: backend
+  "GET /api/customers ucu ekle (kimlik, ad, e-posta, şehir, kayıt tarihi)", frontend "web/customers.html
+  ekranı ekle, backend'in ucundan al". `FM=`/`BM=` ile model değişir.
+- İlk deneme GEÇERSİZDİ: sipariş ucu/ekranı fixture'da zaten var, frontend "zaten hazır" dedi.
+- İkinci deneme Google yüzünden sonuçsuz: backend art arda 3×503, frontend 3.5-flash kotası doldu (429).
+- **Olumlu işaret:** iki model de kendiliğinden önce `/room/contracts`'a baktı. Backend planına "frontend ile
+  koordinasyon için sözleşmeyi /room/contracts'a eklemek" yazdı; frontend boş bulunca "contracts'a yazmamız
+  gereken API isteğinin yapısını" çıkarmaya başladı. Yazdıklarını henüz GÖRMEDİK.
+- **Tasarım bulgusu (dogfood 2. soru + Hafta 8 defteri):** her agent'ın klonunda TÜM depo var. Frontend
+  backend'in `api/server.js`'ini kendi klonunda (taban anındaki BAYAT kopya) okuyabiliyor ve `contracts/`
+  boşken oradan tahmin yürüttü. Risk: backend yeni uç yazar, frontend bayat kopyadan tahmin eder, ayrışırlar.
+
+**Bilinen küçük kusur (Kerem: şimdilik kalsın):** kota dolunca (429, ölümcül hata yolu, "Attempt N failed"
+değil) kart/Özet ham stack trace gösteriyor; 503 gibi Türkçe cümleye çevrilmiyor.
+
+### Yarın (26 Eylül, TSİ 10:00'dan sonra) — hepsi kota yer
+1. Docker Desktop (`%LOCALAPPDATA%\Programs\DockerDesktop\Docker Desktop.exe`) → `npm run db:up` → API + arayüz
+   (aşağıda "Çalıştırma"). Derleme ve imaj güncel.
+2. **Kendiliğinden sözleşme testi:** `bash .gate7a-tmp-contracts/run.sh` → `out/` altındaki turn dökümleri ve
+   `files.txt` (contracts içeriği; frontend alan adları sözleşmeyle tutuyor mu). ~10 frontend isteği.
+3. `npm run gate:w7:agent` (~20 istek; frontend kotası yetmezse `GATE_FRONTEND_MODEL`).
+4. Adım 16 dogfood → README "Hafta 7 dogfood notları" (yukarıdaki iki bulgu dahil) + roadmap'te Hafta 7 ✓.
+
+Google 25 Eylül gecesi çok yoğundu (neredeyse her istekte 503); sabah saatleri denenebilir.
+
+---
+
+## Önceki durum — 24 Eylül ~20:00
 
 **Kotasız işler bitti, hepsi commit + push edildi (`origin/main`). Çalışma ağacı temiz.**
 - `52aa7b0` test: yük altında düşen 3 test (queue "agent failed", publisher debounce, redact perf)
