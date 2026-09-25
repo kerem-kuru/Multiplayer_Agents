@@ -256,10 +256,12 @@ describe("createRetryTracker", () => {
     const t = createRetryTracker(3);
     const out = t.feed([RETRYING, "    at throwErrorIfNotOK (file:///x.js:1:1)", "  status: 503", MAXED, ""].join(NEWLINE));
     expect(out).toEqual([
-      { attempt: 1, budget: 3, status: 503, detail: "", exhausted: false },
+      { attempt: 1, budget: 3, total: 1, totalCap: 9, status: 503, detail: "", exhausted: false },
       {
         attempt: 2,
         budget: 3,
+        total: 2,
+        totalCap: 9,
         status: 503,
         detail: "This model is currently experiencing high demand. Please try again later",
         exhausted: false,
@@ -281,6 +283,28 @@ describe("createRetryTracker", () => {
     expect(t.feed("tus 429. Retrying with backoff..." + NEWLINE)).toMatchObject([
       { attempt: 1, status: 429 },
     ]);
+  });
+
+  it("model yanıt verince art arda sayaç sıfırlanır, ilerleyen turn ölmez (25 Eylül)", () => {
+    // Ölçülen olay: 503, 503, model araç çağırdı, dakikalar sonra tek 503 → turn öldü.
+    const t = createRetryTracker(3);
+    t.feed(RETRYING + NEWLINE + RETRYING + NEWLINE);
+    t.success();
+    const [third] = t.feed(RETRYING + NEWLINE);
+    expect(third).toMatchObject({ attempt: 1, total: 3, exhausted: false });
+  });
+
+  it("dalgalı sağlayıcıda toplam üst sınır dolunca durur", () => {
+    const t = createRetryTracker(3);
+    const all = [];
+    for (let i = 0; i < 4; i += 1) {
+      all.push(...t.feed(RETRYING + NEWLINE + RETRYING + NEWLINE));
+      t.success();
+    }
+    // Hiçbir an art arda 3'e ulaşmadı; 9. başarısız istekte toplam sınır doldu.
+    expect(all.map((s) => s.exhausted)).toEqual([false, false, false, false, false, false, false, false]);
+    const [ninth] = t.feed(RETRYING + NEWLINE);
+    expect(ninth).toMatchObject({ attempt: 1, total: 9, totalCap: 9, exhausted: true });
   });
 
   it("ağ hatasında durum kodu yok", () => {

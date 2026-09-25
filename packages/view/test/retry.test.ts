@@ -80,6 +80,21 @@ describe("turn.retrying", () => {
     expect(summarizeTurn(turn).failedRequests).toBe(1);
   });
 
+  it("art arda sayaç sıfırlansa da Özet toplam başarısız isteği sayar", () => {
+    // Runner model yanıt verince `attempt`ı sıfırlıyor: 1, 2, (araç), 1.
+    const view = project([
+      ...start(),
+      retry(1),
+      retry(2),
+      ev("tool.call", { agent: "frontend", messageId: MID, toolUseId: "t1", tool: "read_file", input: {} }),
+      retry(1),
+    ]);
+    const turn = view.agents.frontend!.turns[0]!;
+    expect(turn.retry).toMatchObject({ attempt: 1, failed: 3, active: true });
+    expect(toCard("frontend", view.agents.frontend!).line).toBe("Google yoğun (503) · 1/3. deneme");
+    expect(summarizeTurn(turn).failedRequests).toBe(3);
+  });
+
   it("bütçe dolunca kart sebebi Türkçe yazar", () => {
     const view = project([
       ...start(),

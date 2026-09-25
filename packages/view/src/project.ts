@@ -33,8 +33,9 @@ import { anchorOf, type AnchorState } from "./patch.js";
  * bayattı. Sürüm artınca eski snapshot'lar yok sayılıp log baştan oynatılıyor.
  *
  * 7: `TurnView.retry` (24 Eylül, `turn.retrying`).
+ * 8: `TurnView.retry.failed` — deneme bütçesi art arda sayılıyor (25 Eylül).
  */
-export const SNAPSHOT_VERSION = 7;
+export const SNAPSHOT_VERSION = 8;
 
 export type AgentStatus = "stopped" | "starting" | "idle" | "busy" | "crashed" | "failed";
 
@@ -99,6 +100,8 @@ export interface TurnView {
     status: number | null;
     detail: string;
     active: boolean;
+    /** Bu turn'deki toplam başarısız istek (`turn.retrying` sayısı). `attempt` art arda sayıdır ve sıfırlanır. */
+    failed: number;
   } | null;
 }
 
@@ -496,6 +499,7 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
             status: typeof payload.status === "number" ? payload.status : null,
             detail: String(payload.detail ?? ""),
             active: true,
+            failed: (turn.retry?.failed ?? 0) + 1,
           };
         }
         break;

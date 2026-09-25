@@ -68,14 +68,24 @@ export function geminiIncludeDirectories(opts: {
 
 /** Bir başarısız sağlayıcı isteği — stderr'deki tek `Attempt N failed` satırından. */
 export interface RetrySignal {
-  /** Bu turn'deki başarısız istek sayısı (1'den başlar). CLI'ın sayacı DEĞİL. */
+  /**
+   * ART ARDA başarısız istek sayısı (1'den başlar). Model bir şey ürettiğinde
+   * (`success()`) sıfırlanır. CLI'ın sayacı DEĞİL.
+   */
   attempt: number;
   budget: number;
+  /** Bu turn'deki TOPLAM başarısız istek — sıfırlanmaz, her biri kotadan düştü. */
+  total: number;
+  /** Turn başına toplam üst sınır. */
+  totalCap: number;
   status: number | null;
   detail: string;
-  /** Bütçe doldu: runner süreci durdurmalı. */
+  /** Bütçe doldu (art arda `budget` ya da toplam `totalCap`): runner süreci durdurmalı. */
   exhausted: boolean;
 }
+
+/** Toplam üst sınır, art arda bütçenin katı: sağlayıcı dalgalıyken bile sonsuza gitmez. */
+export const RETRY_TOTAL_FACTOR = 3;
 
 /**
  * Gemini CLI stderr'inden başarısız istekleri sayar (24 Eylül, ölçüldü).
@@ -91,11 +101,25 @@ export interface RetrySignal {
  * (maxAttempts=3 ile 400 sn'de 80 istek). Bu yüzden sayaç CLI'ın numarasına
  * değil satır SAYISINA bakar ve bütçe runner'da uygulanır.
  *
+ * **Bütçe ART ARDA sayılır (25 Eylül, ölçüldü).** İlk hâli turn boyunca
+ * biriktiriyordu: backend iki 503'ten sonra toparlandı, araç çağırmaya devam
+ * etti, dakikalar sonra gelen TEK bir 503 sayacı 3'e taşıdı ve ilerleyen turn
+ * öldürüldü. Bütçenin amacı "sağlayıcı art arda cevap vermiyor"u yakalamak;
+ * model bir şey ürettiğinde (`success()`) sayaç sıfırlanır. Dalgalı bir
+ * sağlayıcıda kotanın sınırsız yanmaması için ayrıca turn başına toplam üst
+ * sınır var (`budget * RETRY_TOTAL_FACTOR`).
+ *
  * Parçalar satır ortasından bölünebilir: yarım satır bir sonraki parçayı bekler.
  */
-export function createRetryTracker(budget: number): { feed(chunk: string): RetrySignal[] } {
+export function createRetryTracker(budget: number): {
+  feed(chunk: string): RetrySignal[];
+  /** Model bir yanıt üretti: sağlayıcı cevap veriyor, art arda sayacı sıfırla. */
+  success(): void;
+} {
   let partial = "";
   let count = 0;
+  let total = 0;
+  const totalCap = budget * RETRY_TOTAL_FACTOR;
   const LINE = /Attempt (\d+) failed(?: with status (\d{3}))?[.:]?\s*(.*)$/;
   return {
     feed(chunk: string): RetrySignal[] {
@@ -106,6 +130,7 @@ export function createRetryTracker(budget: number): { feed(chunk: string): Retry
         const m = LINE.exec(line);
         if (!m) continue;
         count += 1;
+        total += 1;
         const rest = (m[3] ?? "")
           // Stack trace ve JSON gövdesi ekrana gitmez.
           .replace(/\s*_?ApiError:.*$/, "")
@@ -122,12 +147,17 @@ export function createRetryTracker(budget: number): { feed(chunk: string): Retry
         signals.push({
           attempt: count,
           budget,
+          total,
+          totalCap,
           status,
           detail: rest.slice(0, 300),
-          exhausted: count >= budget,
+          exhausted: count >= budget || total >= totalCap,
         });
       }
       return signals;
+    },
+    success(): void {
+      count = 0;
     },
   };
 }

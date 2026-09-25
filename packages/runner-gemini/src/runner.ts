@@ -93,7 +93,10 @@ let currentMessageId: string | null = null;
 let interrupting = false;
 /** Kibar sinyalden sonra süreç ölmezse ne kadar beklenir. */
 const SIGKILL_AFTER_MS = 5_000;
-/** Turn başına en fazla başarısız sağlayıcı isteği — sunucudan (`AGENT_RETRY_BUDGET`). */
+/**
+ * Art arda en fazla başarısız sağlayıcı isteği — sunucudan (`AGENT_RETRY_BUDGET`).
+ * Turn başına toplam sınır bunun `RETRY_TOTAL_FACTOR` katı (`createRetryTracker`).
+ */
 const RETRY_BUDGET = Math.max(1, Math.floor(Number(process.env.AGENT_RETRY_BUDGET) || 3));
 
 /**
@@ -392,8 +395,11 @@ function runTurn(messageId: string, text: string): Promise<void> {
                   : "crash",
             // Sebebi taşı: "tamamlamadan çıktı" tek başına hiçbir şey anlatmıyor.
             error: exhausted
-              ? `Google yanıt vermedi${status}: ${exhausted.attempt} deneme başarısız, ` +
-                `runner durdurdu (her deneme kotadan düşer). ${exhausted.detail}`.trim()
+              ? `Google yanıt vermedi${status}: ` +
+                (exhausted.attempt >= exhausted.budget
+                  ? `art arda ${exhausted.attempt} deneme başarısız`
+                  : `bu turn'de toplam ${exhausted.total} deneme başarısız`) +
+                `, runner durdurdu (her deneme kotadan düşer). ${exhausted.detail}`.trim()
               : ["gemini süreci turn'ü tamamlamadan çıktı", lastRetry?.detail ?? "", stderrTail.trim()]
                   .filter((s) => s.length > 0)
                   .join(" · ")
@@ -463,6 +469,11 @@ function runTurn(messageId: string, text: string): Promise<void> {
       // Asistan metni parça parça geliyor: biriktir, başka bir satır
       // gelince tek event olarak yaz. Yoksa akışta cümleler ortadan bölünür.
       const rec = parsed as { type?: string; role?: string; content?: unknown };
+      // Model bir şey üretti → sağlayıcı cevap veriyor, art arda deneme sayacı
+      // sıfırlanır. `tool_result` sayılmaz: onu CLI yerelde üretiyor.
+      if ((rec.type === "message" && rec.role === "assistant") || rec.type === "tool_use") {
+        retries.success();
+      }
       if (rec.type === "message" && rec.role === "assistant") {
         textParts.push(typeof rec.content === "string" ? rec.content : "");
         return;

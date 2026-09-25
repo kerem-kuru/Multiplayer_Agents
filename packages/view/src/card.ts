@@ -249,6 +249,6 @@ export function summarizeTurn(turn: TurnView): TurnSummary {
   return {
     firstLine: oneLine(first),
     changedFiles: files.size,
-    failedRequests: turn.retry?.attempt ?? 0,
+    failedRequests: turn.retry?.failed ?? 0,
   };
 }
