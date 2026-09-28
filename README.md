@@ -673,9 +673,15 @@ Dogfood sırasında runner `503 "This model is currently experiencing high deman
 kendi backoff'uyla toparladı; turn düşmedi. `429` (kota) ile karıştırılmamalı: 429 günlük
 hakkın bitmesi, 503 geçici. `summarizeGeminiError` ikisini de sebebi başa alarak gösteriyor.
 
+> **29 Eylül düzeltmesi:** 429 yalnızca günlük hakkın bitmesi değil. Ücretsiz katmanda
+> dakikalık sınır da 429 dönüyor (`3.5-flash`: dakikada 5, *"Please retry in 59s"*) ve CLI
+> bekleyip tekrar deniyor. Günlük bitişte CLI tekrar denemiyor, doğrudan hata veriyor.
+> Runner'ın ikisini nasıl ayırdığı: "Hafta 7 kararları → Gemini yeniden denemeleri stderr'den okunuyor".
+
 ## Hafta 7 kararları
 
-Üç mimari karar ve görev tanımından ölçerek ayrıldığımız üç nokta.
+Üç mimari karar, görev tanımından ölçerek ayrıldığımız üç nokta ve bir bilinçli ilke sapması
+(Gemini yeniden denemeleri).
 
 | Karar | Gerekçe |
 | --- | --- |
@@ -721,6 +727,52 @@ yerde yok ve sistemdeki tek kayıt `/room/repo.git`".
 | Migration `006` değil `007` | `006_diff_reviews.sql` Hafta 6'da alınmıştı. |
 | `rooms.status` DROP CONSTRAINT değil ADD COLUMN | Görev tanımı sütun varmış gibi yazıyor; `rooms` tablosunda `status` hiç yaratılmamıştı (001'deki CHECK `sessions`'a ait). Kısıtıyla birlikte eklendi, Hafta 7 öncesi 343 oda `archived` işaretlendi. |
 | `journal` artık yazılabilir değil | Mimari `journal`ı `root:root 0755` yapıyor ve kapı matrisi oraya yazmanın reddedilmesini istiyor. Eski şema `writable: [journal]`e izin veriyordu; şema daraldı. |
+
+### Bilinçli sapma: Gemini yeniden denemeleri stderr'den okunuyor
+
+**Hangi kurala istisna:** "Hiçbir yerde metin kazıma yok" ("İki mimari kural", 1. kural) ve
+yeni koşum ortamı sözleşmesinin 1. maddesi ("Yapılandırılmış akış"). 24 Eylül'den beri böyle; 29 Eylül'e kadar kayda geçmemişti.
+
+**Ne yapılıyor:** `createRetryTracker` (`packages/runner-gemini/src/map-stream.ts`) Gemini
+CLI'ın stderr'indeki `Attempt N failed …` ve `Retrying after N ms` satırlarını regex ile
+okuyor ve bir **kontrol kararı** veriyor: art arda 3 başarısız istekte CLI'ı durduruyor
+(`retry_exhausted`); sağlayıcının bekleme süresi verdiği 429'u art arda bütçeden saymıyor.
+
+**Neden gerekli:** CLI'ın yapılandırılmış çıktısı (`-o stream-json`) yeniden denemeleri hiç
+bildirmiyor. CLI 503/429'da sessizce tekrar deniyor ve `general.maxAttempts` bunu
+sınırlamıyor: "Max attempts reached"ten sonra model fallback'i sayacı sıfırlıyor. Ölçüldü
+(24 Eylül): 400 sn'de 80 istek, ekranda "çalışıyor". Okumamak kotanın görünmeden yanması demek.
+
+**Neden kabul edilebilir sınırlar içinde:**
+- Okunan şey modelin ürettiği serbest metin değil, CLI'ın kendi tanı satırları.
+- Okuma host'ta değil, container içindeki runner'da. Sonuç şemalı bir event'e
+  (`turn.retrying`) dönüşüyor; host yine yalnızca şemalı veri okuyor.
+- Claude runner'ında karşılığı yok: SDK bu bilgiyi yapılandırılmış veriyor.
+
+**Risk:** CLI sürümü satır biçimini değiştirirse sayaç kör olur ve CLI kotayı yine sessizce
+yakar. Önlemler:
+- `@google/gemini-cli` `0.60.0`'a tam sabit.
+- Testler gerçek log satırlarıyla (`packages/runner-gemini/test/map-stream.test.ts`).
+- Yalnızca süre satırı değişirse davranış temkinliye düşer: 429 bütçeden sayılır.
+- **CLI güncellemesi = bu satırların gerçek stderr ile yeniden ölçülmesi.** Sürüm testlerle
+  birlikte yükseltilir, tek başına değil.
+
+**Çıkış yolu:** CLI yapılandırılmış çıktıya yeniden deneme olayı eklerse ona geçmek, ya da
+Gemini runner'ını CLI yerine doğrudan API/SDK ile yazmak (Claude runner'ı gibi). İkisi de
+bugün kapsam dışı.
+
+### Bekleme süreli 429 turn başına toplam sınıra sayılıyor
+
+| Karar | Gerekçe |
+| --- | --- |
+| Bekleme süreli 429 art arda bütçeye girmez, turn başına toplam sınıra (`budget × 3` = 9) girer | Toplam sınır, CLI'ın kendi başına durmayan tekrar döngüsüne karşı tek güvence. Beklemeyi ondan da çıkarmak o güvenceyi kaldırırdı. |
+
+**Bedeli:** Ücretsiz katmanda (`3.5-flash`: dakikada 5 istek) çok adımlı uzun bir turn 9
+bekleme biriktirirse, sağlıklı olduğu hâlde durdurulur. 29 Eylül `gate:w7:agent`'ta turn
+başına en fazla 2 bekleme görüldü. Hafta 11'de 4 agent aynı model ve anahtarı paylaşırsa
+olasılık artar; ücretli katmanda dakikalık sınır bu düzeyde değil.
+**Gözden geçirme:** Hafta 11 öncesi. Seçenekler: süreye dayalı sınır (turn başına toplam
+bekleme süresi) ya da agent'ları farklı model/anahtara dağıtmak.
 
 ### Kapı kendi ölçümünü kirletiyordu
 
