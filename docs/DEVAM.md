@@ -1,8 +1,8 @@
-# Kaldığımız yer — 29 Eylül 2026, ~02:00
+# Kaldığımız yer — 29 Eylül 2026, ~02:30
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
 
-## ⚠️ EN SON DURUM — 29 Eylül ~01:45 (önce bunu oku)
+## ⚠️ EN SON DURUM — 29 Eylül ~02:30 (önce bunu oku)
 
 ### ✅ Kendiliğinden sözleşme testi GEÇTİ (4. deneme, ~01:28)
 `bash .gate7a-tmp-contracts/run.sh`, 1. anahtar, oda `90d29233`. Görevlerde "contracts" geçmiyor.
@@ -40,11 +40,24 @@ frontend` diye yayımladı → panel "son yazan: frontend". Sebep: izleyici her 
 - **Uçtan uca model koşumuyla doğrulanmadı.** Kalan dar pencere: öteki agent'ın taraması, yazan agent'ın kendi
   taramasından ÖNCE gelirse ilk kayıt yanlış ada düşer (yazan agent tool sonrası hemen taradığı için pencere çok küçük).
 
-### Açık kusurlar (dokunulmadı)
-1. **429 "retry in Ns" 503 bütçesinden sayılıyor.** Testte frontend 3 hakkın 2'sini dakikalık kotaya harcadı; 3.
-   gelseydi sağlıklı turn "Google yanıt vermedi" diye ölürdü. `gate:w7:agent` öncesi düzeltilmesi önerildi
-   (runner değişir → `npm run room:build`).
-2. `turn.retrying.detail` 503'te boş (28 Eylül notu) — 429'da dolu geliyor.
+### Açık kusur (dokunulmadı)
+- `turn.retrying.detail` 503'te boş (28 Eylül notu) — 429'da dolu geliyor.
+
+### Düzeltildi: bekleme süreli 429 art arda bütçeden düşüyordu (~02:30)
+Testte frontend 3 hakkın 2'sini dakikalık kotaya (3.5-flash: dakikada 5) harcadı; 3. gelseydi sağlıklı turn
+"Google yanıt vermedi" diye ölürdü.
+- `createRetryTracker` (`packages/runner-gemini/src/map-stream.ts`): CLI'ın "Retrying after N ms" dediği 429 art arda
+  sayaca GİRMEZ, turn başına toplama (9) girer — sonsuz döngü güvencesi duruyor. CLI mesajı çok satırlı basıyor, süre
+  son satırda → kota satırı süre satırına kadar bekletiliyor; süre yerine yeni `Attempt` gelirse temkinle sayılıyor.
+  Süresiz 429 (backoff) ve "Max attempts reached" eskisi gibi sayılıyor. Günlük kota bitince CLI `Attempt` basmıyor
+  (doğrudan hata) — o yol etkilenmedi.
+- `turn.retrying.waitMs` (isteğe bağlı), `attempt` artık 0 olabilir → **`PROTOCOL_VERSION` 7**. Projeksiyon
+  `TurnView.retry.waitMs`, **`SNAPSHOT_VERSION` 9**. Kart: "Google hız sınırı (429) · 71 sn bekleniyor" ("N/3. deneme"
+  yerine).
+- Doğrulama: 9 yeni test (gerçek log satırlarıyla); bu geceki (01:28) sözleşme testinin gerçek `server.log`'u yeni sayaçtan geçirildi →
+  frontend'in iki 429'u `attempt: 0, waitMs: 6771 / 70547` (eski kod 1/3, 2/3 veriyordu), backend 503'leri eskisi gibi.
+  Tam paket **467/467**, typecheck + web tsc temiz, `build` + **`room:build`** (imajda sürüm 7), **`gate:w7` 93/93**.
+- Gerçek modelle (429 alan bir turn) AYRICA ölçülmedi — `gate:w7:agent`'ta görülebilir.
 
 ### Düzeltildi: silinen sözleşme hiç kayda girmiyordu (~02:00)
 İzleyici silmede `sha256: ""` gönderiyor, şema `min(1)` istiyordu. Runner her event'i çıkmadan ÖNCE
@@ -66,9 +79,9 @@ Eski container'lar `agent-rooms-room-a49ab23a`, `-6d8828fe` duruyor.
 1. proje: `flash-lite` ~7, `3.5-flash` ~10 harcandı. 2. proje: `flash-lite` 1.
 
 ### Sıradaki
-1. Kusur 1'i düzelt (429 bekleme süreli → bütçe dışı) → `room:build`.
-2. `gate:w7:agent` — **2. anahtarla** (yukarıdaki komut). ~20 istek, hiç koşulmadı.
-3. Adım 16 dogfood (iki kişi) → README "Hafta 7 dogfood notları" + roadmap'te Hafta 7 ✓.
+1. `gate:w7:agent` — **2. anahtarla** (yukarıdaki komut). ~20 istek, hiç koşulmadı. 429 bekleme davranışı burada
+   gerçek modelle görülebilir.
+2. Adım 16 dogfood (iki kişi) → README "Hafta 7 dogfood notları" + roadmap'te Hafta 7 ✓.
 
 ---
 
