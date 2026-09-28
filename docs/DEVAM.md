@@ -1,8 +1,8 @@
-# Kaldığımız yer — 29 Eylül 2026, ~02:30
+# Kaldığımız yer — 29 Eylül 2026, ~03:00
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
 
-## ⚠️ EN SON DURUM — 29 Eylül ~02:30 (önce bunu oku)
+## ⚠️ EN SON DURUM — 29 Eylül ~03:00 (önce bunu oku)
 
 ### ✅ Kendiliğinden sözleşme testi GEÇTİ (4. deneme, ~01:28)
 `bash .gate7a-tmp-contracts/run.sh`, 1. anahtar, oda `90d29233`. Görevlerde "contracts" geçmiyor.
@@ -71,16 +71,41 @@ yarıda kalıyor (`seen` güncellenmiyor), her taramada aynı yerde "contracts t
 - **`gate:w7` 93/93** yeni imajla (runner'lar sürüm 6 ile el sıkıştı, idle'a geçti). İmajdaki iki runner'da yeni
   şema var. Silmenin gerçek container'daki runner'dan log'a düştüğü AYRICA ölçülmedi (kapı silmeyi sınamıyor).
 
-### Makinede (01:45)
-Docker Desktop (Kerem pause'dan çıkardı), postgres, redis ayakta. API 8787 ve arayüz KAPALI. Test odası temizlendi.
-Eski container'lar `agent-rooms-room-a49ab23a`, `-6d8828fe` duruyor.
+### `gate:w7:agent` İLK KOŞUM (~02:00, 2. anahtar) — 13 geçti, 3 kaldı, 1 uyarı
+10 turn tamamlandı, 0 başarısız. Frontend 4 kez bekleme süreli 429 aldı (`attempt: 0`, 23–64 sn) ve turn'ler
+sürdü — 429 düzeltmesi gerçek modelle görüldü (dürüst not: turn başına en fazla 2 olduğu için eski kod da 2/3 ile
+atlatırdı).
+| Kontrol | Sebep | Durum |
+| --- | --- | --- |
+| [11] `contracts_race` yok | Projeksiyon dosya başına yalnız SON yazanı tutuyordu; yarış FARKLI dosyalar arasında aranıyordu → aynı dosyaya yarış hiç görülmüyordu, farklı dosyalar yanlış pozitif. Baştan beri böyle (kapı hiç koşulmamıştı). | **Düzeltildi** `d9b98a9` |
+| [10] `conflict.cleared` yok | Frontend (`3.5-flash`) `git checkout --` çalıştırmadı: yalnız `update_topic`, metin yok. | Model davranışı — ÖLÇÜLMEDİ |
+| [13] `violation=0 mod=750` | Aynı: `chmod 777` çalıştırılmadı. Kapı `update_topic`'i araç sayıp uyarı yerine başarısız yazdı. | Kapı düzeltildi `02927e8`; ÖLÇÜLMEDİ |
+| [5] uyarı | Gemini tool çıktısını log'a vermiyor (bilinen). | — |
+Frontend kabuk komutu çalıştırabiliyor ([9]'da `sleep 20 && ls web` çalıştı) — yalnız "yıkıcı görünen" iki komutta durdu.
+
+### ~02:00–03:00 yapılanlar (Kerem'le kararlaştırılan sıra, hepsi push)
+1. **`contracts_race` aynı dosyada** (`d9b98a9`): `ContractView.lastWriteBy` (agent başına son yazma anı — "son N
+   yazma" değil, bir agent art arda yazsa da diğerininki düşmez). Kural: aynı dosyada 60 sn içinde ≥2 agent; farklı
+   dosya kuralı kalktı. **`SNAPSHOT_VERSION` 10.** Kapının gerçek iki event'iyle uçtan uca test. 471/471. İmaj değişmedi.
+2. **README karar notları** (`731351d`): Gemini retry'larının stderr'den okunması "metin kazıma yok" kuralına
+   **bilinçli sapma** olarak kayda geçti (neden, sınırlar, risk, önlem, çıkış yolu); bekleme süreli 429'un toplam
+   sınıra (9) sayılması ve bedeli (Hafta 11 öncesi gözden geçirilecek); Hafta 6'daki "429 = günlük" cümlesine düzeltme notu.
+3. **Kapı** (`02927e8`): `REAL_TOOL` filtresi ([5], [9], [13]) — Gemini iç tool'ları agent eylemi sayılmaz. [10]
+   başarısız KALIR, yalnızca sebebi söyler. Filtre gerçek oturumda doğrulandı.
+Kerem'e verilen taviz raporu: yukarıdaki 2. madde + yeniden duyuru filtresinin dar penceresi + Hafta 7 dogfood'u hâlâ
+yapılmadı (yol haritası: dogfood yoksa yeni özellik yok — bu gece yalnız düzeltme yapıldı).
+
+### Makinede (~03:00)
+Docker Desktop, postgres, redis ayakta. API 8787 ve arayüz KAPALI. Kapı kendini temizledi. Eski container'lar
+`agent-rooms-room-a49ab23a`, `-6d8828fe` duruyor. İmaj `room:dev` protokol 7 ile.
 
 ### Kota (TSİ ~10:00'da sıfırlanır)
-1. proje: `flash-lite` ~7, `3.5-flash` ~10 harcandı. 2. proje: `flash-lite` 1.
+1. proje: `flash-lite` ~7, `3.5-flash` ~10. 2. proje: kapı ~20 istek (`3.5-flash` ağırlıklı) + `flash-lite` 1.
 
-### Sıradaki
-1. `gate:w7:agent` — **2. anahtarla** (yukarıdaki komut). ~20 istek, hiç koşulmadı. 429 bekleme davranışı burada
-   gerçek modelle görülebilir.
+### Sıradaki (TSİ 10:00 sonrası)
+1. **`gate:w7:agent` tekrar** (1. anahtar, yani varsayılan `.env`): [11]'in düzeldiği ve [10]/[13]'ün ölçülmesi.
+   Frontend yine yıkıcı komutu çalıştırmazsa [10]/[13] için seçenekler Kerem'le konuşulacak (ör. o adımları
+   komut çalıştıran modelle koşmak) — **kapı yumuşatılmayacak**; ölçülmeden Hafta 7 kapanmaz.
 2. Adım 16 dogfood (iki kişi) → README "Hafta 7 dogfood notları" + roadmap'te Hafta 7 ✓.
 
 ---
