@@ -1,4 +1,4 @@
-# Kaldığımız yer — 29 Eylül 2026, ~01:45
+# Kaldığımız yer — 29 Eylül 2026, ~02:00
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
 
@@ -44,9 +44,19 @@ frontend` diye yayımladı → panel "son yazan: frontend". Sebep: izleyici her 
 1. **429 "retry in Ns" 503 bütçesinden sayılıyor.** Testte frontend 3 hakkın 2'sini dakikalık kotaya harcadı; 3.
    gelseydi sağlıklı turn "Google yanıt vermedi" diye ölürdü. `gate:w7:agent` öncesi düzeltilmesi önerildi
    (runner değişir → `npm run room:build`).
-2. **Silinen sözleşme event'i şemadan geçmiyor.** İzleyici `sha256: ""` gönderiyor, `contract.changed` şeması
-   `min(1)` istiyor → silme log'a hiç girmiyor (ölçüldü: `safeParse` reddediyor). 29 Eylül değişikliğinden önce de böyleydi.
-3. `turn.retrying.detail` 503'te boş (28 Eylül notu) — 429'da dolu geliyor.
+2. `turn.retrying.detail` 503'te boş (28 Eylül notu) — 429'da dolu geliyor.
+
+### Düzeltildi: silinen sözleşme hiç kayda girmiyordu (~02:00)
+İzleyici silmede `sha256: ""` gönderiyor, şema `min(1)` istiyordu. Runner her event'i çıkmadan ÖNCE
+`RunnerOutput.parse`'tan geçirdiği için hata runner'da atılıyordu → silme log'a girmiyor, izleyicinin taraması
+yarıda kalıyor (`seen` güncellenmiyor), her taramada aynı yerde "contracts taraması düştü" uyarısı.
+- `contract.changed`: `deleted: true` ⇔ `sha256 === ""` (refine). **`PROTOCOL_VERSION` 6** — runner kendi içinde
+  doğruladığı için bayat imaj silmeyi yine düşürürdü; el sıkışma bayat imajı yakalar.
+- İzleyici testi artık event'leri `RunnerOutput.parse`'tan geçiriyor (runner'ın yolu) — eski şemayla silme testi
+  düştü, yenisiyle geçti. Protokol testi (4) + DB testi (silmenin yeniden duyurusu yazılmaz).
+- Tam paket **458/458**, typecheck + web tsc temiz, `npm run build` + **`npm run room:build`** yapıldı.
+- **`gate:w7` 93/93** yeni imajla (runner'lar sürüm 6 ile el sıkıştı, idle'a geçti). İmajdaki iki runner'da yeni
+  şema var. Silmenin gerçek container'daki runner'dan log'a düştüğü AYRICA ölçülmedi (kapı silmeyi sınamıyor).
 
 ### Makinede (01:45)
 Docker Desktop (Kerem pause'dan çıkardı), postgres, redis ayakta. API 8787 ve arayüz KAPALI. Test odası temizlendi.
