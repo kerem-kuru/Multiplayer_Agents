@@ -138,6 +138,12 @@ send() { # <agent> <metin> → messageId
 ev_count() { # <tür> [ek SQL koşulu]
   psql_q "SELECT count(*) FROM session_events WHERE session_id='$SID' AND type='$1' ${2:-}"
 }
+# Gemini'nin iç bakım tool'ları agent'ın ölçülen eylemi DEĞİL. Liste
+# packages/runner-gemini/src/map-stream.ts GEMINI_INTERNAL_TOOLS ile aynı olmalı.
+# 29 Eylül: model yalnızca update_topic çağırıp durdu; kapı bunu "araç çağırdı"
+# sayıp [13]'ü uyarı yerine başarısız yazdı, [9] ise kabuk komutu başlamadan
+# kill -9 yapabilirdi.
+REAL_TOOL="AND coalesce(payload->>'tool','') NOT IN ('update_topic','write_todos')"
 wait_turn() { # <messageId> → 0 bitti / 1 zaman aşımı
   local i=0
   while [ "$i" -lt "$TURN_TIMEOUT" ]; do
@@ -161,7 +167,7 @@ M=$(send frontend "/room/worktrees/backend/api/server.js dosyasının ilk satır
 if [ -n "$M" ] && wait_turn "$M"; then
   AFTER=$(sha_of agent-backend /room/worktrees/backend/api/server.js)
   ERRS=$(ev_count tool.result "AND payload->>'messageId'='$M' AND payload->>'isError'='true'")
-  CALLS=$(ev_count tool.call "AND payload->>'messageId'='$M'")
+  CALLS=$(ev_count tool.call "AND payload->>'messageId'='$M' $REAL_TOOL")
   turn_ok "$M" && ok "[5] turn tamamlandı" || { no "[5] turn tamamlanmadı"; quota_hint; }
   [ "$BEFORE" = "$AFTER" ] && ok "[5] backend'in dosyası değişmedi (sha256 aynı)" || no "[5] DOSYA DEĞİŞTİ"
   if [ "$ERRS" -ge 1 ]; then ok "[5] tool.result isError: true ($ERRS/$CALLS çağrı)"
@@ -195,6 +201,10 @@ step "[10] frontend değişikliğini geri alıyor → conflict.cleared"
 M=$(send frontend "src/shared.js dosyasındaki değişikliğini geri al: kabukta 'git checkout -- src/shared.js' çalıştır.")
 wait_turn "$M"
 if [ -n "$CID" ] && [ "$(ev_count conflict.cleared "AND payload->>'conflictId'='$CID'")" -ge 1 ]; then ok "[10] conflict.cleared"
+# Başarısız KALIR: temizlenme ölçülmedi. Uyarıya çevirmek kapıyı yumuşatmak olurdu;
+# yalnızca sebep söyleniyor ki "ürün mü, model mi" ayrımı log'dan okunabilsin.
+elif [ "$(ev_count tool.call "AND payload->>'messageId'='$M' $REAL_TOOL")" = "0" ]; then
+  no "[10] conflict.cleared yok — model geri alma komutunu çalıştırmadı, ölçülemedi"
 else no "[10] conflict.cleared yok"; quota_hint; fi
 
 ###############################################################################
@@ -213,7 +223,7 @@ BAD=$(psql_q "SELECT count(*) FROM session_events WHERE session_id='$SID' AND ty
 step "[9] koşan turn'ün ortasında backend kill -9"
 MF=$(send frontend "Kabukta 'sleep 20 && ls web' çalıştır ve sonucu tek cümleyle söyle.")
 MB=$(send backend "Kabukta 'sleep 30 && ls api' çalıştır.")
-for _ in $(seq 1 60); do [ "$(ev_count tool.call "AND payload->>'messageId'='$MB'")" -ge 1 ] && break; sleep 1; done
+for _ in $(seq 1 60); do [ "$(ev_count tool.call "AND payload->>'messageId'='$MB' $REAL_TOOL")" -ge 1 ] && break; sleep 1; done
 BPID=$(room_exec "$ROOM" root ps -eo pid=,user:32=,args= | tr -d '\r' | awk '$2=="agent-backend" && /runner/ {print $1; exit}')
 FPID=$(room_exec "$ROOM" root ps -eo pid=,user:32=,args= | tr -d '\r' | awk '$2=="agent-frontend" && /runner/ {print $1; exit}')
 room_exec "$ROOM" root kill -9 "$BPID" >/dev/null
@@ -230,7 +240,7 @@ wait_turn "$M"
 MODE=$(room_stat "$ROOM" /room/worktrees/frontend | awk '{print $4}' | tr -d '\r')
 NV=$(ev_count isolation.violation "AND payload->>'agent'='frontend' AND payload->>'fixed'='true'")
 if [ "$NV" -ge 1 ] && [ "$MODE" = "750" ]; then ok "[13] isolation.violation (fixed: true), stat tekrar 750"
-elif [ "$(ev_count tool.call "AND payload->>'messageId'='$M'")" = "0" ]; then warn "[13] model chmod çalıştırmadı (model davranışı)"
+elif [ "$(ev_count tool.call "AND payload->>'messageId'='$M' $REAL_TOOL")" = "0" ]; then warn "[13] model chmod çalıştırmadı (model davranışı)"
 else no "[13] violation=$NV mod=$MODE"; fi
 
 ###############################################################################
