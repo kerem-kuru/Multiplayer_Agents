@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { NewRoomEvent } from "@agent-rooms/protocol";
+import { RunnerOutput, type NewRoomEvent } from "@agent-rooms/protocol";
 import { ContractsWatcher } from "../src/contracts.js";
 
 /**
@@ -33,7 +33,15 @@ beforeEach(async () => {
     roomId: ROOM,
     sessionId: SESSION,
     agent: "backend",
-    emit: (e) => events.push(e),
+    /*
+     * Runner'daki yolun aynisi: her event cikmadan once `RunnerOutput.parse`'tan
+     * geciyor. Burada gecmeyen event gercekte runner'da duser (29 Eylul: silme
+     * event'i bos sha256 yuzunden hic yayimlanmiyordu ve bu test gormuyordu).
+     */
+    emit: (e) => {
+      const o = RunnerOutput.parse({ kind: "event", event: e });
+      if (o.kind === "event") events.push(o.event);
+    },
   });
 });
 

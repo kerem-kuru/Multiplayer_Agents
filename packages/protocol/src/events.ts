@@ -409,18 +409,28 @@ export const TaskUpdated = ev(
  * ICERIK EVENT'E GIRMEZ — yalnizca hash ve boyut. Sozlesme dosyalari buyuyebilir
  * ve her degisiklikte tam icerigi log'a yazmak log'u sisirirdi; icerigi gormek
  * isteyen UI ayri bir uctan okur (redaction'dan gecerek).
+ *
+ * Silinen dosyanin hash'i yok: `deleted: true` ise `sha256` BOS, degilse dolu.
+ * Eskiden her durumda `min(1)` isteniyordu ve izleyicinin silme event'i runner'in
+ * kendi `RunnerOutput.parse`'inda dusuyordu — silme log'a hic girmiyor, tarama
+ * her seferinde ayni yerde yarida kaliyordu (29 Eylul).
  */
 export const ContractChanged = ev(
   "contract.changed",
-  z.object({
-    ...AgentRef,
-    messageId: z.string().uuid().nullable(),
-    /** `contracts/` altinda goreli yol. */
-    path: z.string().min(1),
-    sha256: z.string().min(1),
-    size: z.number().int().nonnegative(),
-    deleted: z.boolean(),
-  }),
+  z
+    .object({
+      ...AgentRef,
+      messageId: z.string().uuid().nullable(),
+      /** `contracts/` altinda goreli yol. */
+      path: z.string().min(1),
+      sha256: z.string(),
+      size: z.number().int().nonnegative(),
+      deleted: z.boolean(),
+    })
+    .refine((p) => (p.deleted ? p.sha256 === "" : p.sha256.length > 0), {
+      message: "sha256: silinmis dosyada bos, digerlerinde dolu olmali",
+      path: ["sha256"],
+    }),
 );
 
 /**

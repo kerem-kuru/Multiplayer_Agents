@@ -115,6 +115,25 @@ describe("appendContractChange", () => {
     expect(await logged(s)).toHaveLength(2);
   });
 
+  it("silme de bir kez yazılır; öteki agent'ın aynı silme duyurusu yazılmaz", async () => {
+    if (!alive) return;
+    const s = await newSession();
+    const del = (agent: string) => {
+      const e = change(s, agent, "");
+      e.payload = { ...e.payload, size: 0, deleted: true };
+      return e;
+    };
+
+    await appendContractChange(change(s, "backend", SHA_A));
+    expect(await appendContractChange(del("backend"))).not.toBeNull();
+    expect(await appendContractChange(del("frontend"))).toBeNull();
+
+    expect((await logged(s)).map((r) => [r.agent, r.sha256])).toEqual([
+      ["backend", SHA_A],
+      ["backend", ""],
+    ]);
+  });
+
   it("aynı anda gelen iki duyurudan yalnız biri yazılır", async () => {
     if (!alive) return;
     const s = await newSession();

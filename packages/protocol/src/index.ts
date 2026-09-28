@@ -20,4 +20,8 @@ export * from "./stream.js";
  * 5: `turn.retrying` event'i ve `turn.failed` icin `retry_exhausted` sebebi
  * (24 Eylul — saglayici 503'u ekranda gorunmuyordu ve denemeler kotayi yiyordu).
  */
-export const PROTOCOL_VERSION = 5;
+/**
+ * 6: `contract.changed` silmede bos `sha256` kabul ediyor (29 Eylul). Runner
+ * event'i kendi icinde dogruluyor — bayat imaj silmeyi yine dusururdu.
+ */
+export const PROTOCOL_VERSION = 6;
