@@ -368,3 +368,14 @@ export const markSeen = (roomId: string, agent: string, seq: number): Promise<un
     method: "POST",
     body: JSON.stringify({ seq }),
   });
+
+/**
+ * Bir sözleşme dosyasının içeriği (Hafta 7, Adım 7). Event log'da yalnızca
+ * sha256 + boyut var; içerik buradan, redaction'dan geçmiş hâliyle geliyor.
+ * `409` = oda çalışmıyor, `404` = dosya yok (silinmiş olabilir).
+ */
+export const fetchContract = (
+  roomId: string,
+  path: string,
+): Promise<{ path: string; content: string }> =>
+  json(`/rooms/${roomId}/contracts/${path.split("/").map(encodeURIComponent).join("/")}`);

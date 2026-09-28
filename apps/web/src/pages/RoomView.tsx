@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { toCards } from "@agent-rooms/view";
 import { AgentCard } from "../components/AgentCard.js";
+import { ContractsPanel } from "../components/ContractsPanel.js";
 import { PresenceBar } from "../components/PresenceBar.js";
 import { fetchReads } from "../lib/api.js";
 import { useEventStream } from "../lib/useEventStream.js";
@@ -10,7 +11,8 @@ import { useEventStream } from "../lib/useEventStream.js";
  *
  * **BU SAYFADA HAM ÇIKTI YOKTUR.** Terminal yok, patch yok, tool sonucu yok.
  * Bileşen ağacında `TerminalView` ve `DiffFile` İMPORT EDİLMEZ — bunun testi
- * var (`gate:w7`, kontrol 17). Kart satırını `toCard` süzüyor.
+ * var (`gate:w7`, kontrol 17). Kart satırını `toCard` süzüyor. Tek istisna
+ * sözleşme içeriği: kapalı başlar, yalnızca tıklanınca gelir (`ContractsPanel`).
  *
  * Kart sayısı `agents.map()` ile geliyor: üçüncü agent eklemek YAML'a bir blok,
  * koda hiçbir şey.
@@ -95,6 +97,8 @@ export function RoomView({
           ))}
         </div>
       )}
+
+      <ContractsPanel roomId={roomId} contracts={view.contracts} />
 
       <main
         style={{
