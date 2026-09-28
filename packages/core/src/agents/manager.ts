@@ -13,7 +13,7 @@ import {
   collectProviderEnv,
   hasProviderBackend,
 } from "@agent-rooms/protocol";
-import { appendEvent } from "../db/eventStore.js";
+import { appendContractChange, appendEvent } from "../db/eventStore.js";
 import { getPool } from "../db/pool.js";
 import {
   GitkitError,
@@ -711,7 +711,14 @@ export class AgentManager {
           await recordCheckpoint(output.event, this.pool);
           return;
         }
-        await appendEvent(output.event, this.pool);
+        if (output.event.type === "contract.changed") {
+          // Ayni icerigin baska bir agent'in izleyicisinden yeniden duyurusu
+          // yazilmaz (bkz. appendContractChange). Degisiklik yoksa cakisma da
+          // yeniden hesaplanmaz.
+          if (!(await appendContractChange(output.event, this.pool))) return;
+        } else {
+          await appendEvent(output.event, this.pool);
+        }
         /*
          * Cakisma tespiti (Hafta 7, Adim 8).
          *

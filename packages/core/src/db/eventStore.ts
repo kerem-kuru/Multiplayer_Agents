@@ -147,6 +147,56 @@ export async function appendEventWith(
   return stored;
 }
 
+/**
+ * `contract.changed` yaz — içerik o yolun son kaydıyla AYNIYSA yazma.
+ *
+ * Sözleşme izleyicisi her agent'ın kendi runner'ında koşuyor ve hepsi aynı
+ * `/room/contracts`'ı tarıyor. Backend bir dosya yazınca frontend'in
+ * izleyicisi de onu bir sonraki taramasında "yeni" görüp KENDİ adıyla
+ * yayımlıyordu (29 Eylül, gerçek koşumda ölçüldü: aynı sha256, `agent:
+ * frontend`). Panel "son yazan: frontend" diyordu.
+ *
+ * Runner'lar ayrı süreçlerde, ortak hafızaları yok — ayırt edemezler. Tek
+ * kaynak log: aynı içerik ikinci kez geliyorsa bu bir değişiklik değil,
+ * yeniden duyuru.
+ *
+ * Kontrol, `appendOne`'ın kilitlediği oturum satırını ÖNCE kilitleyerek aynı
+ * transaction'da yapılır: iki runner'ın event'i aynı anda gelse de ikincisi
+ * birincinin yazdığını görür. Sunucu yeniden başlasa da doğru kalır (bellekte
+ * durum yok).
+ *
+ * Yazılmadıysa `null`.
+ */
+export async function appendContractChange(
+  event: Extract<NewRoomEvent, { type: "contract.changed" }>,
+  pool: pg.Pool = getPool(),
+): Promise<RoomEvent | null> {
+  const stored = await withTx(async (client) => {
+    await client.query(`SELECT 1 FROM sessions WHERE id = $1 FOR UPDATE`, [event.sessionId]);
+    const last = await client.query<{ sha256: string | null; deleted: boolean | null }>(
+      `SELECT payload->>'sha256' AS sha256, (payload->>'deleted')::boolean AS deleted
+         FROM session_events
+        WHERE session_id = $1 AND type = 'contract.changed' AND payload->>'path' = $2
+        ORDER BY seq DESC
+        LIMIT 1`,
+      [event.sessionId, event.payload.path],
+    );
+    const prev = last.rows[0];
+    if (
+      prev &&
+      prev.sha256 === event.payload.sha256 &&
+      (prev.deleted ?? false) === event.payload.deleted
+    ) {
+      return null;
+    }
+    return appendOne(client, event);
+  }, pool);
+  if (!stored) return null;
+  getEventBus().publish(stored.sessionId, stored);
+  noteEventForSnapshot(stored.sessionId, stored.seq);
+  return stored;
+}
+
 /** Birden çok event'i tek transaction'da, verilen sırayla yaz. */
 export async function appendEvents(
   events: NewRoomEvent[],
