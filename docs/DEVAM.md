@@ -1,6 +1,25 @@
-# Kaldığımız yer — 25 Eylül 2026, ~23:55
+# Kaldığımız yer — 28 Eylül 2026, ~20:55
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
+
+## 28 Eylül — sözleşme paneli + ortam ayakta (COMMIT EDİLMEDİ)
+
+- **Oda görünümüne "Sözleşmeler" paneli** (`apps/web/src/components/ContractsPanel.tsx`,
+  `fetchContract` → `lib/api.ts`, `pages/RoomView.tsx`). Liste `view.contracts`'tan (yol, boyut, son
+  yazan agent, saat); içerik tıklanınca `GET /rooms/:id/contracts/*`'tan (redaction'dan geçmiş),
+  sha256 değişince yeniden çekiliyor. 409/404 sebebi Türkçe yazıyor. Varsayılan KAPALI → kontrol 17
+  ("oda görünümünde `pre` yok") korunuyor. API/protokol/snapshot değişmedi, `room:build` gerekmez.
+- **Ölçüldü (modelsiz):** test odası `6d8828fe-77db-47fb-a7bc-2a56d38553b0`, backend kullanıcısıyla
+  `contracts/api.md` yazıldı, `contract.changed` `appendEvent` ile eklendi (izleyici yalnız tool
+  çağrısı/turn sonunda tarıyor, elle yazılan dosyayı duyurmaz — tasarım gereği). Playwright: panel
+  "1 dosya · api.md 152 B · backend", kapalıyken `pre` 0, kart 2, tıklayınca içerik birebir. Web `tsc` temiz.
+  `gate:w7` yeniden KOŞULMADI.
+- **Giriş/davet linki eski IP'ye gidiyordu** (`.env` `APP_BASE_URL=http://192.168.1.114:5173`, makine
+  artık `10.190.187.98`). `.env`'de satır kapatıldı; `APP_BASE_URL` yoksa link isteğin `Origin`'inden
+  üretiliyor (`apps/api/src/auth/base-url.ts`). Giriş linkinde yalnız `AUTH_DEV_MODE`'da (e-postayla
+  gidecek linkte Origin'e güvenmek zehirleme açığı). Paylaş penceresi localhost linkinde uyarıyor.
+  Ölçüldü: LAN'dan giriş uçtan uca (Playwright, `/auth/me` 200), davet linki LAN adresiyle, auth testleri 13/13.
+- Ortam: Docker, db, API 8787, arayüz 5173 ayakta. Sıradaki: kendiliğinden sözleşme testi (kota yer).
 
 ## ⚠️ EN SON DURUM — 25 Eylül ~23:55 (önce bunu oku)
 
