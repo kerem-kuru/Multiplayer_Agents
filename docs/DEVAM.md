@@ -1,8 +1,68 @@
-# Kaldığımız yer — 28 Eylül 2026, ~21:30
+# Kaldığımız yer — 29 Eylül 2026, ~01:45
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
 
-## ⚠️ EN SON DURUM — 28 Eylül ~21:30 (önce bunu oku)
+## ⚠️ EN SON DURUM — 29 Eylül ~01:45 (önce bunu oku)
+
+### ✅ Kendiliğinden sözleşme testi GEÇTİ (4. deneme, ~01:28)
+`bash .gate7a-tmp-contracts/run.sh`, 1. anahtar, oda `90d29233`. Görevlerde "contracts" geçmiyor.
+- **Backend** (`flash-lite`): önce `/room/contracts`'a baktı, `contracts/customers.json` yazdı (`id, name, email,
+  city, registrationDate`; sahibi `agent-backend:rooms-contracts`), sonra ucu `api/server.js`'e ekledi. 2×503 aldı,
+  3.'de toparlandı (art arda sayaç gerçekte doğru çalıştı), 42 sn.
+- **Frontend** (`3.5-flash`): İLK iş sözleşmeyi okudu, `web/customers.html` + `customers.js` yazdı; alan adları
+  birebir (`registrationDate` dahil). Bu adlar klonundaki bayat `api/server.js`'te YOK — yalnız sözleşmeden gelebilir.
+- Çıktılar `.gate7a-tmp-contracts/out/` (gitignore'lu). Dogfood'da yine de "bayat kopya" riski konuşulmalı:
+  bu sefer sözleşme vardı, yoksa aynı tahmin yürütme görülmüştü (25 Eylül).
+
+### 503 incelemesi (Kerem'in iki hipotezi — kod değişmedi)
+- **Zaman aşımı / büyük istek: değil.** CLI zaten streaming (`streamGenerateContent?alt=sse`), runner'da isteğe
+  süre koyan yer yok; gövde Google'ın JSON'u (`UNAVAILABLE`, "high demand"), bizde kopma olsa `AbortError`/`ETIMEDOUT`
+  görülürdü. 1. deneme <3 sn'de 503 aldı.
+- **Üstel geri çekilme eksik: değil.** `@google/gemini-cli` 0.60.0 `retryWithBackoff`: 5 sn başlar, ×2, tavan 30 sn,
+  ±%30 jitter. Loglar uyuyor.
+- Kanıt: yepyeni projenin anahtarıyla ilk `flash-lite` isteği de 503 aldı → Google kapasitesi.
+
+### İkinci anahtar
+- `.env`'de `GEMINI_API_KEY_2` — **ayrı projeden** (Kerem doğruladı). Kod yalnız `GEMINI_API_KEY` okuyor.
+- Kota **proje × model** başına; agent'lar zaten ayrı modelde → agent başına anahtar kazandırmaz (fikir geri çekildi).
+  **İşe göre anahtar**, kod değişikliği yok (`loadEnvFile` ortamdakini ezmez):
+  `GEMINI_API_KEY="$(grep ^GEMINI_API_KEY_2= .env | cut -d= -f2-)" npm run gate:w7:agent`
+- `3.5-flash` ücretsiz katman **dakikada 5 istek** (429 "retry in 59s"); günlük 20 ayrı.
+
+### Düzeltildi: sözleşmeyi öteki agent kendi adıyla yeniden duyuruyordu
+Testte ölçüldü: frontend'in izleyicisi backend'in `customers.json`'unu aynı sha256 ile `contract.changed agent:
+frontend` diye yayımladı → panel "son yazan: frontend". Sebep: izleyici her runner'da ayrı, hepsi aynı klasörü tarıyor.
+- Düzeltme sunucuda: `appendContractChange` (`packages/core/src/db/eventStore.ts`) — yolun SON `contract.changed`
+  kaydıyla aynı sha256+deleted gelirse yazmaz; kontrol oturum satırı kilidi altında (yarışsız, yeniden başlatmaya
+  dayanıklı). `manager.ts` sözleşme event'ini bundan geçiriyor; yazılmazsa çakışma da yeniden hesaplanmıyor.
+- Test: `packages/core/test/week7-contract-dedupe.test.ts` (gerçek DB, 4 test; eşzamanlı iki duyurudan biri yazılır).
+  Tam paket **453/453**, typecheck temiz, `npm run build` yapıldı. İmaj değişmedi (`room:build` gerekmez).
+- **Uçtan uca model koşumuyla doğrulanmadı.** Kalan dar pencere: öteki agent'ın taraması, yazan agent'ın kendi
+  taramasından ÖNCE gelirse ilk kayıt yanlış ada düşer (yazan agent tool sonrası hemen taradığı için pencere çok küçük).
+
+### Açık kusurlar (dokunulmadı)
+1. **429 "retry in Ns" 503 bütçesinden sayılıyor.** Testte frontend 3 hakkın 2'sini dakikalık kotaya harcadı; 3.
+   gelseydi sağlıklı turn "Google yanıt vermedi" diye ölürdü. `gate:w7:agent` öncesi düzeltilmesi önerildi
+   (runner değişir → `npm run room:build`).
+2. **Silinen sözleşme event'i şemadan geçmiyor.** İzleyici `sha256: ""` gönderiyor, `contract.changed` şeması
+   `min(1)` istiyor → silme log'a hiç girmiyor (ölçüldü: `safeParse` reddediyor). 29 Eylül değişikliğinden önce de böyleydi.
+3. `turn.retrying.detail` 503'te boş (28 Eylül notu) — 429'da dolu geliyor.
+
+### Makinede (01:45)
+Docker Desktop (Kerem pause'dan çıkardı), postgres, redis ayakta. API 8787 ve arayüz KAPALI. Test odası temizlendi.
+Eski container'lar `agent-rooms-room-a49ab23a`, `-6d8828fe` duruyor.
+
+### Kota (TSİ ~10:00'da sıfırlanır)
+1. proje: `flash-lite` ~7, `3.5-flash` ~10 harcandı. 2. proje: `flash-lite` 1.
+
+### Sıradaki
+1. Kusur 1'i düzelt (429 bekleme süreli → bütçe dışı) → `room:build`.
+2. `gate:w7:agent` — **2. anahtarla** (yukarıdaki komut). ~20 istek, hiç koşulmadı.
+3. Adım 16 dogfood (iki kişi) → README "Hafta 7 dogfood notları" + roadmap'te Hafta 7 ✓.
+
+---
+
+## Önceki durum — 28 Eylül ~21:30
 
 **Hepsi commit + push edildi** (`origin/main` = `7ed0808`, bu not ayrı commit). Çalışma ağacı temiz.
 
