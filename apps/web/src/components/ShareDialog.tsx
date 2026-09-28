@@ -113,6 +113,15 @@ export function ShareDialog({ roomId, onClose }: { roomId: string; onClose: () =
               {new Date(fresh.expiresAt).toLocaleString("tr-TR")} tarihine kadar geçerli
             </span>
           </div>
+          {/* Link, arayüze girdiğin adresten üretiliyor. localhost'tan
+              girdiysen link de localhost: başka makinede açılmaz. */}
+          {isLoopback(fresh.url) && (
+            <div style={{ fontSize: 12, color: "var(--wait)", marginTop: 6 }}>
+              Bu link yalnızca bu bilgisayarda açılır. Başka birine göndereceksen arayüzü
+              ağdaki adresinden aç (ör. <span className="mono">http://&lt;bu-makinenin-IP&gt;:5173</span>)
+              ve linki yeniden oluştur.
+            </div>
+          )}
         </div>
       ) : (
         <button onClick={() => void create()}>Paylaşım linki oluştur</button>
@@ -156,4 +165,13 @@ export function ShareDialog({ roomId, onClose }: { roomId: string; onClose: () =
       {error && <p style={{ color: "var(--fail)", fontSize: 12 }}>{error}</p>}
     </div>
   );
+}
+
+function isLoopback(url: string): boolean {
+  try {
+    const h = new URL(url).hostname;
+    return h === "localhost" || h === "[::1]" || h.startsWith("127.");
+  } catch {
+    return false;
+  }
 }

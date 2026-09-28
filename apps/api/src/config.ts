@@ -27,6 +27,12 @@ export interface ApiConfig {
    */
   appBaseUrl: string;
   /**
+   * `APP_BASE_URL` açıkça verildi mi. Verilmediyse bağlantılar, arayüze
+   * girilen gerçek adresten (`Origin`) üretilir — bkz. `auth/base-url.ts`.
+   * Tanımsız = açıkça verilmiş say (programatik config'ler için güvenli taraf).
+   */
+  appBaseUrlFixed?: boolean;
+  /**
    * SADECE geliştirme: giriş bağlantısını yanıtta ve logda göster.
    * YETKİLENDİRMEYİ ETKİLEMEZ — açıkken de her uç üyelik kontrolü yapar.
    */
@@ -82,7 +88,8 @@ export function loadApiConfig(): ApiConfig {
       process.env.ROOM_CONFIG ?? "./config/room.example.yaml",
     ),
     spawnContainer: process.env.SPAWN_CONTAINER !== "0",
-    appBaseUrl: process.env.APP_BASE_URL ?? "http://localhost:5173",
+    appBaseUrl: process.env.APP_BASE_URL || "http://localhost:5173",
+    appBaseUrlFixed: Boolean(process.env.APP_BASE_URL),
     authDevMode: process.env.AUTH_DEV_MODE === "true",
     cookieSecure: process.env.COOKIE_SECURE === "true" || process.env.NODE_ENV === "production",
     agent: {

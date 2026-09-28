@@ -14,6 +14,7 @@ import {
   writeSessionCookie,
 } from "../auth/session.js";
 import { currentUser } from "../auth/guard.js";
+import { linkBaseUrl } from "../auth/base-url.js";
 import type { ApiConfig } from "../config.js";
 
 /**
@@ -56,7 +57,11 @@ export function authRoutes(cfg: ApiConfig) {
       );
     }
 
-    const link = await issueMagicLink(body.data.email, cfg.appBaseUrl, body.data.next);
+    const link = await issueMagicLink(
+      body.data.email,
+      linkBaseUrl(c, cfg, cfg.authDevMode),
+      body.data.next,
+    );
     // Geliştirme kolaylığı: linki hem loga hem yanıta koy.
     console.log(`giriş bağlantısı (${body.data.email}): ${link.url}`);
     return c.json({ ok: true, devLink: link.url, expiresAt: link.expiresAt });

@@ -4,6 +4,7 @@ import { getPool } from "@agent-rooms/core";
 import { HttpError } from "../http-error.js";
 import { addMember, requireRoom, requireUser } from "../auth/guard.js";
 import { hashToken, newToken, tokenPrefix } from "../auth/tokens.js";
+import { linkBaseUrl } from "../auth/base-url.js";
 import type { ApiConfig } from "../config.js";
 
 /**
@@ -48,7 +49,7 @@ export function inviteRoutes(cfg: ApiConfig) {
       [hashToken(token), tokenPrefix(token), roomId, role, user.id, expiresAt],
     );
 
-    const url = new URL("/join", cfg.appBaseUrl);
+    const url = new URL("/join", linkBaseUrl(c, cfg, true));
     url.searchParams.set("token", token);
     // Token YALNIZCA bu yanıtta görünür; DB'de hash'i var.
     return c.json({ url: url.toString(), prefix: tokenPrefix(token), role, expiresAt }, 201);
