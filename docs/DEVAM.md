@@ -1,34 +1,75 @@
-# Kaldığımız yer — 28 Eylül 2026, ~20:55
+# Kaldığımız yer — 28 Eylül 2026, ~21:30
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
 
-## 28 Eylül — sözleşme paneli + ortam ayakta (COMMIT EDİLMEDİ)
+## ⚠️ EN SON DURUM — 28 Eylül ~21:30 (önce bunu oku)
 
-- **Oda görünümüne "Sözleşmeler" paneli** (`apps/web/src/components/ContractsPanel.tsx`,
-  `fetchContract` → `lib/api.ts`, `pages/RoomView.tsx`). Liste `view.contracts`'tan (yol, boyut, son
-  yazan agent, saat); içerik tıklanınca `GET /rooms/:id/contracts/*`'tan (redaction'dan geçmiş),
-  sha256 değişince yeniden çekiliyor. 409/404 sebebi Türkçe yazıyor. Varsayılan KAPALI → kontrol 17
-  ("oda görünümünde `pre` yok") korunuyor. API/protokol/snapshot değişmedi, `room:build` gerekmez.
-- **Ölçüldü (modelsiz):** test odası `6d8828fe-77db-47fb-a7bc-2a56d38553b0`, backend kullanıcısıyla
-  `contracts/api.md` yazıldı, `contract.changed` `appendEvent` ile eklendi (izleyici yalnız tool
-  çağrısı/turn sonunda tarıyor, elle yazılan dosyayı duyurmaz — tasarım gereği). Playwright: panel
-  "1 dosya · api.md 152 B · backend", kapalıyken `pre` 0, kart 2, tıklayınca içerik birebir. Web `tsc` temiz.
-  `gate:w7` yeniden KOŞULMADI.
-- **Giriş/davet linki eski IP'ye gidiyordu** (`.env` `APP_BASE_URL=http://192.168.1.114:5173`, makine
-  artık `10.190.187.98`). `.env`'de satır kapatıldı; `APP_BASE_URL` yoksa link isteğin `Origin`'inden
-  üretiliyor (`apps/api/src/auth/base-url.ts`). Giriş linkinde yalnız `AUTH_DEV_MODE`'da (e-postayla
-  gidecek linkte Origin'e güvenmek zehirleme açığı). Paylaş penceresi localhost linkinde uyarıyor.
-  Ölçüldü: LAN'dan giriş uçtan uca (Playwright, `/auth/me` 200), davet linki LAN adresiyle, auth testleri 13/13.
-- Ortam: Docker, db, API 8787, arayüz 5173 ayakta. Sıradaki: kendiliğinden sözleşme testi (kota yer).
+**Hepsi commit + push edildi** (`origin/main` = `7ed0808`, bu not ayrı commit). Çalışma ağacı temiz.
 
-## ⚠️ EN SON DURUM — 25 Eylül ~23:55 (önce bunu oku)
+### Kerem şu an ne yapıyor
+**503'te bizim de payımız var mı diye kendisi araştırıyor.** Sözleşme testine onun dönüşünden sonra
+geçilecek. Elimizdeki kanıt (ona verildi):
+- 503'ü Google'ın kendisi dönüyor. Ham log (`.gate7a-tmp-contracts/out/server.log`) üç denemede de:
+  `"code": 503, "status": "UNAVAILABLE", "This model is currently experiencing high demand. Spikes in demand
+  are usually temporary."` İstek Google'a ulaşıyor.
+- Runner 503 üretmiyor, sadece Gemini CLI stderr'indeki `Attempt N failed` satırlarını sayıp 3'te durduruyor
+  (24 Eylül'de `--network none` + sahte 503 sunucusuyla ölçüldü).
+- 503'lerin çoğu `gemini-3.1-flash-lite`'ta. Bakılabilecekler: ücretsiz katmanın yoğun saatte önceliği,
+  anahtarın başka yerde kullanılıp kullanılmadığı.
+- **Bizde küçük kusur (sebep değil, düzeltilmedi):** `turn.retrying.detail` BOŞ geliyor; Google'ın
+  "high demand" cümlesi stderr'de var ama runner ayıklayamıyor. Ekranda "Google yoğun (503)" yine yazıyor.
+  Kerem'e "istersen düzeltirim" dendi, cevap yok. Runner değişirse `npm run room:build` gerekir.
+
+### 28 Eylül'de yapılanlar
+1. **Oda görünümüne "Sözleşmeler" paneli** — `0a836e7` (`apps/web/src/components/ContractsPanel.tsx`,
+   `fetchContract` → `lib/api.ts`, `pages/RoomView.tsx`). Liste `view.contracts`'tan (yol, boyut, son yazan
+   agent, saat); içerik tıklanınca `GET /rooms/:id/contracts/*`'tan (redaction'dan geçmiş), sha256 değişince
+   yeniden çekiliyor. 409/404 sebebi Türkçe. Varsayılan KAPALI → kontrol 17 ("oda görünümünde `pre` yok")
+   korunuyor. API/protokol/snapshot değişmedi, `room:build` gerekmez.
+   **Ölçüldü (modelsiz):** test odası `6d8828fe-77db-47fb-a7bc-2a56d38553b0`, backend kullanıcısıyla
+   `contracts/api.md` yazıldı, `contract.changed` `appendEvent` ile eklendi (izleyici yalnız tool
+   çağrısı/turn sonunda tarıyor, elle yazılan dosyayı duyurmaz — tasarım gereği). Playwright: panel
+   "1 dosya · api.md 152 B · backend", kapalıyken `pre` 0, kart 2, tıklayınca içerik birebir. `gate:w7`
+   yeniden KOŞULMADI.
+2. **Giriş/davet linki eski IP'ye gidiyordu** — `0d1359e`. `.env` `APP_BASE_URL=http://192.168.1.114:5173`
+   idi, makine artık `10.190.187.98`. `.env`'de satır yorum yapıldı (gitignore'lu, commit'te yok);
+   `APP_BASE_URL` yoksa link isteğin `Origin`'inden (`apps/api/src/auth/base-url.ts`). Giriş linkinde
+   yalnız `AUTH_DEV_MODE`'da — e-postayla gidecek linkte Origin'e güvenmek zehirleme açığı. Davet linki her
+   zaman (yalnız sahibin yanıtına düşüyor). Paylaş penceresi localhost linkinde "başka makinede açılmaz"
+   uyarıyor. **İki kişilik denemede arayüzü LAN IP'sinden aç**, daveti oradan üret.
+   Ölçüldü: LAN'dan giriş uçtan uca (Playwright, `/auth/me` 200), davet linki LAN adresiyle, auth 13/13.
+3. **Kendiliğinden sözleşme testi — SONUÇSUZ (3. kez).** `bash .gate7a-tmp-contracts/run.sh` (~21:07):
+   backend (`gemini-3.1-flash-lite`) art arda 3×503 → `retry_exhausted` 45 sn'de (503 bütçesi gerçek
+   ortamda doğru çalıştı). Backend ucu olmadan frontend sonucu geçersiz olacağından test DURDURULDU;
+   frontend (`3.5-flash`) turn'ü başlamıştı, 8797 sunucusu + oda container'ı öldürülerek kesildi (event
+   üretmeden). Harcanan: flash-lite 3 istek, 3.5-flash en fazla 1-2.
+   **Dikkat:** `TaskStop` betiğin `trap cleanup`'ını çalıştırmıyor — elle: 8797 portu, `agent-rooms.room`
+   etiketli container, `room-<id>` volume.
+
+### Makinede (21:30)
+- Docker Desktop, postgres, redis ayakta. API 8787 (yeni kodla) + arayüz 5173 bu oturumdan başlatıldı;
+  oturum kapanınca kapanabilir → "Çalıştırma" bölümü.
+- Test odası `6d8828fe` açık (backend agent idle, contracts/api.md içinde). `agent-rooms-room-a49ab23a`
+  adlı eski bir container da çalışıyor — dokunulmadı.
+
+### Sıradaki (Kerem 503 araştırmasından dönünce)
+1. Sözleşme testini yeniden koş. İki seçenek Kerem'e soruldu: (a) aynı ayarla Google sakinken (sabah) —
+   öneri; (b) `BM=gemini-3.5-flash bash .gate7a-tmp-contracts/run.sh` — iki agent aynı 20'yi paylaşır,
+   `gate:w7:agent`'a yer kalmaz. Sonuçlar artık **Sözleşmeler panelinden** de görülebilir.
+2. `npm run gate:w7:agent` (~20 istek; hiç koşulmadı).
+3. Adım 16 dogfood (iki kişi) → README "Hafta 7 dogfood notları" + roadmap'te Hafta 7 ✓.
+   Dogfood'a düşülecek bulgular 25 Eylül bölümünde (bayat klon kopyası riski, kota dolunca ham stack trace).
+
+---
+
+## Önceki durum — 25 Eylül ~23:55
 
 **Yapılanlar (commit `40535cd`, bu not ayrı commit):**
 - ✅ **Sorun 2 uçtan uca doğrulandı.** Tek backend turn'ü "contracts'a api.md yaz" →
   `/room/contracts/api.md` `agent-backend:rooms-contracts 664`, `contract.changed` (yalnız sha256 + size).
   Diff ekranında görünmemesi DOĞRU: `contracts/` worktree dışında (görev tanımı Adım 7).
   Arayüzde sözleşmeyi gösteren bir yer YOK (`useEventStream`'de `contracts` tutuluyor, basan bileşen yok) —
-  Kerem "şu an gerek yok" dedi; dogfood 1. soruya not olarak düşülecek.
+  Kerem "şu an gerek yok" dedi. **→ 28 Eylül: Sözleşmeler paneli eklendi (`0a836e7`).**
 - ✅ **503 bütçesi art arda sayılıyor** (`40535cd`). Ölçülen kusur: backend 503, 503, araç çağırdı,
   sonra TEK 503 → sayaç 3 → ilerleyen turn öldü. Şimdi model metin/`tool_use` ürettiğinde sayaç sıfırlanıyor
   (`createRetryTracker().success()`), turn başına toplam sınır `budget * 3` (9). Özet toplamı
