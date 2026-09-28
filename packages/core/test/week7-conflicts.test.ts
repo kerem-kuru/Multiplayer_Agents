@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { RoomView } from "@agent-rooms/view";
+import { project, type RoomView } from "@agent-rooms/view";
 import { CONTRACTS_RACE_WINDOW_MS, detectConflicts, diffConflicts } from "../src/conflicts.js";
 
 /**
@@ -17,7 +17,8 @@ const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
 function view(opts: {
   files?: Record<string, string[]>;
   clean?: Record<string, string[]>;
-  contracts?: Record<string, { agent: string; at: string }>;
+  /** yol -> (agent -> son yazma anı) */
+  contracts?: Record<string, Record<string, string>>;
 }): RoomView {
   const agents: RoomView["agents"] = {};
   const put = (agent: string, path: string, status: string) => {
@@ -34,8 +35,16 @@ function view(opts: {
   }
 
   const contracts: RoomView["contracts"] = {};
-  for (const [path, c] of Object.entries(opts.contracts ?? {})) {
-    contracts[path] = { sha256: "x", size: 1, lastAgent: c.agent, at: c.at, deleted: false };
+  for (const [path, writes] of Object.entries(opts.contracts ?? {})) {
+    const last = Object.entries(writes).sort(([, a], [, b]) => a.localeCompare(b)).at(-1)!;
+    contracts[path] = {
+      sha256: "x",
+      size: 1,
+      lastAgent: last[0],
+      at: last[1],
+      deleted: false,
+      lastWriteBy: writes,
+    };
   }
 
   return { lastSeq: 0, agents, access: [], baseSha: null, conflicts: [], contracts };
@@ -94,26 +103,34 @@ describe("path_overlap", () => {
 });
 
 describe("contracts_race", () => {
-  it("60 sn içinde iki farklı agent yazınca tespit", () => {
+  it("aynı dosyaya 60 sn içinde iki farklı agent yazınca tespit", () => {
     const c = detectConflicts(
-      view({
-        contracts: {
-          "api.md": { agent: "backend", at: ago(5_000) },
-          "ui.md": { agent: "frontend", at: ago(10_000) },
-        },
-      }),
+      view({ contracts: { "api.md": { backend: ago(10_000), frontend: ago(5_000) } } }),
       NOW,
     );
-    expect(c).toHaveLength(1);
-    expect(c[0]).toMatchObject({ kind: "contracts_race", agents: ["backend", "frontend"] });
+    expect(c).toEqual([
+      {
+        id: "contracts_race|backend+frontend|api.md",
+        kind: "contracts_race",
+        agents: ["backend", "frontend"],
+        paths: ["api.md"],
+      },
+    ]);
+  });
+
+  it("FARKLI dosyalara yazan iki agent yarış değil (29 Eylül'e kadar yanlışlıkla sayılıyordu)", () => {
+    const c = detectConflicts(
+      view({ contracts: { "api.md": { backend: ago(5_000) }, "ui.md": { frontend: ago(10_000) } } }),
+      NOW,
+    );
+    expect(c).toEqual([]);
   });
 
   it("pencere DIŞINDA tespit yok", () => {
     const c = detectConflicts(
       view({
         contracts: {
-          "api.md": { agent: "backend", at: ago(5_000) },
-          "ui.md": { agent: "frontend", at: ago(CONTRACTS_RACE_WINDOW_MS + 10_000) },
+          "api.md": { backend: ago(5_000), frontend: ago(CONTRACTS_RACE_WINDOW_MS + 10_000) },
         },
       }),
       NOW,
@@ -121,17 +138,64 @@ describe("contracts_race", () => {
     expect(c).toEqual([]);
   });
 
-  it("aynı agent iki dosya yazarsa yarış değil", () => {
+  it("aynı agent aynı dosyaya art arda yazarsa yarış değil", () => {
+    const c = detectConflicts(view({ contracts: { "api.md": { backend: ago(1_000) } } }), NOW);
+    expect(c).toEqual([]);
+  });
+
+  it("aynı agent kümesinin yarıştığı dosyalar TEK çakışmada", () => {
     const c = detectConflicts(
       view({
         contracts: {
-          "api.md": { agent: "backend", at: ago(1_000) },
-          "db.md": { agent: "backend", at: ago(2_000) },
+          "api.md": { backend: ago(3_000), frontend: ago(2_000) },
+          "db.md": { backend: ago(4_000), frontend: ago(1_000) },
         },
       }),
       NOW,
     );
-    expect(c).toEqual([]);
+    expect(c.map((x) => x.id)).toEqual(["contracts_race|backend+frontend|api.md,db.md"]);
+  });
+
+  it("üç agent aynı dosyada tek çakışma", () => {
+    const c = detectConflicts(
+      view({ contracts: { "api.md": { backend: ago(3_000), frontend: ago(2_000), security: ago(1_000) } } }),
+      NOW,
+    );
+    expect(c).toHaveLength(1);
+    expect(c[0]!.agents).toEqual(["backend", "frontend", "security"]);
+  });
+});
+
+describe("contracts_race — event log'dan uçtan uca", () => {
+  /**
+   * gate:w7:agent [11], 29 Eylül 23:05 — gerçek iki event (sha256 kısaltıldı).
+   * Projeksiyon yalnızca son yazanı tuttuğu sürece bu yarış görülmüyordu.
+   */
+  const at = (iso: string, seq: number, agent: string, sha256: string) => ({
+    seq,
+    roomId: "11111111-1111-4111-8111-111111111111",
+    sessionId: "22222222-2222-4222-8222-222222222222",
+    ts: iso,
+    actor: { kind: "agent" as const, name: agent },
+    type: "contract.changed" as const,
+    payload: { agent, messageId: null, path: "api.md", sha256, size: 33, deleted: false },
+  });
+
+  it("backend ve frontend 5,6 sn arayla aynı api.md'ye yazdı → yarış", () => {
+    const v = project([
+      at("2026-09-28T23:05:26.258Z", 73, "backend", "8fd7a3ef"),
+      at("2026-09-28T23:05:31.909Z", 84, "frontend", "914cb5a6"),
+    ] as unknown as Parameters<typeof project>[0]);
+
+    expect(v.contracts["api.md"]).toMatchObject({
+      lastAgent: "frontend",
+      lastWriteBy: { backend: "2026-09-28T23:05:26.258Z", frontend: "2026-09-28T23:05:31.909Z" },
+    });
+    const c = detectConflicts(v, new Date("2026-09-28T23:05:32.000Z"));
+    expect(c.map((x) => x.id)).toEqual(["contracts_race|backend+frontend|api.md"]);
+
+    // Pencere geçince bir sonraki ölçümde kalkar (conflict.cleared).
+    expect(detectConflicts(v, new Date("2026-09-28T23:06:40.000Z"))).toEqual([]);
   });
 });
 

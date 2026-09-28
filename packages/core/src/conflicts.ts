@@ -99,48 +99,42 @@ export function detectConflicts(view: RoomView, now: Date = new Date()): Conflic
   }
 
   /*
-   * --- contracts_race: aynı sözleşme dosyasına 60 sn içinde iki farklı agent
+   * --- contracts_race: AYNI sözleşme dosyasına 60 sn içinde iki farklı agent
    *
-   * Projeksiyon dosya başına YALNIZCA son yazanı tutuyor. Yani burada
-   * görebileceğimiz şey "son yazan X, ve bu yazma penceresi içinde" — ikinci
-   * agent'ı bilmek için turn'lere bakmak gerekirdi. Bunun yerine: bir sözleşme
-   * dosyasına son yazan agent ile o dosyayı DEĞİŞTİRMİŞ görünen başka bir agent
-   * varsa (diff'inde ya da daha önce yazmışsa) yarış sayılır.
+   * Projeksiyon her dosya için her agent'ın son yazma anını tutuyor
+   * (`lastWriteBy`). Pencere içinde yazmış agent'lar iki ya da daha fazlaysa
+   * o dosyada yarış var: biri ötekinin yazdığını ezmiş olabilir. İkisi de
+   * [şimdi - 60 sn, şimdi] aralığında olduğundan aralarındaki fark da 60 sn'yi
+   * geçemez.
    *
-   * Pratikte ikinci agent'ı bulmanın güvenilir yolu, aynı pencerede başka bir
-   * sözleşme yazımı olup olmadığına bakmak: `contracts/` altında 60 sn içinde
-   * iki FARKLI agent yazmışsa, o dosyalar için yarış vardır.
+   * 29 Eylül'e kadar projeksiyon yalnızca son yazanı biliyordu ve yarış FARKLI
+   * dosyalar arasında aranıyordu: aynı dosyaya yarış hiç görülmüyor (gate:w7:agent
+   * [11]), farklı dosyalara yazan iki agent ise yanlışlıkla yarış sayılıyordu.
+   *
+   * `path_overlap` gibi: aynı agent kümesinin yarıştığı dosyalar TEK çakışmada.
+   * Silme de yazmadır.
    */
-  const recent: Array<{ path: string; agent: string; at: number }> = [];
+  const raceSets = new Map<string, { agents: string[]; paths: string[] }>();
   for (const [path, c] of Object.entries(view.contracts ?? {})) {
-    const at = Date.parse(c.at);
-    if (!Number.isFinite(at)) continue;
-    if (now.getTime() - at > CONTRACTS_RACE_WINDOW_MS) continue;
-    recent.push({ path, agent: c.lastAgent, at });
+    const racing = Object.entries(c.lastWriteBy ?? {})
+      .filter(([, at]) => {
+        const t = Date.parse(at);
+        return Number.isFinite(t) && now.getTime() - t <= CONTRACTS_RACE_WINDOW_MS;
+      })
+      .map(([agent]) => agent)
+      .sort();
+    if (racing.length < 2) continue;
+    const key = racing.join("+");
+    const entry = raceSets.get(key) ?? { agents: racing, paths: [] };
+    entry.paths.push(path);
+    raceSets.set(key, entry);
   }
-
-  const racePairs = new Map<string, { agents: Set<string>; paths: Set<string> }>();
-  for (let i = 0; i < recent.length; i += 1) {
-    for (let j = i + 1; j < recent.length; j += 1) {
-      const a = recent[i]!;
-      const b = recent[j]!;
-      if (a.agent === b.agent) continue;
-      if (Math.abs(a.at - b.at) > CONTRACTS_RACE_WINDOW_MS) continue;
-      const pair = [a.agent, b.agent].sort();
-      const key = pair.join("+");
-      const entry = racePairs.get(key) ?? { agents: new Set(pair), paths: new Set<string>() };
-      entry.paths.add(a.path);
-      entry.paths.add(b.path);
-      racePairs.set(key, entry);
-    }
-  }
-  for (const entry of racePairs.values()) {
-    const pair = [...entry.agents].sort();
+  for (const entry of raceSets.values()) {
     const paths = [...entry.paths].sort();
     out.push({
-      id: conflictId("contracts_race", pair, paths),
+      id: conflictId("contracts_race", entry.agents, paths),
       kind: "contracts_race",
-      agents: pair,
+      agents: entry.agents,
       paths,
     });
   }

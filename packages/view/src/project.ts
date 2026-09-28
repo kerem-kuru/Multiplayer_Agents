@@ -35,8 +35,9 @@ import { anchorOf, type AnchorState } from "./patch.js";
  * 7: `TurnView.retry` (24 Eylül, `turn.retrying`).
  * 8: `TurnView.retry.failed` — deneme bütçesi art arda sayılıyor (25 Eylül).
  * 9: `TurnView.retry.waitMs` — bekleme süreli 429 (29 Eylül).
+ * 10: `ContractView.lastWriteBy` — aynı sözleşmeye yarış (29 Eylül).
  */
-export const SNAPSHOT_VERSION = 9;
+export const SNAPSHOT_VERSION = 10;
 
 export type AgentStatus = "stopped" | "starting" | "idle" | "busy" | "crashed" | "failed";
 
@@ -221,6 +222,17 @@ export interface ContractView {
   lastAgent: string;
   at: string;
   deleted: boolean;
+  /**
+   * Her agent'in bu dosyaya SON yazdigi an (agent -> ISO). `contracts_race`
+   * bunu okuyor.
+   *
+   * Yalnizca `lastAgent` tutuldugunda ayni dosyaya iki agent'in yazmasi
+   * gorulemiyordu: ikinci yazma birinciyi eziyordu ve eslestirilecek ikinci
+   * agent kalmiyordu (29 Eylul, gate:w7:agent [11]). "Son N yazma" degil agent
+   * basina son an: bir agent art arda cok yazsa da digerininki dusmez; boyut
+   * agent sayisiyla sinirli.
+   */
+  lastWriteBy: Record<string, string>;
 }
 
 export interface IsolationViolationView {
@@ -723,12 +735,14 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
           agent?: unknown; path?: unknown; sha256?: unknown; size?: unknown; deleted?: unknown;
         };
         if (typeof p.path === "string" && typeof p.agent === "string") {
+          const prev = view.contracts[p.path];
           view.contracts[p.path] = {
             sha256: typeof p.sha256 === "string" ? p.sha256 : "",
             size: typeof p.size === "number" ? p.size : 0,
             lastAgent: p.agent,
             at: e.ts,
             deleted: p.deleted === true,
+            lastWriteBy: { ...(prev?.lastWriteBy ?? {}), [p.agent]: e.ts },
           };
         }
         break;
