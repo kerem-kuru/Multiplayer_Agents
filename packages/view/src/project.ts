@@ -34,8 +34,9 @@ import { anchorOf, type AnchorState } from "./patch.js";
  *
  * 7: `TurnView.retry` (24 Eylül, `turn.retrying`).
  * 8: `TurnView.retry.failed` — deneme bütçesi art arda sayılıyor (25 Eylül).
+ * 9: `TurnView.retry.waitMs` — bekleme süreli 429 (29 Eylül).
  */
-export const SNAPSHOT_VERSION = 8;
+export const SNAPSHOT_VERSION = 9;
 
 export type AgentStatus = "stopped" | "starting" | "idle" | "busy" | "crashed" | "failed";
 
@@ -102,6 +103,8 @@ export interface TurnView {
     active: boolean;
     /** Bu turn'deki toplam başarısız istek (`turn.retrying` sayısı). `attempt` art arda sayıdır ve sıfırlanır. */
     failed: number;
+    /** Sağlayıcının verdiği bekleme süresi (429 hız sınırı). Null: süre yok, deneme bütçeden düştü. */
+    waitMs: number | null;
   } | null;
 }
 
@@ -500,6 +503,7 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
             detail: String(payload.detail ?? ""),
             active: true,
             failed: (turn.retry?.failed ?? 0) + 1,
+            waitMs: typeof payload.waitMs === "number" ? payload.waitMs : null,
           };
         }
         break;

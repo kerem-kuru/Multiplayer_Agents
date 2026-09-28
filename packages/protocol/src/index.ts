@@ -24,4 +24,8 @@ export * from "./stream.js";
  * 6: `contract.changed` silmede bos `sha256` kabul ediyor (29 Eylul). Runner
  * event'i kendi icinde dogruluyor — bayat imaj silmeyi yine dusururdu.
  */
-export const PROTOCOL_VERSION = 6;
+/**
+ * 7: `turn.retrying.waitMs` — bekleme sureli 429 art arda butceden dusmez,
+ * `attempt` 0 olabilir (29 Eylul). Bayat imaj 429'da saglikli turn'u oldururdu.
+ */
+export const PROTOCOL_VERSION = 7;

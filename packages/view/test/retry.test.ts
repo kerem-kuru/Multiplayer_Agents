@@ -119,4 +119,28 @@ describe("turn.retrying", () => {
     expect(retryLabel({ ...base, status: 500 })).toBe("Google hata verdi (500) · 1/3. deneme");
     expect(retryLabel({ ...base, status: null })).toBe("Google bağlantı hatası · 1/3. deneme");
   });
+
+  it("bekleme süreli 429: deneme sayısı değil süre yazılır (29 Eylül)", () => {
+    const view = project([
+      ...start(),
+      ev("turn.retrying", {
+        agent: "frontend",
+        messageId: MID,
+        provider: "Google",
+        attempt: 0,
+        budget: 3,
+        status: 429,
+        detail: "You exceeded your current quota",
+        waitMs: 70547,
+      }),
+    ]);
+    const agent = view.agents.frontend!;
+    expect(agent.turns[0]!.retry).toMatchObject({ attempt: 0, waitMs: 70547, failed: 1, active: true });
+    expect(toCard("frontend", agent).line).toBe("Google hız sınırı (429) · 71 sn bekleniyor");
+  });
+
+  it("eski event'te waitMs yok: bekleme sayılmaz", () => {
+    const view = project([...start(), retry(1, 429)]);
+    expect(view.agents.frontend!.turns[0]!.retry?.waitMs).toBeNull();
+  });
 });

@@ -80,6 +80,12 @@ export interface RetrySignal {
   totalCap: number;
   status: number | null;
   detail: string;
+  /**
+   * Sağlayıcı bekleme süresi verdi (429 hız sınırı, CLI "Retrying after N ms"):
+   * CLI o kadar bekleyip tekrar deniyor. Art arda sayaca GİRMEZ — sağlayıcı
+   * cevap veriyor, yalnızca "bekle" diyor. Toplam sınıra girer. Null: süre yok.
+   */
+  waitMs: number | null;
   /** Bütçe doldu (art arda `budget` ya da toplam `totalCap`): runner süreci durdurmalı. */
   exhausted: boolean;
 }
@@ -109,6 +115,21 @@ export const RETRY_TOTAL_FACTOR = 3;
  * sağlayıcıda kotanın sınırsız yanmaması için ayrıca turn başına toplam üst
  * sınır var (`budget * RETRY_TOTAL_FACTOR`).
  *
+ * **Bekleme süreli 429 art arda sayılmaz (29 Eylül, ölçüldü).** 3.5-flash
+ * ücretsiz katmanı dakikada 5 istek; araç çağıran frontend turn'ü iki kez
+ * "Please retry in 59s" aldı ve 3 hakkın 2'sini yedi — üçüncüsü sağlıklı turn'ü
+ * "Google yanıt vermedi" diye öldürecekti. CLI bu durumda mesajı çok satırlı
+ * basıyor ve süre SON satırda:
+ *
+ *   Attempt 2 failed: You exceeded your current quota, please check ...
+ *   * Quota exceeded for metric: ..., limit: 5, model: gemini-3.5-flash
+ *   Please retry in 59.146378666s.
+ *   Suggested retry after 59s.. Retrying after 70547ms...
+ *
+ * Bu yüzden kota satırı, süre satırı gelene kadar BEKLETİLİR. Süre yerine yeni
+ * bir `Attempt` gelirse temkinli davranılır: sayılır. Günlük kota bitince CLI
+ * `Attempt` basmıyor, doğrudan hata atıyor — o yol bu sayaçtan geçmez.
+ *
  * Parçalar satır ortasından bölünebilir: yarım satır bir sonraki parçayı bekler.
  */
 export function createRetryTracker(budget: number): {
@@ -121,20 +142,56 @@ export function createRetryTracker(budget: number): {
   let total = 0;
   const totalCap = budget * RETRY_TOTAL_FACTOR;
   const LINE = /Attempt (\d+) failed(?: with status (\d{3}))?[.:]?\s*(.*)$/;
+  const WAIT = /Retrying after (\d+)\s*ms/;
+  /** Süre satırını bekleyen kota denemesi. */
+  let pending: { status: number | null; detail: string } | null = null;
+
+  const record = (
+    signals: RetrySignal[],
+    p: { status: number | null; detail: string },
+    waitMs: number | null,
+  ): void => {
+    total += 1;
+    if (waitMs === null) count += 1;
+    signals.push({
+      attempt: count,
+      budget,
+      total,
+      totalCap,
+      status: p.status,
+      detail: p.detail,
+      waitMs,
+      exhausted: count >= budget || total >= totalCap,
+    });
+  };
+
   return {
     feed(chunk: string): RetrySignal[] {
       const lines = (partial + chunk).split(/\r?\n/);
       partial = lines.pop() ?? "";
       const signals: RetrySignal[] = [];
       for (const line of lines) {
+        if (pending) {
+          const w = WAIT.exec(line);
+          if (w) {
+            record(signals, pending, Number(w[1]));
+            pending = null;
+            continue;
+          }
+        }
         const m = LINE.exec(line);
         if (!m) continue;
-        count += 1;
-        total += 1;
-        const rest = (m[3] ?? "")
+        if (pending) {
+          // Süre gelmeden yeni deneme: bekleme olduğu kanıtlanmadı, sayılır.
+          record(signals, pending, null);
+          pending = null;
+        }
+        const raw = m[3] ?? "";
+        const rest = raw
           // Stack trace ve JSON gövdesi ekrana gitmez.
           .replace(/\s*_?ApiError:.*$/, "")
           .replace(/\s*Retrying with backoff\.*\s*/, "")
+          .replace(/\.*\s*Retrying after \d+\s*ms\.*\s*$/, "")
           .replace(/\.*\s*Max attempts reached\s*$/, "")
           .trim();
         const status = m[2]
@@ -144,15 +201,15 @@ export function createRetryTracker(budget: number): {
             : /quota|rate limit|resource.?exhausted/i.test(rest)
               ? 429
               : null;
-        signals.push({
-          attempt: count,
-          budget,
-          total,
-          totalCap,
-          status,
-          detail: rest.slice(0, 300),
-          exhausted: count >= budget || total >= totalCap,
-        });
+        const p = { status, detail: rest.slice(0, 300) };
+        const sameLine = WAIT.exec(raw);
+        if (sameLine) {
+          record(signals, p, Number(sameLine[1]));
+        } else if (status === 429 && !/Retrying with backoff|Max attempts reached/.test(raw)) {
+          pending = p;
+        } else {
+          record(signals, p, null);
+        }
       }
       return signals;
     },

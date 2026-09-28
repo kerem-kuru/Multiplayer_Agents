@@ -321,6 +321,7 @@ function runTurn(messageId: string, text: string): Promise<void> {
           budget: s.budget,
           status: s.status,
           detail: s.detail,
+          waitMs: s.waitMs,
         },
       } as NewRoomEvent);
     };

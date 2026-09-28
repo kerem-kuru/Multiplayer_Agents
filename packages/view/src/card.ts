@@ -77,6 +77,11 @@ const FAIL_REASONS: Record<string, string> = {
  */
 export function retryLabel(retry: NonNullable<TurnView["retry"]>): string {
   const who = retry.provider || "sağlayıcı";
+  // Bekleme süreli 429 bütçeden düşmüyor: "N/3. deneme" yazmak, turn'ün
+  // öldürülmeye yaklaştığını söylerdi — öyle değil.
+  if (typeof retry.waitMs === "number") {
+    return `${who} hız sınırı (429) · ${Math.ceil(retry.waitMs / 1000)} sn bekleniyor`;
+  }
   const what =
     retry.status === 503
       ? `${who} yoğun (503)`

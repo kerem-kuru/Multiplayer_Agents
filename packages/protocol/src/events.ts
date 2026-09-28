@@ -223,13 +223,23 @@ export const TurnRetrying = ev(
     ...TurnRef,
     /** Kullanıcıya gösterilen sağlayıcı adı: "Google", "Anthropic". */
     provider: z.string().min(1).max(40),
-    attempt: z.number().int().positive(),
+    /**
+     * Art arda başarısız istek. Bekleme süreli denemede (`waitMs`) artmaz —
+     * o yüzden 0 olabilir (29 Eylül'e kadar `positive`).
+     */
+    attempt: z.number().int().nonnegative(),
     /** Runner bu sayıya ulaşınca turn'ü `retry_exhausted` ile bitirir. */
     budget: z.number().int().positive(),
     /** HTTP durumu; ağ hatasında (`fetch failed`) null. */
     status: z.number().int().nullable(),
     /** Sağlayıcının kısa hata metni. Stack trace değil. */
     detail: z.string().max(300),
+    /**
+     * Sağlayıcının verdiği bekleme süresi (429 hız sınırı): CLI bekleyip tekrar
+     * deniyor, deneme art arda bütçeden düşmez. Yok/null: süre verilmedi.
+     * Eski event'lerde alan yok.
+     */
+    waitMs: z.number().int().nonnegative().nullable().optional(),
   }),
 );
 

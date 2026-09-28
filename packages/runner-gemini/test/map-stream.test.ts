@@ -256,7 +256,7 @@ describe("createRetryTracker", () => {
     const t = createRetryTracker(3);
     const out = t.feed([RETRYING, "    at throwErrorIfNotOK (file:///x.js:1:1)", "  status: 503", MAXED, ""].join(NEWLINE));
     expect(out).toEqual([
-      { attempt: 1, budget: 3, total: 1, totalCap: 9, status: 503, detail: "", exhausted: false },
+      { attempt: 1, budget: 3, total: 1, totalCap: 9, status: 503, detail: "", waitMs: null, exhausted: false },
       {
         attempt: 2,
         budget: 3,
@@ -264,6 +264,7 @@ describe("createRetryTracker", () => {
         totalCap: 9,
         status: 503,
         detail: "This model is currently experiencing high demand. Please try again later",
+        waitMs: null,
         exhausted: false,
       },
     ]);
@@ -310,5 +311,95 @@ describe("createRetryTracker", () => {
   it("ağ hatasında durum kodu yok", () => {
     const [s] = createRetryTracker(3).feed("Attempt 1 failed: fetch failed" + NEWLINE);
     expect(s).toMatchObject({ status: null, detail: "fetch failed" });
+  });
+
+  /** 29 Eylül gerçek koşumu (server.log) — 3.5-flash ücretsiz katman, dakikada 5 istek. */
+  const quota = (n: number, ms: number): string =>
+    [
+      `Attempt ${n} failed: You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits.`,
+      "* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 5, model: gemini-3.5-flash",
+      "Please retry in 59.146378666s.",
+      `Suggested retry after 59s.. Retrying after ${ms}ms...`,
+      "",
+    ].join(NEWLINE);
+
+  it("bekleme süreli 429 art arda sayılmaz, süre taşınır (29 Eylül)", () => {
+    const t = createRetryTracker(3);
+    const out = [...t.feed(quota(1, 6771)), ...t.feed(quota(2, 70547)), ...t.feed(quota(3, 70000))];
+    expect(out.map((s) => [s.attempt, s.total, s.status, s.waitMs, s.exhausted])).toEqual([
+      [0, 1, 429, 6771, false],
+      [0, 2, 429, 70547, false],
+      [0, 3, 429, 70000, false],
+    ]);
+    expect(out[0]!.detail).toMatch(/^You exceeded your current quota/);
+  });
+
+  it("bekleme süreli 429 araya girse de art arda 503 sayımı sürer", () => {
+    const t = createRetryTracker(3);
+    const out = [...t.feed(RETRYING + NEWLINE + quota(2, 6771)), ...t.feed(RETRYING + NEWLINE)];
+    expect(out.map((s) => [s.attempt, s.waitMs])).toEqual([
+      [1, null],
+      [1, 6771],
+      [2, null],
+    ]);
+  });
+
+  it("bekleme süreli 429 toplam sınıra girer — sonsuza gitmez", () => {
+    const t = createRetryTracker(3);
+    const out = [];
+    for (let i = 1; i <= 9; i += 1) out.push(...t.feed(quota(i, 60000)));
+    expect(out.at(-1)).toMatchObject({ attempt: 0, total: 9, exhausted: true });
+  });
+
+  it("süre satırı parçalar arasında bölünse de bulunur", () => {
+    const t = createRetryTracker(3);
+    const text = quota(1, 6771);
+    const cut = text.indexOf("Retrying after") + 5;
+    expect(t.feed(text.slice(0, cut))).toEqual([]);
+    expect(t.feed(text.slice(cut))).toMatchObject([{ attempt: 0, waitMs: 6771 }]);
+  });
+
+  it("süre gelmeden yeni deneme gelirse kota satırı temkinle sayılır", () => {
+    const t = createRetryTracker(3);
+    const out = t.feed(
+      "Attempt 1 failed: You exceeded your current quota" + NEWLINE + RETRYING + NEWLINE,
+    );
+    expect(out.map((s) => [s.attempt, s.status, s.waitMs])).toEqual([
+      [1, 429, null],
+      [2, 503, null],
+    ]);
+  });
+
+  it("süresiz 429 (backoff) ve 'Max attempts reached' eskisi gibi sayılır", () => {
+    const t = createRetryTracker(3);
+    const out = t.feed(
+      "Attempt 1 failed with status 429. Retrying with backoff..." +
+        NEWLINE +
+        "Attempt 2 failed: You exceeded your current quota. Max attempts reached" +
+        NEWLINE,
+    );
+    expect(out.map((s) => [s.attempt, s.status, s.waitMs])).toEqual([
+      [1, 429, null],
+      [2, 429, null],
+    ]);
+  });
+
+  it("turn.retrying event'i şemadan geçer — attempt 0 ve waitMs ile", () => {
+    const e = {
+      ...base,
+      actor: { kind: "agent", name: "backend" },
+      type: "turn.retrying",
+      payload: {
+        agent: "backend",
+        messageId: base.messageId,
+        provider: "Google",
+        attempt: 0,
+        budget: 3,
+        status: 429,
+        detail: "You exceeded your current quota",
+        waitMs: 70547,
+      },
+    };
+    expect(() => NewRoomEvent.parse(e)).not.toThrow();
   });
 });
