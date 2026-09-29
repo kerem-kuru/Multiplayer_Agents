@@ -1,28 +1,56 @@
-# Kaldığımız yer — 29 Eylül 2026, ~03:10
+# Kaldığımız yer — 29 Eylül 2026, ~17:10
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar. Önce bu ilk bölümü oku;
 altındaki "Ayrıntılar" bölümleri her iddianın kanıtını ve gerekçesini taşıyor.
 
-## ⚠️ BURADAN BAŞLA — 29 Eylül ~03:10
+## ⚠️ BURADAN BAŞLA — 29 Eylül ~17:10
 
 ### Neredeyiz (tek paragraf)
-12 haftalık planın **Hafta 7'sindeyiz** (ikinci agent + worktree izolasyonu). Adım 1–15 ve 17
-kod olarak bitti. **Hafta 7 KAPANMADI**, kalan iki şey var: `gate:w7:agent`'ın tam geçmesi ve
-Adım 16 dogfood (iki kişi). 28 Eylül akşamı – 29 Eylül 03:10 oturumunda: kendiliğinden sözleşme
-testi ilk kez geçti, `gate:w7:agent` ilk kez koşuldu (13 geçti / 3 kaldı), çıkan beş kusur
-düzeltildi, README'ye bir bilinçli ilke sapması yazıldı. **Hepsi push edildi, ağaç temiz.**
-Kerem günü kapattı; sıradaki iş TSİ 10:00'da kota sıfırlandıktan sonra.
+12 haftalık planın **Hafta 7'sindeyiz**. Adım 1–15 ve 17 kod olarak bitti. 29 Eylül öğleden sonra
+**Adım 16 dogfood yapıldı, notları README'de** ("Hafta 7 dogfood notları"). **Hafta 7 hâlâ KAPANMADI**,
+üç açık var: (1) `gate:w7:agent` tam geçmedi — bugün iki koşum da Google yüzünden ölçüm vermedi;
+(2) dogfood'da iki hesabı da Kerem kullandı (iki cihaz) → "iki kişi" karşılanmadı; (3) dogfood'un
+3. sorusu (izin hatası alan agent ne yapar) ölçülmedi — Hafta 8 defter tasarımını en çok o etkiler.
+Bugün kodda değişiklik YOK; yalnız README + bu not. Kerem günü kapattı.
 
 ### Kapıların durumu
 | Ölçüm | Sonuç | Not |
 | --- | --- | --- |
-| Tam test paketi | **471/471** | typecheck + web tsc temiz |
+| Tam test paketi | **471/471** | typecheck + web tsc temiz (bugün kod değişmedi) |
 | `gate:w7` (modelsiz) | **93/93** | imaj protokol 7 ile (29 Eylül ~02:40) |
-| `gate:w7:agent` | **13 geçti, 3 kaldı, 1 uyarı** (1 koşum) | [11] sonradan düzeltildi ama modelle GÖRÜLMEDİ; [10] ve [13] ÖLÇÜLMEDİ (model komutu çalıştırmadı) |
-| Kendiliğinden sözleşme testi | **geçti** (1 kez) | Hafta 8 kapısının öncüsü; o kapı `journal/` ile 5 kez üst üste ister |
-| Adım 16 dogfood | yapılmadı | |
+| `gate:w7:agent` | **ölçülmedi** (bugün 2 koşum, ikisi de geçersiz) | frontend (`3.5-flash`) hiç turn bitiremedi: 503 ve sonra 429 günlük. [11] düzeltmesi hâlâ modelle GÖRÜLMEDİ; [10], [13] ÖLÇÜLMEDİ. Backend'in ölçtükleri geçti ([8], [9] backend kısmı, [12], Playwright [21]) |
+| Kendiliğinden sözleşme testi | **geçti** (1 kez, 29 Eylül 01:28) | Hafta 8 kapısının öncüsü |
+| Adım 16 dogfood | **yapıldı, eksik** | tek kişi iki cihaz; soru 3 ölçülmedi, soru 4 gözlenmedi |
+
+### 29 Eylül öğleden sonra ne oldu (kanıtlar README'de ve aşağıda)
+- **Google'ın ücretsiz katmanı bütün gün dalgalıydı.** Düz `curl` (bizim kod yok) ile: `3.5-flash` 15:33'te 1.
+  projede 200, 2. projede 503; 15:58'de 2. projede 503 "high demand"; 16:52'de 2. projede 200, bir dakika sonra
+  gate'te art arda 503. `2.5-flash` 16:00'da 200, dogfood'da (16:21–16:25) 10 kez art arda 503; 16:52'de 2. projede
+  **404** (o projede yok gibi). `flash-lite` 16:52'de iki projede de 503.
+- **Gate koşum 1** (15:34, 1. anahtar): 7 geçti / 7 kaldı / 3 uyarı. Frontend 5 turn'ün hepsinde 3×503. Geçersiz.
+- **Gate koşum 2** (16:53, 2. anahtar, `AGENT_RETRY_BUDGET=5`): frontend 1 turn 5×503, sonra 5 turn doğrudan
+  **429** (CLI tekrar denemedi → günlük kota). 2. projede `3.5-flash`'a bugün ~11 istek görünüyordu (4 yoklama +
+  ~7 deneme) — 20'ye varmadan bitti: 503 denemeleri de kotadan düşüyor olmalı (kesin değil).
+- **Kota dolunca kartta ham stack trace** görüldü (`gemini: error — 429, · sync file:///opt/runner/...`) — 28 Eylül'de
+  Kerem "şimdilik kalsın" demişti, artık gerçekte görüldü.
+- **Dogfood** (16:17–16:38, oda `0b7a2291`): iki agent da `flash-lite` (`AGENT_MODEL_GEMINI` ile, config/repo
+  değişmedi), 2. anahtar, deneme hakkı 5. Sözleşme üzerinden iki yönde anlaştılar; birlikte çalıştıkları odanın
+  DIŞINDA elle doğrulandı (worktree'ler kopyalandı, backend host'ta, tek origin için geçici ara sunucu, `curl` +
+  Playwright). Ayrıntılar README.
 
 ### İlk yapılacaklar (TSİ 10:00'dan sonra, sırayla — ağır işleri ASLA paralel koşma)
+1. **Kotayı ve SAĞLIĞI yokla** (aşağıdaki komut; `2.5-flash`'ı da ekle). Bugünkü ders: tek 200 yetmez — birkaç
+   dakika arayla iki kez 200 görmeden gate'e girme; 503 denemeleri kotayı yiyor.
+2. **`gate:w7:agent`** — `3.5-flash` sağlıklı olan anahtarla. Hâlâ 503 ise **Kerem'le konuş**: `GATE_FRONTEND_MODEL`
+   ile başka model (kod değişmez; kapı aynı kalır, ölçen model değişir — [10]/[13] için modelin "yıkıcı" komutu
+   çalıştırması gerekiyor, `flash-lite` bunu yapar mı bilinmiyor).
+3. **Dogfood soru 3 ölçümü:** frontend'e doğası gereği backend'in klasörüne dokunmayı gerektiren bir iş ver (ör.
+   "backend'e CORS ekle"), event log'dan ne yaptığını oku (vazgeçti / contracts'a yazdı / döngü). Claude tetiklerse
+   README'ye "kontrollü ölçüm, iki insanla değil" diye yazılır.
+4. **İki kişilik dogfood** — ikinci bir insan gerekiyor. Tek kişi iki cihaz "iki kişi" SAYILMADI (kapı
+   yumuşatılmaz kuralıyla Claude öyle yazdı; Kerem aksine karar verirse bu madde kapanır).
+
+### Eski "ilk yapılacaklar" (29 Eylül 03:10 — makine hazırlığı ve komutlar hâlâ geçerli)
 1. **Makineyi hazırla.** Docker Desktop kapalıysa `%LOCALAPPDATA%\Programs\DockerDesktop\Docker Desktop.exe`
    (Program Files'ta değil); *paused* ise tepsiden **Resume** (CLI'da resume yok, `docker desktop status`
    ile bak). Sonra `npm run db:up`. Kapı kendi sunucusunu kurar; API/arayüz gerekmez. Derleme ve imaj güncel.
@@ -33,15 +61,12 @@ Kerem günü kapattı; sıradaki iş TSİ 10:00'da kota sıfırlandıktan sonra.
        -H "x-goog-api-key: $k" -H 'Content-Type: application/json' -d '{"contents":[{"parts":[{"text":"OK"}]}]}' \
        "https://generativelanguage.googleapis.com/v1beta/models/$m:generateContent")"; done; done
    ```
-3. **`npm run gate:w7:agent`** (1. anahtar = `.env` varsayılanı; ~20 istek, frontend `3.5-flash`, backend
-   `flash-lite`). Beklenen: [11] `contracts_race` artık geçmeli. **[10]/[13]'e bak:** frontend yine
-   `git checkout --` / `chmod 777` çalıştırmazsa kapı [10]'u "model komutu çalıştırmadı" diye başarısız,
-   [13]'ü uyarı yazar → **Kerem'le konuş** (seçenek: `GATE_FRONTEND_MODEL=gemini-2.5-flash` gibi komut
-   çalıştıran bir model — o model YOKLANMADI). **Kapı yumuşatılmaz; ölçülmeden Hafta 7 kapanmaz.**
-4. **Adım 16 dogfood** (Kerem + ikinci kişi): arayüzü LAN IP'sinden aç, daveti oradan üret (28 Eylül
-   düzeltmesi). Görev tanımı: `Downloads/HAFTA-7-GOREV (1).md` (4 soru + DoD). Dogfood'a düşülecek bulgular:
-   bayat klon kopyası riski (25 Eylül), kota dolunca kartta ham stack trace, `3.5-flash`'ın "yıkıcı" komutları
-   sessizce atlaması, Sözleşmeler paneli. → README "Hafta 7 dogfood notları" + `docs/roadmap.md`'de Hafta 7 ✓.
+3. `gate:w7:agent` (~20 istek, frontend `3.5-flash`, backend `flash-lite`): [11] `contracts_race` artık geçmeli.
+   Frontend `git checkout --` / `chmod 777` çalıştırmazsa [10] başarısız, [13] uyarı → Kerem'le konuş.
+   **Kapı yumuşatılmaz; ölçülmeden Hafta 7 kapanmaz.** Hafta 7 kapanınca `docs/roadmap.md`'de ✓.
+4. Dogfood API'sini tekrar açmak gerekirse (29 Eylül düzeni, repo değişmeden):
+   `GEMINI_API_KEY=… AGENT_RETRY_BUDGET=5 AGENT_MODEL_GEMINI=gemini-3.1-flash-lite npm run api` +
+   `WEB_HOST=1 npm run dev:web`; arayüz LAN IP'sinden açılır (29 Eylül: `10.183.103.98`, değişiyor).
 
 ### Kerem'le alınan kararlar (değiştirmeden önce ona sor)
 - **Kapı model davranışı yüzünden yumuşatılmaz.** Başarısızı uyarıya çevirme; ölçülmeyen kontrol "geçti" değildir.
@@ -60,8 +85,9 @@ Kerem günü kapattı; sıradaki iş TSİ 10:00'da kota sıfırlandıktan sonra.
 ### Kota (ücretsiz katman)
 - **Proje × model başına günde 20 istek** (Google'ın etiketi: `GenerateRequestsPerDayPerProjectPerModel-FreeTier`),
   `3.5-flash` ayrıca **dakikada 5**. Sıfırlanma TSİ ~10:00. 503/429 denemeleri de kotadan düşebilir.
-- 03:05 yoklaması: 1. proje `flash-lite` ✅, `3.5-flash` 503 (tahmini ~10 kaldı); 2. proje `flash-lite` ✅,
-  `3.5-flash` **bitti**. 10:00'da ikisi de sıfırlanıyor.
+- 29 Eylül ~17:00 durumu: iki projede de `3.5-flash` **bitti** (429 günlük); `flash-lite` 503 veriyordu, iki
+  projede de epey kullanıldı. 1. projede `2.5-flash` ✅ (1 yoklama + frontend'in 1 dogfood denemesi hariç temiz),
+  2. projede `2.5-flash` 404. 30 Eylül 10:00'da hepsi sıfırlanıyor. Kerem kota biterse yeni proje/anahtar açabilir.
 
 ### Açık borçlar (bilerek bırakıldı, kayıtlı)
 - Bekleme süreli 429 turn başına toplam sınıra (9) sayılıyor → uzun turn ücretsiz katmanda durdurulabilir.
@@ -70,6 +96,9 @@ Kerem günü kapattı; sıradaki iş TSİ 10:00'da kota sıfırlandıktan sonra.
 - Silinen sözleşmenin gerçek container'dan log'a düştüğü ayrıca ölçülmedi (birim + şema testli).
 - Gemini tool çıktısını log'a vermiyor ([5] uyarısı, bilinen).
 - Yol haritası kuralı: dogfood yapılmadan yeni özellik eklenmez — bu oturumda yalnız düzeltme yapıldı.
+- 29 Eylül dogfood bulguları (README'de, karar bekliyor): diff'e çalışma zamanı dosyaları giriyor (`server.pid`,
+  `output.log`, `database.sqlite` — worktree'de `.gitignore` yok); oda "birlikte çalışıyor mu"yu gösteremiyor
+  (Hafta 9–10); kota dolunca kartta ham stack trace artık gerçekte görüldü.
 
 ### Bu oturumun commit'leri (`10c8feb..0b43a16` + bu not)
 | Commit | Ne |
@@ -82,11 +111,11 @@ Kerem günü kapattı; sıradaki iş TSİ 10:00'da kota sıfırlandıktan sonra.
 | `02927e8` | Kapı: Gemini iç tool'ları (`update_topic`) agent eylemi sayılmaz |
 | `5f9ddef`, `ee36f6a`, `0520e52`, `0b43a16` | Devir notları |
 
-### Makinede (03:10)
-Docker Desktop, postgres (5433), redis (6380) ayakta. API 8787 ve arayüz **KAPALI**. İmaj `agent-rooms/room:dev`
-protokol 7 ile. Kapılar kendilerini temizledi. Eski container'lar `agent-rooms-room-a49ab23a`, `-6d8828fe`
-duruyor (dokunulmadı). `.env`: `APP_BASE_URL` yorum satırı (link isteğin Origin'inden), makinenin LAN IP'si
-28 Eylül'de `10.190.187.98` idi — değişmiş olabilir.
+### Makinede (29 Eylül ~17:10)
+Docker Desktop, postgres (5433), redis (6380) ayakta. API 8787, arayüz 5173 ve dogfood deneme sunucuları (8090,
+3000) **KAPALI**. İmaj `agent-rooms/room:dev` protokol 7 ile. Dogfood odaları (`0b7a2291` asıl, `f493ad88` deneme,
+`c8616050`, `32d654cf`) ve eski container'lar duruyor (dokunulmadı). Dogfood'un geçici config'i ve entegrasyon
+denemesi oturumun scratchpad'indeydi (repoda değil, kalıcı değil). LAN IP'si 29 Eylül'de `10.183.103.98`.
 
 ---
 

@@ -678,6 +678,73 @@ hakkın bitmesi, 503 geçici. `summarizeGeminiError` ikisini de sebebi başa ala
 > bekleyip tekrar deniyor. Günlük bitişte CLI tekrar denemiyor, doğrudan hata veriyor.
 > Runner'ın ikisini nasıl ayırdığı: "Hafta 7 kararları → Gemini yeniden denemeleri stderr'den okunuyor".
 
+## Hafta 7 dogfood notları
+
+29 Eylül 16:17–16:38, iki hesap (`deneme7w` owner, `deneme7w2` member), aynı ağdaki iki
+ayrı cihaz — **ama iki hesabı da Kerem kullandı.** Görev tanımının "iki kişi"si karşılanmadı,
+DoD maddesi açık kalıyor. Gerçek iş: backend kullanıcı girdisini SQLite'a yazan bir uç, frontend
+bir login sayfası, aradaki sözleşme `contracts/` içinde. Sayılar event log'dan (oda `0b7a2291`).
+
+**Plandan sapma: iki agent da `gemini-3.1-flash-lite` ile koştu.** Oda config'i frontend'e
+`gemini-3.5-flash` veriyor. O gün `3.5-flash` iki ayrı projede, bizim kodumuz hiç işin içinde
+olmadan (düz `curl`) `503 "high demand"` döndü. Yedek olarak denenen `gemini-2.5-flash` da
+dogfood sırasında art arda 10 kez 503 verdi (iki turn, `retry_exhausted`). Frontend
+`AGENT_MODEL_GEMINI=gemini-3.1-flash-lite` ile koşuldu; oda config'i ve repo değişmedi. Aynı
+oturumda `AGENT_RETRY_BUDGET=5` (varsayılan 3) ve ikinci anahtar kullanıldı. Bedeli: dogfood
+planlanan model ikilisiyle yapılmadı, iki agent tek proje × model kotasını paylaştı.
+
+| Soru | Cevap | Kanıt |
+| --- | --- | --- |
+| Oda görünümüne bakıp bir agent'ın ne yaptığını anlayamadığın an oldu mu? | **hayır** | Kerem'in gözlemi: kartlardan izlemek yetti |
+| Agent'lar `contracts/` üzerinden gerçekten anlaştı mı? | **evet, iki yönde** | backend `user_input_api.md` yazdı (16:19:38) → frontend okudu, login ucu olmadığını görüp durdu ve sordu (16:27:39) → onayla `auth_api.md` yazdı (16:29:14) → backend okudu, token biçimini ekleyip uyguladı (16:34:15) |
+| İzin hatası alan agent ne yaptı? | **ölçülmedi** | hiçbir agent ötekinin klasörüne yazmaya kalkmadı. Tek `tool.denied`, `toolsAllow` dışındaki `enter_plan_mode` (saptandı, engellenmedi) |
+| Okunmamış işareti doğru muydu? | **gözlenmedi** | Kerem dikkat etmedi. Mekanizma kapıda ölçülü (Playwright [21] 29 Eylül'de geçti) |
+
+**Üçüncü soru hâlâ açık ve en önemlisi o.** Görev tanımına göre Hafta 8'deki oda defterinin
+tasarımını doğrudan etkiliyor. Doğal bir görev izin hatası üretmedi; kapıdaki [5] de o gün
+frontend 503 aldığı için ölçülemedi. Hafta 8 tasarımından önce ayrıca ölçülmeli.
+
+### Asıl bulgu: oda "birlikte çalışıyor mu" sorusunu cevaplayamıyor
+
+İki agent da "bitti, sözleşmeye uyumlu" dedi. Frontend'in ilk `login.html`'inde ise ne
+`fetch` vardı ne de formun gideceği bir adres. Sözleşmeyle uyumlu olan yalnızca alan adlarıydı.
+Agent'ın "uyumlu" demesi çalıştığını göstermiyor. İkinci turda form bağlandı.
+
+Sonrasını oda gösteremedi, elle doğrulandı. İki worktree container'dan kopyalandı, backend
+bu makinede koşturuldu. Frontend göreli `/api/auth/login` çağırıyor, yani backend'le aynı
+origin'i varsayıyor. Backend ise sayfa sunmuyor. İkisini tek origin'den sunan geçici bir ara
+sunucu gerekti. Sonuç:
+
+- `curl`: doğru şifre 200 `{"token": ...}`, yanlış şifre, olmayan kullanıcı ve boş gövde 401,
+  `user-input` 201 (boş gövdede 400). Hepsi sözleşmeye uygun.
+- Gerçek tarayıcı (Playwright): 200 → yeşil "Login successful!", 401 → kırmızı "Invalid credentials.".
+
+Sözleşme uçları tanımlıyor, sayfanın nereden sunulacağını tanımlamıyor. Bu boşluk Hafta 9–10
+entegrasyon modelinin işi ("Hafta 7 kararları → Hafta 9–10 entegrasyon modeli"). O zamana
+kadar ekip bir sözleşmenin çalışıp çalışmadığını ancak odanın dışında görebiliyor.
+
+### Diğer bulgular
+
+- **503 turn'ü yarıda düşürdü, sözleşme hiç oluşmadı** (deneme odası `f493ad88`, deneme hakkı
+  3). Backend `server.js`'i yazdı, sonra art arda 3 kez 503 aldı (16:10:19). Sözleşme dosyası
+  hiç yazılmadı. Kod turn sonu checkpoint'inde korundu ama sürücü görevi yeniden vermek
+  zorunda kaldı. Asıl odada hak 5'ti: 15 yeniden deneme oldu (frontend 13, backend 2), düşen
+  turn'lerin ikisi de `2.5-flash`'taydı.
+- **Sözleşmenin yazarı el değiştirdi.** `auth_api.md`'yi frontend yazdı, 5 dakika sonra backend
+  güncelledi. 60 sn penceresinin dışında kaldığı için `contracts_race` tetiklenmedi; bu doğru
+  davranış.
+- **Diff'e çalışma zamanı dosyaları giriyor.** Backend sunucusunu kendi worktree'sinde
+  başlattı. `server.pid`, `output.log` ve `database.sqlite` diff'te agent'ın işi gibi görünüyor,
+  çünkü `.gitignore` yok. Hafta 6'daki `GEMINI.md` gürültüsü bu dogfood'un hiçbir diff'inde yok.
+- **Backend imajla uğraştı.** `sqlite3`'ü kaynaktan yeniden derlemeye çalıştı
+  (`npm install sqlite3 --build-from-source`). Turn'ün 12 tool çağrısı ve 121 sn'si buna gitti.
+  Nedeni log'da görünmüyor, çünkü Gemini tool çıktısını vermiyor. İlk turn'de arka planda
+  bıraktığı `node` süreci `<defunct>` olarak kaldı.
+- **Bu dogfood'da tetiklenmeyenler:** bayat klon kopyası, kota bitince karttaki ham stack
+  trace (dogfood'da günlük 429 gelmedi; aynı gün 16:55'teki `gate:w7:agent` koşumunda gerçekte
+  görüldü: `gemini: error — 429, · sync file:///opt/runner/...`), `3.5-flash`'ın "yıkıcı" komutları sessizce atlaması (model
+  kullanılamadı), Hafta 6'dan taşınan `outdated` çapa durumu.
+
 ## Hafta 7 kararları
 
 Üç mimari karar, görev tanımından ölçerek ayrıldığımız üç nokta ve bir bilinçli ilke sapması
