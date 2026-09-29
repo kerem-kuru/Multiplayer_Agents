@@ -1,8 +1,96 @@
-# Kaldığımız yer — 29 Eylül 2026, ~03:00
+# Kaldığımız yer — 29 Eylül 2026, ~03:10
 
-Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar.
+Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar. Önce bu ilk bölümü oku;
+altındaki "Ayrıntılar" bölümleri her iddianın kanıtını ve gerekçesini taşıyor.
 
-## ⚠️ EN SON DURUM — 29 Eylül ~03:00 (önce bunu oku)
+## ⚠️ BURADAN BAŞLA — 29 Eylül ~03:10
+
+### Neredeyiz (tek paragraf)
+12 haftalık planın **Hafta 7'sindeyiz** (ikinci agent + worktree izolasyonu). Adım 1–15 ve 17
+kod olarak bitti. **Hafta 7 KAPANMADI**, kalan iki şey var: `gate:w7:agent`'ın tam geçmesi ve
+Adım 16 dogfood (iki kişi). 28 Eylül akşamı – 29 Eylül 03:10 oturumunda: kendiliğinden sözleşme
+testi ilk kez geçti, `gate:w7:agent` ilk kez koşuldu (13 geçti / 3 kaldı), çıkan beş kusur
+düzeltildi, README'ye bir bilinçli ilke sapması yazıldı. **Hepsi push edildi, ağaç temiz.**
+Kerem günü kapattı; sıradaki iş TSİ 10:00'da kota sıfırlandıktan sonra.
+
+### Kapıların durumu
+| Ölçüm | Sonuç | Not |
+| --- | --- | --- |
+| Tam test paketi | **471/471** | typecheck + web tsc temiz |
+| `gate:w7` (modelsiz) | **93/93** | imaj protokol 7 ile (29 Eylül ~02:40) |
+| `gate:w7:agent` | **13 geçti, 3 kaldı, 1 uyarı** (1 koşum) | [11] sonradan düzeltildi ama modelle GÖRÜLMEDİ; [10] ve [13] ÖLÇÜLMEDİ (model komutu çalıştırmadı) |
+| Kendiliğinden sözleşme testi | **geçti** (1 kez) | Hafta 8 kapısının öncüsü; o kapı `journal/` ile 5 kez üst üste ister |
+| Adım 16 dogfood | yapılmadı | |
+
+### İlk yapılacaklar (TSİ 10:00'dan sonra, sırayla — ağır işleri ASLA paralel koşma)
+1. **Makineyi hazırla.** Docker Desktop kapalıysa `%LOCALAPPDATA%\Programs\DockerDesktop\Docker Desktop.exe`
+   (Program Files'ta değil); *paused* ise tepsiden **Resume** (CLI'da resume yok, `docker desktop status`
+   ile bak). Sonra `npm run db:up`. Kapı kendi sunucusunu kurar; API/arayüz gerekmez. Derleme ve imaj güncel.
+2. **Kotayı yokla** (her anahtar × model 1 istek; 200 = var, 429 `PerDay` = bitti, 503 = Google yoğun):
+   ```bash
+   for v in GEMINI_API_KEY GEMINI_API_KEY_2; do k=$(grep -E "^$v=" .env | cut -d= -f2- | tr -d '\r" ')
+     for m in gemini-3.1-flash-lite gemini-3.5-flash; do echo "$v $m: $(curl -s -m 60 -o /dev/null -w '%{http_code}' \
+       -H "x-goog-api-key: $k" -H 'Content-Type: application/json' -d '{"contents":[{"parts":[{"text":"OK"}]}]}' \
+       "https://generativelanguage.googleapis.com/v1beta/models/$m:generateContent")"; done; done
+   ```
+3. **`npm run gate:w7:agent`** (1. anahtar = `.env` varsayılanı; ~20 istek, frontend `3.5-flash`, backend
+   `flash-lite`). Beklenen: [11] `contracts_race` artık geçmeli. **[10]/[13]'e bak:** frontend yine
+   `git checkout --` / `chmod 777` çalıştırmazsa kapı [10]'u "model komutu çalıştırmadı" diye başarısız,
+   [13]'ü uyarı yazar → **Kerem'le konuş** (seçenek: `GATE_FRONTEND_MODEL=gemini-2.5-flash` gibi komut
+   çalıştıran bir model — o model YOKLANMADI). **Kapı yumuşatılmaz; ölçülmeden Hafta 7 kapanmaz.**
+4. **Adım 16 dogfood** (Kerem + ikinci kişi): arayüzü LAN IP'sinden aç, daveti oradan üret (28 Eylül
+   düzeltmesi). Görev tanımı: `Downloads/HAFTA-7-GOREV (1).md` (4 soru + DoD). Dogfood'a düşülecek bulgular:
+   bayat klon kopyası riski (25 Eylül), kota dolunca kartta ham stack trace, `3.5-flash`'ın "yıkıcı" komutları
+   sessizce atlaması, Sözleşmeler paneli. → README "Hafta 7 dogfood notları" + `docs/roadmap.md`'de Hafta 7 ✓.
+
+### Kerem'le alınan kararlar (değiştirmeden önce ona sor)
+- **Kapı model davranışı yüzünden yumuşatılmaz.** Başarısızı uyarıya çevirme; ölçülmeyen kontrol "geçti" değildir.
+- **Her öneride "taviz veriyor muyuz" sorusunu kendiliğinden cevapla** (mimari, ölçeklenebilirlik, plan). Çok
+  adımlı işte her adım bitince rapor ver.
+- **İkinci anahtar işe göre kullanılır, agent'a göre değil.** Kota proje × model başına; agent'lar zaten ayrı
+  modelde, agent başına anahtar kazandırmaz. Kod değişikliği yok, komutun ortamına verilir:
+  `GEMINI_API_KEY="$(grep ^GEMINI_API_KEY_2= .env | cut -d= -f2- | tr -d '\r\" ')" npm run gate:w7:agent`
+  (`process.loadEnvFile` ortamdakini ezmez).
+- **503 bizden değil** (Kerem'in iki hipotezi incelendi, kod değişmedi): CLI zaten streaming ve üstel geri
+  çekilme kullanıyor; yepyeni projenin ilk isteği de 503 aldı.
+- **Metin kazıma istisnası** README "Hafta 7 kararları"nda. Gemini CLI sürümü (`0.60.0`) yükseltilecekse stderr
+  satırları gerçek çıktıyla yeniden ölçülür, testlerle birlikte.
+- `turn.retrying.detail` 503'te boş ve kota dolunca ham stack trace: Kerem "şimdilik kalsın" dedi.
+
+### Kota (ücretsiz katman)
+- **Proje × model başına günde 20 istek** (Google'ın etiketi: `GenerateRequestsPerDayPerProjectPerModel-FreeTier`),
+  `3.5-flash` ayrıca **dakikada 5**. Sıfırlanma TSİ ~10:00. 503/429 denemeleri de kotadan düşebilir.
+- 03:05 yoklaması: 1. proje `flash-lite` ✅, `3.5-flash` 503 (tahmini ~10 kaldı); 2. proje `flash-lite` ✅,
+  `3.5-flash` **bitti**. 10:00'da ikisi de sıfırlanıyor.
+
+### Açık borçlar (bilerek bırakıldı, kayıtlı)
+- Bekleme süreli 429 turn başına toplam sınıra (9) sayılıyor → uzun turn ücretsiz katmanda durdurulabilir.
+  **Hafta 11 öncesi** gözden geçir (README'de).
+- Yeniden duyuru filtresinin dar penceresi (öteki agent yazandan önce tararsa ilk kayıt yanlış ada düşer).
+- Silinen sözleşmenin gerçek container'dan log'a düştüğü ayrıca ölçülmedi (birim + şema testli).
+- Gemini tool çıktısını log'a vermiyor ([5] uyarısı, bilinen).
+- Yol haritası kuralı: dogfood yapılmadan yeni özellik eklenmez — bu oturumda yalnız düzeltme yapıldı.
+
+### Bu oturumun commit'leri (`10c8feb..0b43a16` + bu not)
+| Commit | Ne |
+| --- | --- |
+| `ba8f9c2` | Öteki agent'ın aynı sözleşmeyi kendi adıyla yeniden duyurması log'a girmez (`appendContractChange`) |
+| `d7e8121` | Silinen sözleşme event'i şemadan geçer — **PROTOCOL_VERSION 6** |
+| `8e51c17` | Bekleme süreli 429 art arda bütçeden düşmez, kart "N sn bekleniyor" — **PROTOCOL_VERSION 7**, **SNAPSHOT 9** |
+| `d9b98a9` | `contracts_race` aynı dosyada yarışı yakalar — **SNAPSHOT 10** |
+| `731351d` | README: metin kazıma bilinçli sapması + 429 toplam sınırı + Hafta 6 notuna düzeltme |
+| `02927e8` | Kapı: Gemini iç tool'ları (`update_topic`) agent eylemi sayılmaz |
+| `5f9ddef`, `ee36f6a`, `0520e52`, `0b43a16` | Devir notları |
+
+### Makinede (03:10)
+Docker Desktop, postgres (5433), redis (6380) ayakta. API 8787 ve arayüz **KAPALI**. İmaj `agent-rooms/room:dev`
+protokol 7 ile. Kapılar kendilerini temizledi. Eski container'lar `agent-rooms-room-a49ab23a`, `-6d8828fe`
+duruyor (dokunulmadı). `.env`: `APP_BASE_URL` yorum satırı (link isteğin Origin'inden), makinenin LAN IP'si
+28 Eylül'de `10.190.187.98` idi — değişmiş olabilir.
+
+---
+
+## Ayrıntılar — 28/29 Eylül gecesi (kanıtlar ve gerekçeler)
 
 ### ✅ Kendiliğinden sözleşme testi GEÇTİ (4. deneme, ~01:28)
 `bash .gate7a-tmp-contracts/run.sh`, 1. anahtar, oda `90d29233`. Görevlerde "contracts" geçmiyor.
@@ -95,18 +183,7 @@ Frontend kabuk komutu çalıştırabiliyor ([9]'da `sleep 20 && ls web` çalış
 Kerem'e verilen taviz raporu: yukarıdaki 2. madde + yeniden duyuru filtresinin dar penceresi + Hafta 7 dogfood'u hâlâ
 yapılmadı (yol haritası: dogfood yoksa yeni özellik yok — bu gece yalnız düzeltme yapıldı).
 
-### Makinede (~03:00)
-Docker Desktop, postgres, redis ayakta. API 8787 ve arayüz KAPALI. Kapı kendini temizledi. Eski container'lar
-`agent-rooms-room-a49ab23a`, `-6d8828fe` duruyor. İmaj `room:dev` protokol 7 ile.
-
-### Kota (TSİ ~10:00'da sıfırlanır)
-1. proje: `flash-lite` ~7, `3.5-flash` ~10. 2. proje: kapı ~20 istek (`3.5-flash` ağırlıklı) + `flash-lite` 1.
-
-### Sıradaki (TSİ 10:00 sonrası)
-1. **`gate:w7:agent` tekrar** (1. anahtar, yani varsayılan `.env`): [11]'in düzeldiği ve [10]/[13]'ün ölçülmesi.
-   Frontend yine yıkıcı komutu çalıştırmazsa [10]/[13] için seçenekler Kerem'le konuşulacak (ör. o adımları
-   komut çalıştıran modelle koşmak) — **kapı yumuşatılmayacak**; ölçülmeden Hafta 7 kapanmaz.
-2. Adım 16 dogfood (iki kişi) → README "Hafta 7 dogfood notları" + roadmap'te Hafta 7 ✓.
+*(Makine, kota ve sıradaki işler en üstteki "BURADAN BAŞLA" bölümünde — tek kaynak orası.)*
 
 ---
 
@@ -316,14 +393,17 @@ değiştirir.
 | 4 | Redaction ve ikinci izleyici | ✅ `gate:w4` 22/22 |
 | 5 | Yazma yetkisi, kuyruk, kesme | ✅ `gate:w5` 25/25 |
 | 6 | Diff görünümü ve satır yorumu | ✅ `gate:w6` 13/13 · dogfood ✅ |
-| 7 | **İkinci agent ve worktree izolasyonu** | 🔶 **`gate:w7` 93/93 · agent kapısı + dogfood kaldı** |
+| 7 | **İkinci agent ve worktree izolasyonu** | 🔶 **`gate:w7` 93/93 · `gate:w7:agent` 13/3/1 (1 koşum, [10]/[13] ölçülmedi) · dogfood kaldı** |
 
-**436 test**, `npm run typecheck` temiz. Paketler: `protocol`, `redact`, `view`, `gitkit`,
+**471 test** (29 Eylül), `npm run typecheck` temiz. Paketler: `protocol`, `redact`, `view`, `gitkit`,
 `core`, `runner`, `runner-gemini`.
 
 ---
 
-## Hafta 7 — nerede kaldık
+## Hafta 7 — nerede kaldık (24 Eylül — TARİHÇE; güncel sıra en üstte)
+
+> Bu bölüm 24 Eylül'ün planı. 1–3. maddeler yapıldı (ayrı modeller, elle test, 503/429 ekranda +
+> deneme bütçesi), 4. madde 29 Eylül'de ilk kez koşuldu. `.env` artık `AGENT_MODEL=` boş.
 
 **Adım 1–15 ve 17 kod olarak bitti, hepsi push edildi.** 24 Eylül'ün sırası (Kerem ile
 kararlaştırıldı):
@@ -558,7 +638,7 @@ npm run db:up                                     # postgres + redis
 npm run build                                     # paketler
 npm run room:build                                # ODA İMAJI — runner/gitkit değiştiyse ŞART
 ROOM_CONFIG=config/room.week7.yaml node apps/api/dist/index.js    # API 8787
-WEB_HOST=1 WEB_ALLOWED_HOSTS="192.168.1.114,localhost" npm run dev:web   # arayüz 5173
+WEB_HOST=1 WEB_ALLOWED_HOSTS="<LAN IP>,localhost" npm run dev:web   # arayüz 5173 (IP: ipconfig; 28 Eylül 10.190.187.98)
 
 npm run gate / gate:w3 / gate:w4 / gate:w5 / gate:w6   # modelsiz, model isteği harcamaz
 npm run gate:w7                                        # Hafta 7, 93 kontrol, modelsiz
@@ -567,9 +647,9 @@ npm run gate:w7:agent                                  # MODEL İSTER (~20 istek
 node scripts/room-view.mjs <oda> --base <url> --session <çerez>   # CANLI durum
 ```
 
-**Gemini kotası** ücretsiz katmanda model başına günde **20 MODEL İSTEĞİ** — turn değil.
-Tool çağıran tek bir agentic turn modele birkaç kez gidiyor. Pasifik gece yarısı
-(≈ TSİ 10:00) sıfırlanıyor.
+**Gemini kotası** ücretsiz katmanda **proje × model** başına günde **20 MODEL İSTEĞİ** — turn
+değil; `3.5-flash` ayrıca dakikada 5. Tool çağıran tek bir agentic turn modele birkaç kez gidiyor.
+Pasifik gece yarısı (≈ TSİ 10:00) sıfırlanıyor. İki anahtar var (ayrı projeler), kullanımı en üstte.
 
 ---
 
@@ -577,9 +657,9 @@ Tool çağıran tek bir agentic turn modele birkaç kez gidiyor. Pasifik gece ya
 
 Hafta 1–6 tuzakları geçerliliğini koruyor. Bu hafta eklenenler:
 
-1. **`packages/runner*` veya `packages/gitkit` değiştiyse `npm run build` YETMEZ**,
-   `npm run room:build` gerekir. `PROTOCOL_VERSION` bu hafta **4**'e çıktı: bayat imajla
-   agent `stopped`da kalır.
+1. **`packages/runner*`, `packages/gitkit` veya `packages/protocol` değiştiyse `npm run build`
+   YETMEZ**, `npm run room:build` gerekir. `PROTOCOL_VERSION` şu an **7** (29 Eylül): bayat
+   imajla agent `stopped`da kalır.
 2. **Sunucu süreci eski kodu koşar.** `npm run build` sonrası API'yi YENİDEN BAŞLAT. Bugün
    iki kez buna takıldık: bir kere `ROOM_PEERS` boş geldi, bir kere düzeltilmiş projeksiyon
    görünmedi. Port doluysa `taskkill //PID <pid> //F`.
@@ -604,6 +684,17 @@ Hafta 1–6 tuzakları geçerliliğini koruyor. Bu hafta eklenenler:
    numarasıyla `sed 'Nr dosya'` ile ekle. Python `open(..., 'w')` Windows'ta CRLF yazar;
    `.sh` dosyası CRLF olursa bash bozulur (`.gitattributes` repoda düzeltir, çalışma
    kopyasında düzeltmez).
+9. **Testler `@agent-rooms/*` paketlerini `dist`'ten import ediyor.** Şema/projeksiyon
+   değiştirince önce `npm run typecheck` (`tsc -b` derler) ya da `npm run build`; yoksa test
+   ESKİ kodla koşar ve yanlış geçer/düşer (29 Eylül'de bununla kusur bilerek ölçüldü).
+10. **Kapılar derlenmiş koddan koşar.** Kapı çalışırken `npm run build` / `room:build` yapma.
+11. **`TaskStop` betiğin `trap cleanup`'ını çalıştırmaz** — elle: ilgili port (8796/8797),
+    `agent-rooms.room` etiketli container, `room-<id>` volume.
+12. **`.gate7a-tmp-contracts/run.sh` backend turn'ü başarısız olsa da frontend'e geçer** —
+    frontend kotasını korumak için kesici gerekir (29 Eylül'de `backend turn:` satırını
+    bekleyen arka plan betiğiyle yapıldı).
+13. **`npx tsx` projede yok** (npm önbelleğinden indirir). TS'yi elle koşturmak gerekirse
+    scratchpad'e yaz, `npx -y tsx <mutlak yol>`.
 
 ---
 
@@ -627,7 +718,8 @@ Hafta 1–6 tuzakları geçerliliğini koruyor. Bu hafta eklenenler:
 
 1. Bu dosya
 2. `README.md` — özellikle **"Hafta 7 kararları"** bölümü (üç karar, `safe.directory`
-   istisnası, sapmalar, "kapı kendi ölçümünü kirletiyordu")
+   istisnası, sapmalar, **Gemini yeniden denemeleri stderr'den okunuyor — bilinçli sapma**,
+   429 toplam sınırı, "kapı kendi ölçümünü kirletiyordu")
 3. `Downloads/HAFTA-7-GOREV (1).md` — Adım 16 (dogfood) ve DoD listesi
 4. `docs/roadmap.md` — 12 haftalık plan
 5. `docs/week-01.md` … `docs/week-06.md` — hafta hafta ne yapıldı ve **neden**
