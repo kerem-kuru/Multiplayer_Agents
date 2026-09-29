@@ -111,10 +111,12 @@ Bugün kodda değişiklik YOK; yalnız README + bu not. Kerem günü kapattı.
 | `02927e8` | Kapı: Gemini iç tool'ları (`update_topic`) agent eylemi sayılmaz |
 | `5f9ddef`, `ee36f6a`, `0520e52`, `0b43a16` | Devir notları |
 
-### Makinede (29 Eylül ~17:10)
-Docker Desktop, postgres (5433), redis (6380) ayakta. API 8787, arayüz 5173 ve dogfood deneme sunucuları (8090,
-3000) **KAPALI**. İmaj `agent-rooms/room:dev` protokol 7 ile. Dogfood odaları (`0b7a2291` asıl, `f493ad88` deneme,
-`c8616050`, `32d654cf`) ve eski container'lar duruyor (dokunulmadı). Dogfood'un geçici config'i ve entegrasyon
+### Makinede (29 Eylül ~17:15)
+**Hiçbir container çalışmıyor** — hepsi `docker stop` / `docker compose stop` ile DURDURULDU, silinmedi (veri
+ve volume'lar yerinde). Postgres (5433) ve redis (6380) de durdu → ilk iş `npm run db:up`. API 8787, arayüz 5173
+ve dogfood deneme sunucuları (8090, 3000) **KAPALI**. İmaj `agent-rooms/room:dev` protokol 7 ile. Dogfood odaları
+(`0b7a2291` asıl, `f493ad88` deneme, `c8616050`, `32d654cf`) durmuş halde; açılırsa API durmuş container'ı
+kaldırıyor mu, ayrıca görülmedi (Hafta 5'te bu bir borçtu). Gate'ler kendi odalarıyla çalışır, bunlara ihtiyaç yok. Dogfood'un geçici config'i ve entegrasyon
 denemesi oturumun scratchpad'indeydi (repoda değil, kalıcı değil). LAN IP'si 29 Eylül'de `10.183.103.98`.
 
 ---
