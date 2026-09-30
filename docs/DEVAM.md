@@ -1,9 +1,60 @@
-# Kaldığımız yer — 29 Eylül 2026, ~17:10
+# Kaldığımız yer — 30 Eylül 2026, ~22:45
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar. Önce bu ilk bölümü oku;
-altındaki "Ayrıntılar" bölümleri her iddianın kanıtını ve gerekçesini taşıyor.
+altındaki bölümler (29 Eylül ve öncesi) kanıtları, gerekçeleri ve hâlâ geçerli komutları taşıyor.
 
-## ⚠️ BURADAN BAŞLA — 29 Eylül ~17:10
+## ⚠️ BURADAN BAŞLA — 30 Eylül ~22:45
+
+### Neredeyiz
+Hâlâ **Hafta 7**. Açık kalan **tek** şey `gate:w7:agent`'ın tam geçmesi. Geri kalanlar:
+
+| Madde | Durum |
+| --- | --- |
+| İki kişilik dogfood | ✅ **Kerem'in kararıyla sayıldı** (iki hesap, iki cihaz). README'de |
+| Dogfood soru 3 | ✅ **kontrollü ölçüldü** (`scripts/week7-q3-probe.sh`, README "Soru 3"). Agent ötekinin klasörüne yazmayı denemedi, `contracts/`'a istek bıraktı → **Hafta 8 bulgusu: `contracts/` mesaj kutusu gibi kullanılıyor** |
+| Diff'e giren çalışma zamanı dosyaları | ✅ **E yolu**: boş depo tabanı `STARTER_GITIGNORE` ile başlıyor. Canlı probe 28/28. README "Boş depo `.gitignore` ile başlıyor" |
+| Karttaki ham stack trace | ⏭ Kerem: şimdi önemli değil, **Hafta 8 tasarımında** |
+| Tam test paketi | 471/471, typecheck temiz (30 Eylül, E sonrası) |
+| `gate:w7` (modelsiz) | 93/93 (29 Eylül). E'den etkilenmez: iki gate de `kind: local` fixture kullanıyor |
+| **`gate:w7:agent`** | ❌ **ölçülmedi** — 3. gün üst üste Google 503 |
+
+### 30 Eylül'de ne oldu
+- **Sağlık yoklaması** (22:19): 1. anahtar `flash-lite` 200, `3.5-flash` 503, `2.5-flash` 200. 2. anahtar
+  `flash-lite` 200, `3.5-flash` 200, `2.5-flash` 404. 22:23'te 2. anahtar `3.5-flash` yine 200, `flash-lite` 503;
+  22:24'te `flash-lite` 200.
+- **Gate koşumu** (22:24, 2. anahtar, `AGENT_RETRY_BUDGET=5`): iki yoklamada 200 görülmesine rağmen [5]'te frontend
+  (`3.5-flash`) 4×503 + 1× `fetch failed` aldı, `retry_exhausted`. [5]: dosya değişmedi ✓, turn ✗. **[5] ✗ olduğu için
+  koşum kapıyı geçemezdi. Kotayı yakmasın diye [8, 10]'da durduruldu.** Yeni ders: iki kez 200 görmek de yetmiyor.
+- **Durdurulan gate EXIT trap'ini çalıştırmadı.** API (8796), oda container'ı, volume ve `.gate7a-tmp-<pid>` elle
+  temizlendi. Gate'i dışarıdan öldürürsen: `taskkill` ile 8796/5196 portlarındaki süreçler, sonra
+  `docker rm -f` (etiket `agent-rooms.room=<oda>`), `docker volume rm room-<oda>`, geçici klasörü sil.
+- **Soru 3 deneyi** iki koşum, `flash-lite`: 1. koşum (1. anahtar) kurulum hatası yüzünden geçersiz (frontend'in klasörü boştu).
+  2. koşum 2. anahtarla yapıldı. Ayrıntı README'de.
+
+### Kota (30 Eylül ~22:45, tahmin)
+2. anahtar: `3.5-flash` en az 7 istek (2 yoklama + gate'in 5 denemesi), `flash-lite` ~10 (3 yoklama + soru 3'ün
+2. koşumu + durdurulmadan önce gate'in backend'i). 1. anahtar:
+`flash-lite` ~11, `2.5-flash` 1. **1 Ekim TSİ ~10:00'da hepsi sıfırlanıyor.**
+
+### İlk yapılacaklar (sırayla, ağır işleri ASLA paralel koşma)
+1. Docker Desktop açık mı bak, sonra `npm run db:up` (30 Eylül gecesi postgres/redis açık bırakıldı).
+2. **Kerem'e sor: gate'i hangi modelle koşturalım?** 30 Eylül'de iki seçenek sunuldu, karar verilmedi:
+   - **(a)** `GATE_FRONTEND_MODEL=gemini-2.5-flash` (1. anahtar). Kapı aynı kalıyor, sadece ölçen model değişiyor.
+     Taviz: [10] ve [13] modelin "yıkıcı" komutu çalıştırmasını gerektiriyor. Çalıştırmazsa uyarı ya da ✗ yazılır,
+     **yumuşatılmaz**.
+   - **(b)** `3.5-flash` ile, 10:00'dan sonra taze kotayla. Claude'un önerisi buydu. 503 riski aynı.
+3. Yoklama (29 Eylül komutu, `gemini-2.5-flash` eklenmiş) → gate → geçerse `docs/roadmap.md`'de Hafta 7 ✓.
+4. Hafta 8'e geçmeden önce: soru 3 bulgusu (**`contracts/`'a düşen iş istekleri**) defter tasarımına girdi olarak alınacak.
+
+### Kerem'le alınan yeni kararlar (30 Eylül)
+- Tek kişi, iki cihaz, iki hesap → "iki kişi" sayıldı.
+- Diff gürültüsü için **E** seçildi (boş depoya starter `.gitignore`). A ve D reddedildi. B (config'te `ignore:`)
+  kaçış kapısı olarak saklandı ve **ihtiyaç ölçülmeden yazılmayacak**. C Hafta 9–10'a bırakıldı.
+- Ham stack trace Hafta 8 tasarımına ertelendi.
+
+---
+
+## 29 Eylül ~17:10 durumu (eski — yukarıdaki 30 Eylül bölümü geçerli)
 
 ### Neredeyiz (tek paragraf)
 12 haftalık planın **Hafta 7'sindeyiz**. Adım 1–15 ve 17 kod olarak bitti. 29 Eylül öğleden sonra
