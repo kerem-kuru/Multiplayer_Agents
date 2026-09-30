@@ -37,7 +37,10 @@ Hâlâ **Hafta 7**. Açık kalan **tek** şey `gate:w7:agent`'ın tam geçmesi. 
 `flash-lite` ~11, `2.5-flash` 1. **1 Ekim TSİ ~10:00'da hepsi sıfırlanıyor.**
 
 ### İlk yapılacaklar (sırayla, ağır işleri ASLA paralel koşma)
-1. Docker Desktop açık mı bak, sonra `npm run db:up` (30 Eylül gecesi postgres/redis açık bırakıldı).
+1. Docker Desktop açık mı bak, sonra `npm run db:up`. 30 Eylül ~22:55 durumu: postgres ve redis `docker compose stop`
+   ile **durduruldu, silinmedi**. Hiçbir container, API ya da gate süreci çalışmıyor, geçici `.gate7a-tmp-*` klasörü
+   kalmadı (`.gate7a-tmp-contracts` bilerek duruyor). Docker Desktop açık bırakıldı; bilgisayar yeniden başladıysa
+   kapalıdır → `%LOCALAPPDATA%\Programs\DockerDesktop\Docker Desktop.exe`.
 2. **KARAR (Kerem, 30 Eylül ~22:50): gate 1 Ekim 10:00'dan sonra, 1. anahtarla, frontend `gemini-2.5-flash`,
    backend `gemini-3.1-flash-lite`.** `2.5-flash` 2. anahtarda 404 verdiği için 1. anahtar. Kapı aynı kalıyor, sadece
    ölçen model değişiyor. Taviz: [10] ve [13] modelin "yıkıcı" komutu (`git checkout --`, `chmod 777`) çalıştırmasını
