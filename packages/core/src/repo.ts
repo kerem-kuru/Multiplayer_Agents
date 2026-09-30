@@ -43,6 +43,32 @@ const IDENT = [
 
 export const CENTRAL_REPO = "/room/repo.git";
 
+/**
+ * Boş depo tabanının `.gitignore`'u — YALNIZ `repo.kind === "empty"` için.
+ *
+ * O depoyu biz yaratıyoruz, henüz kimsenin projesi değil; ilk commit'e makul bir
+ * başlangıç `.gitignore`'u koymak `create-next-app`in yaptığının aynısı. Gerçek
+ * bir depoya (`local`, `git`) DOKUNULMAZ, onun kendi `.gitignore`'u geçerli.
+ *
+ * 29 Eylül dogfood'u: backend sunucusunu kendi klasöründe başlattı ve
+ * `server.pid`, `output.log`, `database.sqlite` diff'e agent'ın işi gibi girdi.
+ * Aynı yolu iki agent yazarsa `path_overlap` sahte çakışma da üretir (Hafta 6'daki
+ * `GEMINI.md` gibi).
+ *
+ * Neden `DEFAULT_EXCLUDES`'a (`info/exclude`) eklenmedi: o liste bizim kodumuzda
+ * gizli durur ve hangi dosyanın çalışma zamanı olduğunu projeye bakmadan tahmin
+ * eder. Bu dosya ise taban commit'te, diff'te görünür; agent da insan da tek
+ * satırla düzeltir.
+ */
+export const STARTER_GITIGNORE = [
+  "node_modules/",
+  ".env",
+  "*.log",
+  "*.pid",
+  "*.sqlite",
+  "*.sqlite3",
+];
+
 export class RepoError extends Error {
   constructor(step: string, detail: string) {
     super(`depo kurulumu başarısız (${step}): ${detail.trim().slice(0, 500)}`);
@@ -130,12 +156,15 @@ export async function initCentralRepo(opts: {
   const repo = config.repo;
 
   if (repo.kind === "empty") {
-    // Boş depo + TEK boş başlangıç commit'i. Çalışma ağacı gerekmiyor:
-    // `mktree` boş ağacı, `commit-tree` onun commit'ini üretiyor.
+    // Boş depo + TEK başlangıç commit'i, içinde yalnız `.gitignore`. Çalışma
+    // ağacı gerekmiyor: `hash-object` blob'u, `mktree` ağacı, `commit-tree`
+    // commit'i üretiyor.
+    const lines = STARTER_GITIGNORE.map((l) => `'${l}'`).join(" ");
     const script = [
       INTEGRATOR_UMASK,
       `git init --bare --initial-branch=main ${CENTRAL_REPO} >/dev/null`,
-      `TREE=$(git -C ${CENTRAL_REPO} mktree </dev/null)`,
+      `BLOB=$(printf '%s\\n' ${lines} | git -C ${CENTRAL_REPO} hash-object -w --stdin)`,
+      `TREE=$(printf '100644 blob %s\\t.gitignore\\n' "$BLOB" | git -C ${CENTRAL_REPO} mktree)`,
       `COMMIT=$(${IDENT} git -C ${CENTRAL_REPO} commit-tree $TREE -m "oda tabanı")`,
       `git -C ${CENTRAL_REPO} update-ref refs/heads/main $COMMIT`,
       "echo $COMMIT",

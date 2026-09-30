@@ -12,7 +12,7 @@ import YAML from "yaml";
 process.loadEnvFile?.(".env");
 
 const { RoomConfig } = await import("@agent-rooms/protocol");
-const { openRoom, closeRoom, execCapture, removeRoomVolume, CENTRAL_REPO } = await import(
+const { openRoom, closeRoom, execCapture, removeRoomVolume, CENTRAL_REPO, STARTER_GITIGNORE } = await import(
   "@agent-rooms/core"
 );
 
@@ -143,8 +143,33 @@ if (rootGit.exitCode !== 0 && /dubious ownership|detected dubious/i.test(rootGit
   no(`root agent deposunu açtı (kod ${rootGit.exitCode}): ${(rootGit.stdout + rootGit.stderr).trim().slice(0, 160)}`);
 }
 
+// --- 8) boş depo tabanı .gitignore taşıyor (29 Eylül dogfood bulgusu) -------
+// Yalnız `repo.kind === "empty"` için; bu probe room.week7.yaml'ı (repo yok) kullanıyor.
+const baseFiles = await out("rooms-integrator", `git -C ${CENTRAL_REPO} ls-tree --name-only ${baseSha}`);
+if (baseFiles === ".gitignore") ok("taban commit'te yalnız .gitignore var");
+else no(`taban commit ağacı: "${baseFiles}", beklenen ".gitignore"`);
+
+const ignoreBody = await out("rooms-integrator", `git -C ${CENTRAL_REPO} show ${baseSha}:.gitignore`);
+if (ignoreBody === STARTER_GITIGNORE.join("\n")) ok(`.gitignore içeriği STARTER_GITIGNORE (${STARTER_GITIGNORE.length} satır)`);
+else no(`.gitignore içeriği farklı: ${JSON.stringify(ignoreBody)}`);
+
+// Dogfood'da diff'e giren üç çalışma zamanı dosyası + bir gerçek dosya. Checkpoint
+// `add -A` ile ağaç çıkarıyor; `--dry-run` aynı kuralla neyi alacağını söylüyor.
+{
+  const dir = "/room/worktrees/backend";
+  const r = await sh(
+    "agent-backend",
+    `cd ${dir} && echo 1 > server.pid && echo x > output.log && echo x > database.sqlite && echo x > server.js && ` +
+      `git add -A --dry-run && rm -f server.pid output.log database.sqlite server.js`,
+  );
+  const added = r.stdout.trim().split("\n").filter(Boolean);
+  if (r.exitCode === 0 && added.length === 1 && added[0] === "add 'server.js'") {
+    ok("add -A yalnız server.js'i alıyor — server.pid, output.log, database.sqlite dışarıda");
+  } else no(`add -A çıktısı (kod ${r.exitCode}): ${JSON.stringify(r.stdout + r.stderr)}`);
+}
+
 console.log("");
-console.log(fail === 0 ? "ADIM 4 KABUL: GEÇTİ" : `ADIM 4 KABUL: ${fail} KONTROL DÜŞTÜ`);
+console.log(fail === 0 ? "ADIM 4 KABUL: GEÇTİ": `ADIM 4 KABUL: ${fail} KONTROL DÜŞTÜ`);
 
 await closeRoom({ roomId: result.room.id, actor });
 await removeRoomVolume(result.room.id);
