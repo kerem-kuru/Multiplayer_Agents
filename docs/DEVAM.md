@@ -38,12 +38,17 @@ Hâlâ **Hafta 7**. Açık kalan **tek** şey `gate:w7:agent`'ın tam geçmesi. 
 
 ### İlk yapılacaklar (sırayla, ağır işleri ASLA paralel koşma)
 1. Docker Desktop açık mı bak, sonra `npm run db:up` (30 Eylül gecesi postgres/redis açık bırakıldı).
-2. **Kerem'e sor: gate'i hangi modelle koşturalım?** 30 Eylül'de iki seçenek sunuldu, karar verilmedi:
-   - **(a)** `GATE_FRONTEND_MODEL=gemini-2.5-flash` (1. anahtar). Kapı aynı kalıyor, sadece ölçen model değişiyor.
-     Taviz: [10] ve [13] modelin "yıkıcı" komutu çalıştırmasını gerektiriyor. Çalıştırmazsa uyarı ya da ✗ yazılır,
-     **yumuşatılmaz**.
-   - **(b)** `3.5-flash` ile, 10:00'dan sonra taze kotayla. Claude'un önerisi buydu. 503 riski aynı.
-3. Yoklama (29 Eylül komutu, `gemini-2.5-flash` eklenmiş) → gate → geçerse `docs/roadmap.md`'de Hafta 7 ✓.
+2. **KARAR (Kerem, 30 Eylül ~22:50): gate 1 Ekim 10:00'dan sonra, 1. anahtarla, frontend `gemini-2.5-flash`,
+   backend `gemini-3.1-flash-lite`.** `2.5-flash` 2. anahtarda 404 verdiği için 1. anahtar. Kapı aynı kalıyor, sadece
+   ölçen model değişiyor. Taviz: [10] ve [13] modelin "yıkıcı" komutu (`git checkout --`, `chmod 777`) çalıştırmasını
+   gerektiriyor. Çalıştırmazsa uyarı ya da ✗ yazılır, **yumuşatılmaz**; o durumda Kerem'le konuşulur. Not: `2.5-flash`
+   29 Eylül dogfood'unda 10×503 vermişti, 30 Eylül 22:19'da 200. Tek 200 bir şey kanıtlamıyor.
+3. Önce 1. anahtarda `2.5-flash` ve `flash-lite` için birkaç dakika arayla iki yoklama (29 Eylül komutuna
+   `gemini-2.5-flash` ekle), sonra gate:
+   ```bash
+   GATE_FRONTEND_MODEL=gemini-2.5-flash AGENT_RETRY_BUDGET=5 npm run gate:w7:agent
+   ```
+   (`.env`'deki `GEMINI_API_KEY` zaten 1. anahtar.) Geçerse README'ye model sapması yazılır ve `docs/roadmap.md`'de Hafta 7 ✓.
 4. Hafta 8'e geçmeden önce: soru 3 bulgusu (**`contracts/`'a düşen iş istekleri**) defter tasarımına girdi olarak alınacak.
 
 ### Kerem'le alınan yeni kararlar (30 Eylül)
