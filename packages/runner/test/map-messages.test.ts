@@ -116,6 +116,28 @@ describe("SDK mesajı → event", () => {
     const e = r.events[0]!;
     expect(e.type === "turn.completed" && e.payload.subtype).toBe("success");
     expect(e.type === "turn.completed" && e.payload.costUsd).toBeCloseTo(0.0123);
+    expect(e.type === "turn.completed" && "models" in e.payload).toBe(false);
+    assertWritable(r.events);
+  });
+
+  it("result.modelUsage → turn.completed.models (yardımcı modeller dahil)", () => {
+    const r = mapMessage(
+      {
+        type: "result",
+        subtype: "success",
+        num_turns: 1,
+        duration_ms: 900,
+        total_cost_usd: 0.001,
+        usage: { input_tokens: 10, output_tokens: 2 },
+        modelUsage: { "claude-sonnet-5-5": { inputTokens: 10 }, "claude-haiku-4-5-20251001": { inputTokens: 3 } },
+      },
+      ctx,
+    );
+    const e = r.events[0]!;
+    expect(e.type === "turn.completed" && e.payload.models).toEqual([
+      "claude-sonnet-5-5",
+      "claude-haiku-4-5-20251001",
+    ]);
     assertWritable(r.events);
   });
 

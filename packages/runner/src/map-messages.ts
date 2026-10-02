@@ -142,6 +142,8 @@ export function mapMessage(msg: unknown, ctx: MapContext): MapResult {
           durationMs: num(msg.duration_ms),
           costUsd: num(msg.total_cost_usd),
           usage: isRec(msg.usage) ? msg.usage : {},
+          // GERÇEKTE çalışan model(ler) — yardımcı modeller de girebilir (bkz. protokol 8).
+          ...(isRec(msg.modelUsage) ? { models: Object.keys(msg.modelUsage) } : {}),
         },
       } as NewRoomEvent);
       return { events };

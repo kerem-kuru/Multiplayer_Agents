@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { CommentView, TurnItem, TurnView } from "@agent-rooms/view";
-import { formatTool, retryLabel, stripAnsi, summarizeTurn } from "@agent-rooms/view";
+import { formatTool, modelMismatch, retryLabel, stripAnsi, summarizeTurn } from "@agent-rooms/view";
 
 /**
  * Küratörlü akış — kağıt malzemesi.
@@ -61,6 +61,34 @@ function Outcome({ turn }: { turn: TurnView }) {
     <span style={{ color: "var(--ink-soft)" }}>
       ● tamamlandı · {dur(o.durationMs)}
       {cost}
+    </span>
+  );
+}
+
+/**
+ * GERÇEKTE çalışan model; istenenden farklıysa UYARI (protokol 8).
+ *
+ * 3 Ekim: Gemini CLI `-m gemini-3.8-flash` alıp istekleri `3.5-flash`'a gönderiyordu.
+ * Event log istenen modeli yazıyordu, ekran hiç model göstermiyordu — üç gate koşumu
+ * yanlış modelle yapıldı ve kimse görmedi. Model bilinmiyorsa (turn sürüyor, eski log)
+ * hiçbir şey yazılmaz: tahmin göstermek yalan olur.
+ */
+function TurnModel({ model }: { model: TurnView["model"] }) {
+  const mismatch = modelMismatch(model);
+  if (mismatch) {
+    return (
+      <span
+        style={{ color: "var(--fail)", fontSize: 12, whiteSpace: "nowrap" }}
+        title="Runtime istenen modeli kullanmadı — sağlayıcının kullanım raporuna göre çalışan model(ler) bunlar."
+      >
+        ⚠ istenen {mismatch.requested} · çalışan {mismatch.actual.join(", ")}
+      </span>
+    );
+  }
+  if (!model.actual || model.actual.length === 0) return null;
+  return (
+    <span style={{ color: "var(--ink-soft)", fontSize: 12, whiteSpace: "nowrap" }}>
+      {model.actual.join(", ")}
     </span>
   );
 }
@@ -344,6 +372,7 @@ function TurnBlock({
         <span style={{ color: "var(--ink-soft)", fontSize: 12, whiteSpace: "nowrap" }}>
           {turn.actor}
         </span>
+        <TurnModel model={turn.model} />
         {summary.changedFiles > 0 && (
           <span style={{ color: "var(--run)", fontSize: 12, whiteSpace: "nowrap" }}>
             {summary.changedFiles} dosya

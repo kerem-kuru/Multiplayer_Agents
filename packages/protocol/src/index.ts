@@ -28,4 +28,9 @@ export * from "./stream.js";
  * 7: `turn.retrying.waitMs` — bekleme sureli 429 art arda butceden dusmez,
  * `attempt` 0 olabilir (29 Eylul). Bayat imaj 429'da saglikli turn'u oldururdu.
  */
-export const PROTOCOL_VERSION = 7;
+/**
+ * 8: `turn.completed.models` — saglayicinin kullanim raporundaki GERCEKTE calisan
+ * modeller (3 Ekim). Gemini CLI `-m` ile istenen flash modelini sessizce kendi
+ * varsayilanina ceviriyordu; `turn.started.model` istenen modeli yaziyordu.
+ */
+export const PROTOCOL_VERSION = 8;

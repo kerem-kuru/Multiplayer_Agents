@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { NewRoomEvent, roomRelativePath } from "@agent-rooms/protocol";
 import {
@@ -6,6 +8,7 @@ import {
   mapStreamLine,
   resolveGeminiTools,
   type MapContext,
+  type RetrySignal,
 } from "../src/map-stream.js";
 
 /**
@@ -133,6 +136,38 @@ describe("Gemini stream-json → event", () => {
     // Gemini USD maliyet vermiyor — 0 "bilmiyoruz" demek.
     expect(e.type === "turn.completed" && e.payload.costUsd).toBe(0);
     assertWritable(r.events);
+  });
+
+  /**
+   * 3 Ekim, ölçüldü: CLI 0.60.0 `-m gemini-3.8-flash` → `init.model: gemini-3.8-flash`,
+   * `stats.models: { gemini-3.5-flash }`. Gerçekte çalışan model `models`'e girer.
+   */
+  it("result → turn.completed.models: CLI'ın raporundaki GERÇEK model", () => {
+    const init = mapStreamLine({ type: "init", session_id: "s", model: "gemini-3.8-flash" }, ctx()).events[0]!;
+    expect(init.type === "turn.started" && init.payload.model).toBe("gemini-3.8-flash");
+    const r = mapStreamLine(
+      {
+        type: "result",
+        status: "success",
+        stats: {
+          total_tokens: 10997,
+          input_tokens: 10796,
+          output_tokens: 1,
+          duration_ms: 2758,
+          tool_calls: 0,
+          models: { "gemini-3.5-flash": { total_tokens: 10997, input_tokens: 10796, output_tokens: 1 } },
+        },
+      },
+      ctx(),
+    );
+    const e = r.events[0]!;
+    expect(e.type === "turn.completed" && e.payload.models).toEqual(["gemini-3.5-flash"]);
+    assertWritable(r.events);
+  });
+
+  it("stats.models yoksa models alanı yazılmaz (bilmiyoruz)", () => {
+    const e = mapStreamLine({ type: "result", status: "success", stats: { duration_ms: 1 } }, ctx()).events[0]!;
+    expect(e.type === "turn.completed" && "models" in e.payload).toBe(false);
   });
 
   /**
@@ -401,5 +436,44 @@ describe("createRetryTracker", () => {
       },
     };
     expect(() => NewRoomEvent.parse(e)).not.toThrow();
+  });
+});
+
+/**
+ * Gemini CLI 0.62.0 stderr'i — GERÇEK çıktı, kırpılmadan (3 Ekim, sahte sunucuyla
+ * ölçüldü: `scripts/probes/fake-503-429.mjs`). 0.60.0 → 0.62.0 yükseltmesinde
+ * `Attempt` / `Retrying after` biçimi değişmedi; yeni olan `[STARTUP] ...` satırları
+ * kota bloğunun arasına da düşebiliyor. Parçalar rastgele bölünerek verilir.
+ */
+describe("CLI 0.62.0 stderr (ölçülmüş)", () => {
+  const fixture = (name: string): string =>
+    readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url)), "utf8");
+  const feedChunked = (text: string, budget: number): RetrySignal[] => {
+    const t = createRetryTracker(budget);
+    const out: RetrySignal[] = [];
+    for (let i = 0; i < text.length; i += 97) out.push(...t.feed(text.slice(i, i + 97)));
+    out.push(...t.feed("\n"));
+    return out;
+  };
+
+  it("503: üç deneme, art arda sayılır, üçüncüsü bütçeyi doldurur", () => {
+    const s = feedChunked(fixture("cli-0.62.0-stderr-503.log"), 3);
+    expect(s.map((x) => [x.attempt, x.status, x.waitMs, x.exhausted])).toEqual([
+      [1, 503, null, false],
+      [2, 503, null, false],
+      [3, 503, null, true],
+    ]);
+    // Stack trace ve JSON gövdesi ekrana gitmez.
+    expect(s[0]!.detail).not.toMatch(/ApiError|\{/);
+  });
+
+  it("429 bekleme süreli: art arda sayılmaz, süre okunur, [STARTUP] satırı araya girse de", () => {
+    const s = feedChunked(fixture("cli-0.62.0-stderr-429.log"), 3);
+    expect(s.map((x) => [x.attempt, x.status, x.waitMs, x.exhausted])).toEqual([
+      [0, 429, 5670, false],
+      [0, 429, 10138, false],
+      [0, 429, 22107, false],
+    ]);
+    expect(s[2]!.total).toBe(3);
   });
 });

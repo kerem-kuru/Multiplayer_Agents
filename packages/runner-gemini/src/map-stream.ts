@@ -97,7 +97,8 @@ export const RETRY_TOTAL_FACTOR = 3;
  * Gemini CLI stderr'inden başarısız istekleri sayar (24 Eylül, ölçüldü).
  *
  * CLI 503/429'da sessizce tekrar deniyor ve her deneme kotadan düşüyor. İki
- * satır biçimi var (0.60.0, sahte 503 sunucusuyla ölçüldü):
+ * satır biçimi var (0.60.0, sahte 503 sunucusuyla ölçüldü; 0.62.0'da birebir aynı,
+ * 3 Ekim — `[STARTUP] …` satırları araya girebiliyor, tanınmayan satır atlanır):
  *
  *   Attempt 1 failed with status 503. Retrying with backoff... _ApiError: {...}
  *   Attempt 3 failed: This model is currently experiencing high demand. ... Max attempts reached
@@ -458,6 +459,9 @@ export function mapStreamLine(line: unknown, ctx: MapContext): MapResult {
           // demek; fiyat tablosu Hafta 11'de.
           costUsd: 0,
           usage: stats,
+          // GERÇEKTE çalışan model(ler): CLI `-m`'i sessizce değiştirebiliyor,
+          // `init.model` istenen modeli yazıyor (bkz. protokol 8).
+          ...(isRec(stats.models) ? { models: Object.keys(stats.models) } : {}),
         },
       } as NewRoomEvent);
       return { events, finished: { ok } };

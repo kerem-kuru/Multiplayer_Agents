@@ -189,6 +189,14 @@ export const TurnCompleted = ev(
     durationMs: z.number().nonnegative(),
     costUsd: z.number().nonnegative(),
     usage: z.record(z.unknown()),
+    /**
+     * Sağlayıcının kullanım raporundaki modeller — GERÇEKTE çalışan, istenen değil.
+     *
+     * `turn.started.model` CLI'ın iddiası: Gemini CLI 0.60.0 `-m gemini-3.8-flash`
+     * alıp `init`'te onu yazıyor, istekleri ise `gemini-3.5-flash`'a gönderiyordu
+     * (3 Ekim, ölçüldü). Opsiyonel: eski log'larda yok, "bilmiyoruz" demek.
+     */
+    models: z.array(z.string()).optional(),
   }),
 );
 

@@ -9,6 +9,6 @@
   "dependencies": {
     "@agent-rooms/gitkit": "*",
     "@agent-rooms/protocol": "*",
-    "@google/gemini-cli": "0.60.0"
+    "@google/gemini-cli": "0.62.0"
   }
 }

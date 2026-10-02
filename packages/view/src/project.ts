@@ -87,6 +87,15 @@ export interface TurnView {
   actor: string;
   startedAt: string;
   sdkSessionId: string | null;
+  /**
+   * İstenen ve GERÇEKTE çalışan model (protokol 8).
+   *
+   * `requested`: `turn.started.model` — runtime'ın iddiası. `actual`:
+   * `turn.completed.models` — sağlayıcının kullanım raporu; turn bitmeden ya da
+   * eski log'da null ("bilmiyoruz"). Gemini CLI istenen flash modelini sessizce
+   * kendi varsayılanına çeviriyordu (3 Ekim): ikisi ayrı tutulmazsa ekran yalan söyler.
+   */
+  model: { requested: string | null; actual: string[] | null };
   items: TurnItem[];
   outcome: TurnOutcome;
   /**
@@ -493,6 +502,7 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
           actor: actorLabel(e.actor),
           startedAt: e.ts,
           sdkSessionId: null,
+          model: { requested: null, actual: null },
           items: [],
           outcome: { kind: "running" },
           retry: null,
@@ -503,7 +513,10 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
         break;
       }
       case "turn.started":
-        if (turn) turn.sdkSessionId = typeof payload.sdkSessionId === "string" ? payload.sdkSessionId : null;
+        if (turn) {
+          turn.sdkSessionId = typeof payload.sdkSessionId === "string" ? payload.sdkSessionId : null;
+          turn.model.requested = typeof payload.model === "string" && payload.model ? payload.model : null;
+        }
         break;
       case "turn.retrying":
         if (turn) {
@@ -603,6 +616,9 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
             durationMs: Number(payload.durationMs ?? 0),
             costUsd: Number(payload.costUsd ?? 0),
           };
+          if (Array.isArray(payload.models)) {
+            turn.model.actual = payload.models.filter((m): m is string => typeof m === "string");
+          }
         }
         if (agent.status === "busy") agent.status = "idle";
         if (agent.running?.messageId === messageId) agent.running = null;
@@ -783,4 +799,20 @@ export function project(events: StoredEvent[], base?: RoomView): RoomView {
   }
 
   return view;
+}
+
+/**
+ * İstenen model gerçekte çalışanlar arasında DEĞİLSE fark (protokol 8). Null: fark yok
+ * ya da bilinmiyor.
+ *
+ * "Listede yok" ölçütü bilerek gevşek: Claude kullanım raporuna yardımcı modelleri de
+ * yazıyor (ana model + küçük model), yani "tek model ve aynısı" ölçütü sahte uyarı
+ * üretirdi. `auto` bir istek değil, seçimi sağlayıcıya bırakmak — fark sayılmaz.
+ */
+export function modelMismatch(
+  model: TurnView["model"],
+): { requested: string; actual: string[] } | null {
+  const { requested, actual } = model;
+  if (!requested || requested === "auto" || !actual || actual.length === 0) return null;
+  return actual.includes(requested) ? null : { requested, actual };
 }
