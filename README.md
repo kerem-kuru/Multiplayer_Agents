@@ -874,8 +874,9 @@ sınırlamıyor: "Max attempts reached"ten sonra model fallback'i sayacı sıfı
 
 **Risk:** CLI sürümü satır biçimini değiştirirse sayaç kör olur ve CLI kotayı yine sessizce
 yakar. Önlemler:
-- `@google/gemini-cli` `0.60.0`'a tam sabit.
-- Testler gerçek log satırlarıyla (`packages/runner-gemini/test/map-stream.test.ts`).
+- `@google/gemini-cli` `0.62.0`'a tam sabit (3 Ekim'e kadar `0.60.0`, aşağıdaki "CLI 0.62.0'a yükseltme").
+- Testler gerçek log satırlarıyla (`packages/runner-gemini/test/map-stream.test.ts`). 0.62.0'ın stderr'i
+  kırpılmadan fixture olarak duruyor (`test/fixtures/cli-0.62.0-stderr-{503,429}.log`).
 - Yalnızca süre satırı değişirse davranış temkinliye düşer: 429 bütçeden sayılır.
 - **CLI güncellemesi = bu satırların gerçek stderr ile yeniden ölçülmesi.** Sürüm testlerle
   birlikte yükseltilir, tek başına değil.
@@ -883,6 +884,33 @@ yakar. Önlemler:
 **Çıkış yolu:** CLI yapılandırılmış çıktıya yeniden deneme olayı eklerse ona geçmek, ya da
 Gemini runner'ını CLI yerine doğrudan API/SDK ile yazmak (Claude runner'ı gibi). İkisi de
 bugün kapsam dışı.
+
+### CLI 0.62.0'a yükseltme ve "çalışan model" (3 Ekim)
+
+**Neden:** CLI 0.60.0, `-m` ile verilen her flash modelini sessizce `gemini-3.5-flash`'a
+çeviriyordu. `init` olayı istenen modeli yazıyor, kullanım raporu (`stats.models`) ise gerçekte
+çalışanı. Kaynak (bundle `resolveModel`): `useGemini3_5Flash && isFlashModel(…)` →
+varsayılan flash. Bayrak hesap düzeyinde (`hasGemini35FlashGAAccess`), ayarla kapatılamıyor.
+Ölçüldü: `-m gemini-3.8-flash` → `stats.models: gemini-3.5-flash`. `gate:w7:agent`'ın üç
+koşumu bu yüzden istenen modelle yapılmadı ve ekran bunu göstermedi.
+
+| Karar | Gerekçe |
+| --- | --- |
+| CLI `0.62.0` | `-m gemini-3.8-flash` gerçekten `3.8-flash`'a gidiyor (ölçüldü). |
+| `turn.completed.models` (protokol 8), kartta çalışan model, farklıysa ⚠ | **0.62.0 da aynı zorlamayı yapıyor**, yalnız hedefi değişti: `-m gemini-3.5-flash` → `stats.models: gemini-3.8-flash` (`hasLatestFlashGAAccess`). Yükseltme "config'teki model çalışır" sözünü geri getirmiyor. Ürün yapabileceği tek dürüst şeyi yapıyor: sağlayıcının raporuna göre ne çalıştığını gösteriyor. Claude'da da aynı alan dolu (`modelUsage`). |
+| Fark ölçütü: istenen, çalışanlar listesinde yok | Claude raporuna yardımcı modelleri de yazıyor. "Tek model ve aynısı" ölçütü sahte uyarı üretirdi. `auto` istek sayılmaz. |
+
+**Yeniden ölçüm (stderr kazıma istisnasının şartı):** 0.60.0 ve 0.62.0 aynı sahte sunucuya
+(`scripts/probes/fake-503-429.mjs`) karşı koşturuldu. `Attempt N failed with status 503.
+Retrying with backoff...` ve çok satırlı kota bloğu (`Please retry in …` / `Retrying after N ms`)
+birebir aynı. Yeni olan `[STARTUP] …` satırları kota bloğunun arasına da düşebiliyor. Sayaç
+tanımadığı satırı atladığı için etkilenmiyor, test gerçek çıktıyla bunu gösteriyor.
+**Ölçülmeyen:** "Max attempts reached"ten sonraki fallback döngüsü (400 sn'lik ölçüm tekrarlanmadı).
+Bütçe (art arda 3) oraya varmadan CLI'ı durduruyor.
+
+**Açık kalan:** Kullanıcı oda config'inde bir flash modeli seçerse CLI yine kendi seçtiğini
+koşturuyor. Ürün bunu artık gösteriyor ama engelleyemiyor. Engelleme ancak Gemini runner'ının
+CLI yerine API/SDK ile yazılmasıyla mümkün (yukarıdaki "Çıkış yolu").
 
 ### Bekleme süreli 429 turn başına toplam sınıra sayılıyor
 

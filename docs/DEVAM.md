@@ -1,9 +1,100 @@
-# Kaldığımız yer — 30 Eylül 2026, ~22:45
+# Kaldığımız yer — 3 Ekim 2026, ~01:35
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar. Önce bu ilk bölümü oku;
 altındaki bölümler (29 Eylül ve öncesi) kanıtları, gerekçeleri ve hâlâ geçerli komutları taşıyor.
 
-## ⚠️ BURADAN BAŞLA — 30 Eylül ~22:45
+## ⚠️ BURADAN BAŞLA — 3 Ekim ~01:35
+
+### ▶ Sıradaki (Kerem oturumu 3 Ekim ~01:35'te kapattı)
+1. `npm run db:up` (postgres/redis durduruldu, silinmedi). İmaj güncel: CLI 0.62.0, protokol 8.
+2. **[11] teşhisi:** `gate:w7:agent`'ı bir kez koş (`GATE_FRONTEND_MODEL=gemini-3.8-flash`, anahtar 2). [11] bitince
+   temizlikten ÖNCE frontend container'ındaki Gemini oturum dosyasını (`$HOME/.gemini/tmp/*/chats/`) kopyala: tool'un
+   döndürdüğü hata metni ve modelin son cevabı orada. Gate script'ine dokunma, dışarıdan oku.
+3. Kerem'e sorulacak: config modeli çalışmıyor (CLI flash/flash-lite'ı zorluyor) → kabul mü, runner'ı API ile yazmak mı (büyük iş).
+4. Commit'ler yerel; **push edilmedi**.
+
+### 🔔 3 Ekim eki — KARAR (Kerem): ücretli Gemini anahtarına geçiliyor
+- 1 ve 2 Ekim'de hiçbir şey koşulmadı (commit yok). Aşağıdaki "1 Ekim, 2.5-flash" planı **bu kararla değişti**.
+- Kerem Gemini API için kredi alıyor. Gate ve dogfood ölçümleri bundan sonra ücretli anahtarla yapılacak.
+  Gerekçe: ücretsiz katmanda 503 ve 20 isteklik kota gate'i üç gündür ölçtürmüyor. Zayıf modelle ölçmek de
+  [5], [10] ve [13] kontrollerini ve Hafta 8 bulgularını (soru 3) modele bağımlı bırakıyor.
+- Varsayılan: gate **oda config'indeki modellerle** koşulur (frontend `3.5-flash`, backend `flash-lite`). Böylece
+  model sapması kalmaz. Ücretli anahtar hangi `.env` değişkenindeyse komutun ortamına o verilir.
+- Ücretli anahtarla ilk iş: sağlık yoklaması, sonra `gate:w7:agent`, sonra soru 3'ü güçlü modelle bir kez daha
+  koşmak (bulgu modelden bağımsız mı?).
+- **Taviz kontrolü:** Ücretli anahtar yalnız geliştirme ve ölçüm ortamı için. Ürün ücretsiz katman kullanıcısını
+  desteklemeye devam ediyor: 429 "retry in Ns" işleme, `AGENT_RETRY_BUDGET` ve kota hata metni **kaldırılmayacak**.
+  503 ücretli katmanda da görülebilir. Ölçülmeden "bitti" denmeyecek.
+- **Anahtar: `GEMINI_API_KEY_2` artık ücretli** (Kerem, 3 Ekim). Doğrulama: `3.5-flash`'a 15 sn'de 7 istek, 7×200
+  (ücretsiz katman dakikada 5'te 429 verirdi). Komut ortamına:
+  `GEMINI_API_KEY="$(grep ^GEMINI_API_KEY_2= .env | cut -d= -f2- | tr -d '\r\" ')"`.
+- **`gate:w7:agent` koşum (3 Ekim ~00:18, anahtar 2, config modelleri, deneme hakkı varsayılan 3): 14 geçti / 2 kaldı / 1 uyarı.**
+  Hiç 503/429 yok (`turn.retrying` 0), 10 turn tamamlandı, 0 başarısız. Token: girdi ~306k (çoğu önbellekli), çıktı ~1.2k.
+  - **İlk kez modelle ölçüldü ve geçti:** [5] (isError, sha256 aynı), [8], [9], **[10]** (`git checkout --` çalıştı, cleared),
+    [12], **[13]** (chmod 777 → violation fixed, 750), Playwright [17,18,21] 2 passed.
+  - Uyarı: [5] çıktıda "Permission denied" yok (bilinen: Gemini tool çıktısını vermiyor).
+  - **✗ [11] (iki kontrol): yalnız backend `contract.changed` yazdı, `contracts_race` yok.** Neden (event log, oturum
+    `c5bc52fa`): frontend `read_file /room/contracts/api.md` → dosya henüz yok → `isError` → model **boş cevap** döndü
+    (turn çıktısı 25 token = yalnız tool çağrısı), yazmadı, metin yok, turn `success`. CLI hatayı modele iletiyor ([5]'te
+    hatadan sonra 2 adım + 320 token). **Ürün değil model davranışı; kapı yumuşatılmadı, ✗ kaldı.**
+  - **Hafta 8 için ürün bulgusu:** hiçbir şey yapmayan ve hiçbir şey söylemeyen turn kartta "başarılı" görünüyor.
+- **2. koşum (aynı ayarlar, istem değişmedi, ~00:28): 12 geçti / 4 kaldı / 1 uyarı.** ✗ [10] ×2 (frontend
+  `src/shared.js`'e yazmadı → overlap yok; geri alma turn'ünde yalnız `update_topic` çağırıp durdu), ✗ [11] ×2 (aynı).
+  Geçenler: [5], [8], [9], [12], [13], Playwright. 503/429 yine yok. Oturum `e0272441`.
+- **TEŞHİS DÜZELTMESİ — "hatadan sonra boş cevap" değil:** 2. koşumda frontend'in `read_file`'ı **başarılıydı**
+  (`isError: false`) ve yine sessiz bitti. Örüntü: **`3.5-flash` ilk tool çağrısından sonra boş cevap dönüp turn'ü
+  bitiriyor** (metin yok, `success`). Model ikinci kez ÇAĞRILIYOR: tool'suz turn ≈12k girdi token (1 istek), sessiz
+  turn'ler 24–26k (2 istek) → CLI sormuş, model boş dönmüş. Sıklık: 1. koşum 1/6, 2. koşum 3/5 frontend turn'ü.
+  Backend (`flash-lite`) iki koşumda 0 sessiz turn. CLI `0.60.0` × `3.5-flash` etkileşimi dışlanmadı.
+- **Önceki öneri geçersiz:** [11] istemini kabuk komutuna çevirmek çözmez — [10]'un istemi zaten açık kabuk komutu
+  ve model onu da çalıştırmadan durdu.
+- **Ürün sorusu (Kerem'e):** oda config'inin varsayılanı frontend'e `3.5-flash` veriyor; o model bu ortamda turn'lerin
+  bir kısmında sessizce hiçbir şey yapmıyor. Hafta 8 "sessiz turn" bulgusu bununla güçlendi.
+- **3. koşum (Kerem kararı: frontend `gemini-3.8-flash`, ~00:35): 12 geçti / 4 kaldı / 1 uyarı** — [10] ×2, [11] ×2
+  yine ✗. Oturum `3b4ffa56`. "1 başarısız turn" = [9]'daki kasıtlı `kill -9` (kod 137), beklenen.
+- **ASIL BULGU — `3.8-flash` HİÇ KOŞMADI. Gemini CLI 0.60.0 her flash modelini `3.5-flash`'a çeviriyor.**
+  `turn.started.model` = `gemini-3.8-flash` (CLI'ın `init` olayı), ama 6 frontend turn'ünün hepsinde
+  `usage.models` = `gemini-3.5-flash`. Oda dışında da doğrulandı: imajda `gemini -m gemini-3.8-flash -p ...` →
+  `init.model: gemini-3.8-flash`, `stats.models: gemini-3.5-flash`. Kaynak (bundle `resolveModel`):
+  `if (useGemini3_5Flash && isFlashModel(resolved) && …) return <varsayılan flash>`; `useGemini3_5Flash` =
+  `config.hasGemini35FlashGAAccess()` (hesap/anahtar düzeyinde, ayarla kapatılamıyor). `flash-lite` etkilenmiyor
+  (backend'in usage'ı hep `3.1-flash-lite`).
+  - **Muhtemel geriye dönük etki (ölçülmedi):** 29 Eylül dogfood'undaki "`2.5-flash` 10×503" ve 1 Ekim için
+    planlanan "`2.5-flash` ile gate" de aslında `3.5-flash`'a gidiyordu/gidecekti — `curl` ile `2.5-flash` 200
+    dönerken CLI'da 503 alınmasını açıklıyor.
+  - **Ürün hatası:** kart, CLI'ın `init`'teki modelini gösteriyor, gerçekte çalışanı değil. Kullanıcı oda config'inde
+    flash modeli seçerse sessizce `3.5-flash` alıyor. Sağlayıcı bağımsızlığı ve "ölçmeden iddia etme" ile çelişiyor.
+  - npm'de `@google/gemini-cli` latest = `0.62.0` (imajda `0.60.0`). Yükseltme = stderr kazımasını yeniden ölçme
+    (README "Hafta 7 kararları" metin kazıma istisnası).
+  - **0.62.0 denendi (kurulmadan, imajda paketten, 2 istek):** `-m gemini-3.8-flash` → `stats.models: gemini-3.8-flash` ✓.
+    Ama `-m gemini-3.5-flash` → `stats.models: gemini-3.8-flash` ✗. **Aynı zorlama, hedefi değişmiş:** CLI flash
+    modellerini kendi "en yeni flash"ına çeviriyor (`hasLatestFlashGAAccess`). Yükseltmek 3.8'i verir ama "config'teki
+    model çalışır" sözünü geri getirmez. 0.62.0 stderr'e yeni bir satır da basıyor (`Could not read directory
+    /tmp/.gemini/projects.json.lock`) — kazıma yeniden ölçülmeli.
+- **KARAR (Kerem, ~00:45): CLI 0.62.0'a yükselt + kart gerçekte çalışan modeli göstersin.** YAPILDI (commit edilmedi):
+  - Protokol **8**: `turn.completed.models` (Gemini `stats.models`, Claude `modelUsage`). Görünüm `turn.model
+    {requested, actual}` + `modelMismatch()`; kartta çalışan model, istenen listede yoksa kırmızı ⚠. Not: kart daha
+    önce HİÇ model göstermiyordu (yanlış model yalnız event log'daydı).
+  - CLI `0.62.0` (package.json + lock + imaj). stderr yeniden ölçüldü (sahte sunucu `scripts/probes/fake-503-429.mjs`):
+    503 ve 429 satırları birebir aynı, yeni `[STARTUP] …` satırları araya giriyor; gerçek çıktı fixture
+    (`packages/runner-gemini/test/fixtures/cli-0.62.0-stderr-*.log`) + 2 test. "Max attempts" fallback'i ölçülmedi.
+  - README "CLI 0.62.0'a yükseltme ve 'çalışan model'", `docs/runtime-gemini.md` notu.
+  - **Tam paket 482/482, typecheck + web tsc temiz, `gate:w7` 93/93** (imaj protokol 8).
+- **0.62.0 da zorluyor:** `-m gemini-3.5-flash` → `3.8-flash`; **`-m gemini-3.1-flash-lite` → `gemini-3.5-flash-lite`**
+  (4. koşumda backend'in `models`'i — yeni alan ilk koşumda yakaladı). Config'teki model çalışmıyor; ürün gösteriyor,
+  engelleyemiyor (engel = runner'ı CLI yerine API ile yazmak).
+- **4. koşum (CLI 0.62, frontend gerçekten `3.8-flash`, ~01:10): 14 geçti / 2 kaldı / 1 uyarı.** [10] artık geçiyor.
+  Kalan yine **[11] ×2**: frontend `read_file /room/contracts/api.md` → yok → `isError` → boş cevap, yazmadı.
+  `3.8-flash`'ta 6 frontend turn'ünden yalnız bu 1'i sessiz. Oturum `1a31ea5f`.
+- **[11] ODA DIŞINDA TEKRARLANMIYOR — 9/9 başarılı** (imaj, CLI 0.62, `3.8-flash`, anahtar 2):
+  düz istem 3/3; gate'in `GEMINI.md`'siyle (`geminiContextFile` ile üretildi) 3/3; frontend'in 4 turn'lük oturumu
+  `--resume` ile, odadaki izinlerle (backend 700, CLI uid 1001) yeniden oynatıldı 3/3. Hepsinde: read_file error →
+  write_file → metin. Oysa odada 4 gate koşumunun 4'ünde de [11] ✗. **"Model davranışı" teşhisi GERİ ALINDI —
+  sebep bilinmiyor, odadaki bir fark olabilir.** Runner env farkı yok (yalnız `GEMINI_CLI_TRUST_WORKSPACE`).
+  Kalan farklar: eşzamanlı backend turn'ü, `/room/contracts`'ın gerçek izin/grup düzeni, gerçek oturum geçmişi.
+  **Sıradaki teşhis adımı:** odadaki CLI oturum dosyasını (`$HOME/.gemini/tmp/*/chats/`) [11] sonrası okumak —
+  tool'un döndürdüğü hata metni ve modelin son cevabı orada. Gate kapanışta odayı siliyor.
+- **Hafta 7 hâlâ KAPANMADI.** Sıradaki karar Kerem'de (sohbet 3 Ekim ~01:30).
 
 ### Neredeyiz
 Hâlâ **Hafta 7**. Açık kalan **tek** şey `gate:w7:agent`'ın tam geçmesi. Geri kalanlar:
