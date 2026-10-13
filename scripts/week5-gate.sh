@@ -135,9 +135,9 @@ A_ID=$(acurl "$BASE/auth/me" | jget id)
 D_ID=$(curl -s -b "rooms_session=$D" "$BASE/auth/me" | jget id)
 
 send() { # <cookie> <text> → yanıt gövdesi
-  curl -s --max-time 30 -b "rooms_session=$1" -X POST \
-    "$BASE/rooms/$ROOM/agents/$AGENT/message" \
-    -H 'content-type: application/json' -d "{\"text\":$(node -e 'console.log(JSON.stringify(process.argv[1]))' "$2")}"
+  # Gövde stdin'den bayt olarak, curl'süz: scripts/lib/post-json.mjs başındaki not.
+  node -e 'console.log(JSON.stringify({ text: process.argv[1] }))' "$2" |
+    node scripts/lib/post-json.mjs "$BASE/rooms/$ROOM/agents/$AGENT/message" --cookie "$1" --max-time 30
 }
 
 queue_rows() { psql_q "SELECT count(*) FROM agent_queue WHERE room_id='$ROOM' AND agent_name='$AGENT' AND status='$1'"; }
