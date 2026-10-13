@@ -1,11 +1,37 @@
-# Kaldığımız yer — 13 Ekim 2026, ~15:15
+# Kaldığımız yer — 13 Ekim 2026, akşam
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar. Önce bu ilk bölümü oku;
 altındaki bölümler (3 Ekim ve öncesi) kanıtları, gerekçeleri ve hâlâ geçerli komutları taşıyor.
 
-## ⚠️ BURADAN BAŞLA — 13 Ekim ~15:15
+## ⚠️ BURADAN BAŞLA — 13 Ekim akşam
 
-### Bugün ne oldu
+### UTF-8 göçü (Kerem'in 5 aşamalı planı) — BİTTİ
+Kural README "Kural: HTTP gövdeleri UTF-8 ve bayt olarak": **Gövdeler stdin'den bayt olarak gönderilir; API
+geçersiz UTF-8'i 400 ile reddeder.**
+- **Aşama 0 (ölçüm):** `curl -d` → DB'de `EF BF BD`; `curl` stdin, `node fetch` (argv), `node fetch` (stdin Buffer)
+  → birebir UTF-8. README'de tablo.
+- **Aşama 1 (`7b3ddb0`):** `apps/api/src/utf8-body.ts`, `app.use("*")` ile tek geçit (`TextDecoder fatal`, UTF-8 dışı
+  charset 400). API'de önceden tek geçit YOKTU: 14 uç `c.req.json().catch(() => ({}))` kullanıyor. Bilinçli istisna:
+  geçit kimlikten önce çalışır (kimliksiz + bozuk gövde → 400, 401 değil), test sabitliyor. Tam paket 493/493.
+- **Aşama 2 (`2215b9c`):** `scripts/lib/post-json.mjs` + pilot `gate:w7:agent` 16/0/1, 11/11 mesaj sağlam.
+- **Aşama 3:** w4:agent 5/5 (`ed962fc`; 1. koşum 4/4: model `.env`'i paylaşmayı reddetti), w5 25/25 (`b4871d1`),
+  w6 13/13 (`3b2f9c5`), w6:agent 12/12 (`d80c254`; 1. koşum 11/12: atladığım `"koşarken"` etiketini geçit yakaladı),
+  w7 93/93 (`0c8ff6f`), w2 **ölçülmedi** (`a83ecb2`, Claude anahtarı yok), q3 probe (`2503ddf`).
+- **Aşama 4:** Sorun yok. Runner env'i Docker Engine API'siyle (JSON) gidiyor, `docker exec` argümanıyla değil.
+  Türkçe `systemPrompt` `/proc/<pid>/environ`'da ve `GEMINI.md`'de birebir. Not: container'da root başka agent'ın
+  `environ`'unu okuyamıyor (beklenen sertleştirme); süreç sahibi agent kullanıcısıyla okunur.
+- **Soru 3 sağlam metinle yeniden ölçüldü:** bulgu aynı (backend'i okumayı denedi, yazmadı, `contracts/cors-request.md`'ye
+  iş isteği). Hafta 8 girdisi artık bozuk metin şüphesi taşımıyor.
+
+### Açık kalanlar (bu göçün dışında, kayıtlı)
+- `gate:w6:agent` yorumdan düzeltmeye **42,4 / 59,6 sn** (eşik 30 uyarı / **60 başarısız**; referans 13,7). Model süresi,
+  taşımayla ilgisiz ama başarısızlığa 0,4 sn kaldı.
+- `gate:w4:agent` modelin `.env`'i yazmayı kabul etmesine bağlı; reddederse redaction'ın canlı yolu sınanmıyor ve kapı yine
+  geçiyor. Bilgi satırı o durumda yanlış sebep söylüyor ("Gemini tool çıktısını vermiyor").
+- API'deki 14 `c.req.json().catch(() => ({}))`: bozuk JSON sessizce `{}` oluyor (`POST /rooms`'ta oda varsayılanla açılır).
+- Commit'ler **push edilmedi** (`7fa156b..2503ddf` + bu not).
+
+### Daha önce bugün
 - 3 Ekim commit'leri push edildi. Docker açıldı, `db:up` yapıldı (postgres/redis AÇIK bırakıldı).
 - **`gate:w7:agent` iki kez TAM GEÇTİ: 16 geçti / 0 kaldı / 1 uyarı** (anahtar 2, `GATE_FRONTEND_MODEL=gemini-3.8-flash`).
   Uyarı bilinen [5] "Permission denied metni yok". Ayrıntı README "Kapılar".
@@ -21,12 +47,9 @@ altındaki bölümler (3 Ekim ve öncesi) kanıtları, gerekçeleri ve hâlâ ge
 
 ### ▶ Sıradaki (Kerem'e sorulacak)
 1. **Hafta 7 kapansın mı?** Tek açık kapı geçti. Kapanış = `docs/week-07.md` (week-06 biçiminde) + roadmap.
-2. Soru 3 probe'u doğru metinle bir kez yeniden koşmak (Hafta 8 tasarımının girdisi, bozuk metinle ölçülmüştü):
-   `bash scripts/week7-q3-probe.sh` (anahtar 2 ile).
-3. Eski kapılar (`week2-gate`, `week4-agent-gate`, `week5-gate`, `week6-agent-gate`) Türkçe metni hâlâ `-d` ile
-   gönderiyor: düzeltilsin mi, yeniden koşulsun mu?
-4. Ürün sorusu (Hafta 8): API geçersiz UTF-8'i sessizce `�`'ye çevirip modele iletiyor — 400 mü, işaretleme mi?
-5. Hafta 8 görev dokümanı (`HAFTA-8-GOREV.md`) henüz yok.
+2. Push (yukarıdaki commit'ler yerel).
+3. Hafta 8 görev dokümanı (`HAFTA-8-GOREV.md`) henüz yok.
+(Soru 3 yeniden koşumu, eski kapılar ve API'nin UTF-8 davranışı → yukarıdaki göçte çözüldü.)
 
 ### Gate komutu (anahtar 2)
 ```bash

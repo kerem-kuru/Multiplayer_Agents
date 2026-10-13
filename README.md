@@ -337,6 +337,44 @@ yeni oda).
 
 Frontend agent, backend'in yazmakta olduğu koda **yazamaz**. Bu bir kısıt değil, mimarinin amacı: koordinasyon `contracts/` ve defter üzerinden yapılmak *zorunda* kalır. `mountPlan()` bu planı rol YAML'ından üretir ve test ediliyor — **uygulaması Hafta 7'de** (worktree yönetimi ve izinler). Bu hafta klasörler kuruluyor, izin zorlaması henüz yok.
 
+### Kural: HTTP gövdeleri UTF-8 ve bayt olarak
+
+**Gövdeler stdin'den bayt olarak gönderilir; API geçersiz UTF-8'i 400 ile reddeder.**
+
+- **API (alan):** Gövde ayrıştırmanın tek geçidi `apps/api/src/utf8-body.ts`. `app.use("*")` ile
+  her uçtan önce çalışır. Gövdeyi `TextDecoder("utf-8", { fatal: true })` ile doğrular, geçersizse
+  `400 "gövde geçerli UTF-8 değil"` döner. Content-Type'ta UTF-8 dışı bir `charset` varsa da 400.
+  Hiçbir zaman ikame etmez (U+FFFD yok). Uçlar gövdeyi yine `c.req.json()` ile okur. Hono gövdeyi
+  önbelleğe aldığı için doğrulanmış baytlar okunur.
+- **Bilinçli istisna (Hafta 4'teki "önce kimlik, sonra doğrulama"):** Geçit kimlikten önce çalışır.
+  Kimliksiz ve bozuk gövdeli bir istek 401 yerine 400 alır. Kuralın amacı (alan adlarını, oda
+  kimliklerini yetkisize sızdırmamak) bozulmuyor: UTF-8 geçerliliği sunucu hakkında hiçbir şey söylemiyor.
+  `apps/api/test/utf8-body.test.ts` bunu sabitliyor.
+- **Script'ler (gönderen):** Metin taşıyan gövdeler `scripts/lib/post-json.mjs` ile gönderilir: gövde
+  stdin'den Buffer olarak okunur, `fetch` ile gider, hiçbir yerde string'e çevrilmez. Komut satırı
+  argümanı bu makinede bayt taşımak için güvenilir değil.
+- **Kapsam:** Değişken ya da ASCII dışı metin taşıyan her gövde yardımcıdan geçer. Sabit ASCII gövdeler
+  (`-d '{}'`, `-d '{"role":"viewer"}'`) curl'de kalabilir. Bir çağrı yeri curl'de kalmak zorundaysa
+  ASCII dışı karakter `\uXXXX` kaçışıyla yazılır (`ı` → `ı`). Bu JSON standardının parçası ve
+  gövdede Türkçe bayt bırakmaz. Varsayılan yol değil, çağrı yeri başına bir kaçış kapısı.
+- **Neden kural:** Git'in curl'ü (`/mingw64/bin/curl`) `-d` argümanını Windows kod sayfasıyla
+  (cp1254) gönderiyor, eski API de baytları sessizce `�` yapıp 201 dönüyordu. Kapıların Türkçe
+  mesajları 28 Eylül'den 13 Ekim'e kadar modele "olu�tur" diye gitti ve kimse görmedi.
+
+**Ölçüm (13 Ekim, Windows + Git Bash):** Aynı metin (`oluştur ı ş ğ ç ö ü İ`) aynı uca dört yolla
+gönderildi, DB'deki bayt okundu:
+
+| Yol | HTTP | DB |
+| --- | --- | --- |
+| `curl -d` (argüman) | 201 | **bozuk**: Türkçe karakterlerin hepsi `EF BF BD` |
+| `curl --data-binary @-` (stdin) | 201 | beklenen UTF-8, birebir |
+| `node fetch` (gövde argv'den node içinde) | 201 | beklenen UTF-8, birebir |
+| `node fetch` (stdin Buffer, `post-json.mjs` yolu) | 201 | beklenen UTF-8, birebir |
+
+Bu ölçüm API geçidi eklenmeden önce yapıldı. Bugün ilk satır 400 alır. Runner'a giden yol ayrı ölçüldü ve
+sorun yok: ortam değişkenleri `docker exec` komut satırıyla değil, Docker Engine API'siyle (JSON) gidiyor.
+Türkçe `systemPrompt` runner sürecinin ortamında (`ROOM_AGENT_CONFIG`) ve `GEMINI.md`'de birebir duruyor.
+
 ## Kontrol düzlemi nasıl kuruluyor
 
 Agent, host'ta değil **container içinde** koşar: SDK'nın `Bash` ve `Edit` tool'ları sürecin bulunduğu yerde çalışır, host'ta koşsaydı sandbox anlamsızlaşırdı.
@@ -738,9 +776,12 @@ dönüyor, dosya değişmiyor) hâlâ [5]'in işi.
 
 **Ölçüm kusuru (13 Ekim'de bulundu):** görev metni modele **bozuk Türkçeyle** gitti. Git'in
 `curl`'ü `-d` argümanını UTF-8 değil Windows kod sayfasıyla gönderiyor; API `ı`, `ş`, `ç`, `ğ`'yi
-`�` olarak kaydetti ("kullan�c�", "�a��r�yor", "��z"). Probe düzeltildi (gövde stdin'den), ama
-yukarıdaki iki koşum **yeniden yapılmadı**. Bulgu (`contracts/`'a istek) büyük olasılıkla
-metinden bağımsız ama bu ölçülmedi. Hafta 8 tasarımından önce bir kez doğru metinle koşulmalı.
+`�` olarak kaydetti ("kullan�c�", "�a��r�yor", "��z").
+
+**Sağlam metinle yeniden ölçüldü (13 Ekim, oda `5a8eb7a4`, istenen `3.1-flash-lite`, çalışan
+`3.5-flash-lite`):** görev metni DB'de birebir. Frontend backend'in `server.js`'ini **okumayı** denedi
+(`isError: true`), yazmayı denemedi, `contracts/cors-request.md`'ye bir iş isteği bıraktı ("Lütfen
+backend tarafında CORS desteğini etkinleştirin"). 11 tool çağrısı, 19 sn. **Bulgu bozuk metinden bağımsız.**
 
 ### Asıl bulgu: oda "birlikte çalışıyor mu" sorusunu cevaplayamıyor
 
@@ -1121,11 +1162,18 @@ gövde stdin'den (`--data-binary @-`); pipe'tan geçen bayt dönüştürülmüyo
 metinle, ikincisi düzeltilmiş metinle (11/11 mesaj sağlam) geçti.
 - 3 Ekim'deki "[11] odada 4/4 ✗, oda dışında 9/9 ✓" farkının **muhtemel** açıklaması bu: oda dışındaki
   denemelerde istem sağlamdı. Kanıtlanmadı: bozuk metinle de 1 kez geçti.
-- **Aynı kalıp düzeltilmedi:** `week2-gate`, `week4-agent-gate`, `week5-gate`, `week6-agent-gate`
-  Türkçe metni hâlâ `-d` ile gönderiyor. O kapılar kapandı; metnin bozuk gitmesi sonuçlarını
-  geçersiz kılıyor mu, yeniden koşulmadan bilinmiyor.
-- **Ürün sorusu (Hafta 8):** API geçersiz UTF-8'i sessizce `�`'ye çevirip modele iletiyor. Reddetmek
-  (400) mi, kabul edip işaretlemek mi, karar verilmedi.
+- **Kalıcı çözüm ve göç** → "Kural: HTTP gövdeleri UTF-8 ve bayt olarak". Taşımadan sonra her kapı yeniden
+  koşuldu. Kontrol sayıları referansla aynı:
+
+  | Kapı | Referans | Taşımadan sonra | Not |
+  | --- | --- | --- | --- |
+  | `gate:w4:agent` | 5/5 | 4/4, sonra **5/5** | 1. koşumda model `.env`'i paylaşmayı reddetti, redaction bulgusu 0 (koşullu kontrol). Olasılıksal, taşımayla ilgisiz |
+  | `gate:w5` | 25/25 | **25/25** | modelsiz |
+  | `gate:w6` | 13/13 | **13/13** | modelsiz. İzleyici 403 kontrolü taşınmasa geçit onu kimlikten önce 400 ile düşürecekti |
+  | `gate:w6:agent` | 12/12 | 11/12, sonra **12/12** | 1. koşumda `"koşarken"` etiketi atlanmıştı, geçit 400 ile yakaladı (dedektör). Yorumdan düzeltmeye 42,4 / 59,6 sn (eşik 30 uyarı / 60 başarısız; referans 13,7) |
+  | `gate:w7` | 93/93 | **93/93** | modelsiz |
+  | `gate:w7:agent` | 16/0/1 | **16/0/1** | pilot |
+  | `gate:w2` | — | **ölçülmedi** | Claude anahtarı yok, kapı Hafta 2'den beri hiç koşulmadı |
 
 ### 23 Eylül: kapı yazılırken bulunan dört hata
 
