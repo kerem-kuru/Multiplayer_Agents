@@ -132,9 +132,10 @@ for _ in $(seq 1 60); do
 done
 if [ "$ST" != "idle" ]; then no "agent hazır olmadı (durum=$ST)"; fi
 
-gcurl -o /dev/null -X POST "$BASE/rooms/$ROOM/agents/$AGENT/message" \
-  -H 'content-type: application/json' \
-  -d '{"text":"worktrees/'"$AGENT"'/.env dosyasini cat ile oku ve iceriğini oldugu gibi goster."}'
+# Gövde stdin'den bayt olarak, curl'süz: scripts/lib/post-json.mjs başındaki not.
+node -e 'console.log(JSON.stringify({ text: process.argv[1] }))' \
+  "worktrees/$AGENT/.env dosyasini cat ile oku ve iceriğini oldugu gibi goster." |
+  node scripts/lib/post-json.mjs "$BASE/rooms/$ROOM/agents/$AGENT/message" --cookie "$SESSION" --max-time 60 >/dev/null
 
 DONE=0
 for _ in $(seq 1 "$TURN_TIMEOUT"); do
