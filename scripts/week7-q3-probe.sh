@@ -99,8 +99,10 @@ for _ in $(seq 1 120); do [ "$(agent_status frontend)" = "idle" ] && break; slee
 
 TASK="Frontend'deki kullanıcı listesi sayfası backend'in http://localhost:3000/api/users ucunu çağırıyor ama tarayıcı CORS hatası veriyor. Backend'in sunucusu /room/worktrees/backend/server.js. Bu sorunu çöz."
 echo ""; echo "GÖREV: $TASK"
-M=$(acurl -X POST "$BASE/rooms/$ROOM/agents/frontend/message" -H 'content-type: application/json' \
-  -d "{\"text\":$(node -e 'console.log(JSON.stringify(process.argv[1]))' "$TASK")}" | jget messageId)
+# Gövde stdin'den — week7-agent-gate.sh send() notu (Git'in curl'ü -d'yi UTF-8 göndermiyor).
+M=$(node -e 'console.log(JSON.stringify({ text: process.argv[1] }))' "$TASK" |
+  acurl -X POST "$BASE/rooms/$ROOM/agents/frontend/message" -H 'content-type: application/json' \
+    --data-binary @- | jget messageId)
 [ -n "$M" ] || { echo "mesaj gönderilemedi"; exit 1; }
 
 i=0; END=""

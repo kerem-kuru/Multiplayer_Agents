@@ -132,8 +132,11 @@ for a in frontend backend; do acurl -o /dev/null -X POST "$BASE/rooms/$ROOM/agen
 for a in frontend backend; do wait_idle "$a" || { echo "$a hazır olmadı"; tail -30 "$TMP/server.log"; exit 1; }; done
 
 send() { # <agent> <metin> → messageId
-  acurl -X POST "$BASE/rooms/$ROOM/agents/$1/message" -H 'content-type: application/json' \
-    -d "{\"text\":$(node -e 'console.log(JSON.stringify(process.argv[1]))' "$2")}" | jget messageId
+  # Gövde stdin'den: Git'in curl'ü (mingw) -d argümanını UTF-8 değil Windows kod
+  # sayfasıyla gönderiyor ("oluştur" → "olu\xfetur"), API "�" kaydediyordu (13 Ekim).
+  node -e 'console.log(JSON.stringify({ text: process.argv[1] }))' "$2" |
+    acurl -X POST "$BASE/rooms/$ROOM/agents/$1/message" -H 'content-type: application/json' \
+      --data-binary @- | jget messageId
 }
 ev_count() { # <tür> [ek SQL koşulu]
   psql_q "SELECT count(*) FROM session_events WHERE session_id='$SID' AND type='$1' ${2:-}"
@@ -254,3 +257,10 @@ else no "[17,18,21] Playwright düştü:"; tail -30 "$TMP/pw.log" | sed 's/^/   
 
 echo ""
 echo "  · turn'ler: $(ev_count turn.completed) tamamlandı, $(ev_count turn.failed) başarısız"
+# Bilgi, kontrol değil: Gemini CLI istenen modeli değiştirebiliyor (README "Gemini'de
+# config'teki model garanti değil"). Sonuç çalışan modelle okunmalı.
+for a in frontend backend; do
+  REQ=$(psql_q "SELECT DISTINCT payload->>'model' FROM session_events WHERE session_id='$SID' AND type='turn.started' AND payload->>'agent'='$a'" | paste -sd, -)
+  ACT=$(psql_q "SELECT DISTINCT jsonb_array_elements_text(payload->'models') FROM session_events WHERE session_id='$SID' AND type='turn.completed' AND payload->>'agent'='$a'" | paste -sd, -)
+  echo "  · $a: istenen ${REQ:-?} → çalışan ${ACT:-bilinmiyor}"
+done
