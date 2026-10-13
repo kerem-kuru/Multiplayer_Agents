@@ -46,7 +46,8 @@ psql_q() { docker compose exec -T postgres psql -U rooms -d agent_rooms -tA -c "
 api() { # method path [body]
   local m="$1" p="$2" b="${3:-}"
   if [ -n "$b" ]; then
-    curl -s -b "rooms_session=$SESSION" -X "$m" "$BASE$p" -H 'content-type: application/json' -d "$b"
+    # Gövde stdin'den bayt olarak, curl'süz: scripts/lib/post-json.mjs başındaki not.
+    printf '%s' "$b" | node scripts/lib/post-json.mjs "$BASE$p" --cookie "$SESSION" --method "$m"
   else
     curl -s -b "rooms_session=$SESSION" -X "$m" "$BASE$p"
   fi
