@@ -33,6 +33,13 @@ import { z } from "zod";
  *    ortamı kendi akışını BİZİM event kataloğumuza çevirir. Katalog zaten
  *    sağlayıcı-bağımsız: `tool.call`, `tool.result`, `turn.completed` hiçbir
  *    yerde "Claude" demiyor.
+ *
+ * 5. ÇALIŞAN MODELİN RAPORU. Turn sonunda gerçekte koşan model(ler)
+ *    yapılandırılmış biçimde verilmeli (`turn_end` → `turn.completed.models`).
+ *    Config'teki modeli KOŞTURMAK garanti edilemeyebilir — Gemini CLI flash
+ *    ailesinde kendi seçtiğini koşturuyor (README "Gemini'de config'teki model
+ *    garanti değil") — ama RAPORLAMAK zorunlu: ekran istenenle çalışanı
+ *    karşılaştırabilmeli, bütçe (Hafta 11) çalışana göre hesaplanmalı.
  */
 
 export const RuntimeKind = z.enum(["claude", "gemini"]);

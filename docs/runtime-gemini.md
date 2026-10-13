@@ -6,6 +6,9 @@
 > **Uyarı:** CLI `-m` ile verilen flash modelini sessizce kendi seçtiği flash modeline çeviriyor
 > (0.60.0 → `3.5-flash`, 0.62.0 → `3.8-flash`). `init.model` istenen modeli, `result.stats.models`
 > gerçekte çalışanı yazıyor. Ayrıntı ve karar: README "CLI 0.62.0'a yükseltme ve 'çalışan model'".
+> **13 Ekim kararı (Kerem):** bu kabul edildi ve bilinçli sapma olarak kayda geçti (README "Gemini'de
+> config'teki model garanti değil"). Sözleşmeye 5. madde eklendi: çalışan modeli raporla. Gemini
+> karşılıyor (`stats.models`).
 
 **Sonuç: `packages/protocol/src/runtime.ts` içindeki dört maddelik sözleşmeyi karşılıyor.** İkinci koşum ortamı olarak uygundur.
 

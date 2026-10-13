@@ -1,9 +1,44 @@
-# Kaldığımız yer — 3 Ekim 2026, ~01:35
+# Kaldığımız yer — 13 Ekim 2026, ~15:15
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar. Önce bu ilk bölümü oku;
-altındaki bölümler (29 Eylül ve öncesi) kanıtları, gerekçeleri ve hâlâ geçerli komutları taşıyor.
+altındaki bölümler (3 Ekim ve öncesi) kanıtları, gerekçeleri ve hâlâ geçerli komutları taşıyor.
 
-## ⚠️ BURADAN BAŞLA — 3 Ekim ~01:35
+## ⚠️ BURADAN BAŞLA — 13 Ekim ~15:15
+
+### Bugün ne oldu
+- 3 Ekim commit'leri push edildi. Docker açıldı, `db:up` yapıldı (postgres/redis AÇIK bırakıldı).
+- **`gate:w7:agent` iki kez TAM GEÇTİ: 16 geçti / 0 kaldı / 1 uyarı** (anahtar 2, `GATE_FRONTEND_MODEL=gemini-3.8-flash`).
+  Uyarı bilinen [5] "Permission denied metni yok". Ayrıntı README "Kapılar".
+- **Gate'in kendi kusuru bulundu ve düzeltildi:** Git'in `curl`'ü `-d`'yi cp1254 gönderiyor → 28 Eylül'den beri
+  gate mesajlarının 9/11'i modele `�`'li gitti ("dosya yoksa olu�tur"). `send()` artık gövdeyi stdin'den
+  yolluyor. 1. koşum bozuk metinle, 2. koşum sağlam metinle (11/11) geçti. [11]'in "odada ✗ / dışarıda ✓"
+  farkının muhtemel açıklaması bu (kanıtlanmadı). `week7-q3-probe.sh` de düzeltildi.
+- **KARAR (Kerem): 3. madde (a).** Gemini'de config'teki model garanti değil, bilinçli sapma olarak kayda geçti
+  (README "Gemini'de config'teki model garanti değil"). Sözleşmeye 5. madde: çalışan modeli raporla
+  (`runtime.ts`). Gate sonunda istenen → çalışan model satırı. Hafta 11 şartı: bütçe çalışan modele göre.
+- Teşhis için kopyalanan Gemini sohbet kayıtları (scratchpad, repoda değil): [11]'de `read_file` → "File not
+  found" → `write_file` → metin; frontend `write_file` backend'in satırını ezdi → `contracts_race` doğru yakaladı.
+
+### ▶ Sıradaki (Kerem'e sorulacak)
+1. **Hafta 7 kapansın mı?** Tek açık kapı geçti. Kapanış = `docs/week-07.md` (week-06 biçiminde) + roadmap.
+2. Soru 3 probe'u doğru metinle bir kez yeniden koşmak (Hafta 8 tasarımının girdisi, bozuk metinle ölçülmüştü):
+   `bash scripts/week7-q3-probe.sh` (anahtar 2 ile).
+3. Eski kapılar (`week2-gate`, `week4-agent-gate`, `week5-gate`, `week6-agent-gate`) Türkçe metni hâlâ `-d` ile
+   gönderiyor: düzeltilsin mi, yeniden koşulsun mu?
+4. Ürün sorusu (Hafta 8): API geçersiz UTF-8'i sessizce `�`'ye çevirip modele iletiyor — 400 mü, işaretleme mi?
+5. Hafta 8 görev dokümanı (`HAFTA-8-GOREV.md`) henüz yok.
+
+### Gate komutu (anahtar 2)
+```bash
+GEMINI_API_KEY="$(grep ^GEMINI_API_KEY_2= .env | cut -d= -f2- | tr -d '\r\" ')" \
+  GATE_FRONTEND_MODEL=gemini-3.8-flash npm run gate:w7:agent
+```
+**Dikkat:** `MSYS_NO_PATHCONV=1`'i npm'den ÖNCE ortama verme — gate'in `pwd`'si `/c/...` olur, Windows git
+fixture deposunu bulamaz ("cannot change to /c/Users/...").
+
+---
+
+## 3 Ekim ~01:35 durumu (eski — yukarıdaki 13 Ekim bölümü geçerli)
 
 ### ▶ Sıradaki (Kerem oturumu 3 Ekim ~01:35'te kapattı)
 1. `npm run db:up` (postgres/redis durduruldu, silinmedi). İmaj güncel: CLI 0.62.0, protokol 8.

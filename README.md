@@ -376,6 +376,7 @@ Sağlayıcı seçiliyse `ANTHROPIC_API_KEY` gerekmez. `AWS_*` / `GOOGLE_*` deği
 2. **Tool kapısı** — tool çalışmadan önce araya girilebilmeli ki YAML'daki yetki zorlanabilsin
 3. **Oturum sürekliliği** — çökme sonrası sohbet sürsün
 4. **NDJSON** — kendi akışını bizim event kataloğumuza çevirir
+5. **Çalışan modelin raporu** — turn sonunda gerçekte hangi modelin koştuğunu yapılandırılmış biçimde verir (`turn.completed.models`). Config'teki modeli koşturmak garanti edilemeyebilir (aşağıda "Gemini'de config'teki model garanti değil"); raporlamak zorunlu
 
 Katalog zaten sağlayıcı-bağımsız: `tool.call`, `tool.result`, `turn.completed` hiçbir yerde "Claude" demiyor.
 
@@ -387,6 +388,8 @@ Katalog zaten sağlayıcı-bağımsız: `tool.call`, `tool.result`, `turn.comple
 | Tool kapısı | ✅ `PreToolUse` hook'u **engeller** | ⚠️ `--allowed-tools` kısıtlar; ihlal **saptanır**, engellenmez |
 | Oturum sürekliliği | ✅ `resume` | ✅ `--session-id` / `--resume` |
 | Rol prompt'u | ✅ `systemPrompt.append` | ✅ çalışma alanına yazılan `GEMINI.md` (CLI'da bayrak yok) |
+| Config'teki model çalışıyor | ✅ | ⚠️ flash ailesinde CLI kendi seçtiğini koşturabilir; kart gösterir (⚠) |
+| Çalışan modelin raporu | ✅ `modelUsage` | ✅ `stats.models` |
 | Tool çıktısının metni | ✅ | ❌ sadece `status` |
 | USD maliyet | ✅ | ❌ sadece token sayısı |
 | SDK tool listesi | ✅ `turn.started.tools` | ❌ boş |
@@ -733,6 +736,12 @@ bunun kararı gerekiyor.
 `gemini-3.1-flash-lite` (o saatte `3.5-flash` 503 veriyordu). İzin hatasının kendisi (hata
 dönüyor, dosya değişmiyor) hâlâ [5]'in işi.
 
+**Ölçüm kusuru (13 Ekim'de bulundu):** görev metni modele **bozuk Türkçeyle** gitti. Git'in
+`curl`'ü `-d` argümanını UTF-8 değil Windows kod sayfasıyla gönderiyor; API `ı`, `ş`, `ç`, `ğ`'yi
+`�` olarak kaydetti ("kullan�c�", "�a��r�yor", "��z"). Probe düzeltildi (gövde stdin'den), ama
+yukarıdaki iki koşum **yeniden yapılmadı**. Bulgu (`contracts/`'a istek) büyük olasılıkla
+metinden bağımsız ama bu ölçülmedi. Hafta 8 tasarımından önce bir kez doğru metinle koşulmalı.
+
 ### Asıl bulgu: oda "birlikte çalışıyor mu" sorusunu cevaplayamıyor
 
 İki agent da "bitti, sözleşmeye uyumlu" dedi. Frontend'in ilk `login.html`'inde ise ne
@@ -803,8 +812,8 @@ taban commit'te yalnız `.gitignore` var, içeriği `STARTER_GITIGNORE` ile ayn�
 
 ## Hafta 7 kararları
 
-Üç mimari karar, görev tanımından ölçerek ayrıldığımız üç nokta ve bir bilinçli ilke sapması
-(Gemini yeniden denemeleri).
+Üç mimari karar, görev tanımından ölçerek ayrıldığımız üç nokta ve iki bilinçli ilke sapması
+(Gemini yeniden denemeleri; Gemini'de config'teki modelin garanti olmaması).
 
 | Karar | Gerekçe |
 | --- | --- |
@@ -908,9 +917,48 @@ tanımadığı satırı atladığı için etkilenmiyor, test gerçek çıktıyla
 **Ölçülmeyen:** "Max attempts reached"ten sonraki fallback döngüsü (400 sn'lik ölçüm tekrarlanmadı).
 Bütçe (art arda 3) oraya varmadan CLI'ı durduruyor.
 
-**Açık kalan:** Kullanıcı oda config'inde bir flash modeli seçerse CLI yine kendi seçtiğini
-koşturuyor. Ürün bunu artık gösteriyor ama engelleyemiyor. Engelleme ancak Gemini runner'ının
-CLI yerine API/SDK ile yazılmasıyla mümkün (yukarıdaki "Çıkış yolu").
+**Açık kalan → karara bağlandı (13 Ekim):** Kullanıcı oda config'inde bir flash modeli seçerse CLI
+yine kendi seçtiğini koşturuyor. Ürün bunu gösteriyor ama engelleyemiyor. Kerem'in kararı aşağıda.
+
+### Bilinçli sapma: Gemini'de config'teki model garanti değil (13 Ekim, Kerem kararı)
+
+**Hangi ilkeye istisna:** Rol YAML'ı agent'ın tek tanım kaynağı; `model` alanı yazıldığı gibi
+uygulanır. Claude'da bu doğru, Gemini'de değil: `model` alanı Gemini için bir **istek**.
+
+**Ne kabul edildi:** Gemini runner'ı CLI üzerinde kalıyor. CLI flash ve flash-lite ailesinde
+istenen modeli kendi "en yeni"siyle değiştirebiliyor (0.62.0'da ölçülen: `3.5-flash` → `3.8-flash`,
+`3.1-flash-lite` → `3.5-flash-lite`). Karar hesap düzeyindeki bir bayrağa bağlı, ayarla kapanmıyor.
+
+**Neden kabul edilebilir:**
+- Mimari değişmiyor. Sorun tek bir fişin (`runner-gemini`) içinde. Host, event log ve
+  NDJSON protokolü hangi modelin koştuğundan habersiz kalmaya devam ediyor.
+- Ürün yalan söylemiyor. Çalışan model sağlayıcının yapılandırılmış raporundan
+  (`stats.models`) okunuyor ve kartta gösteriliyor, istenenden farklıysa ⚠. Metin kazıma yok.
+- Sağlayıcı bağımsızlığının hedefi "popüler agent CLI'ları takılabilsin". CLI'ların kendi
+  davranışları (model yönlendirme, kendi yeniden denemeleri) bu hedefin bedeli. Ürünün işi
+  bunları ölçüp göstermek. Alternatif (runner'ı API ile yazmak), Gemini için agent döngüsünü
+  (dosya ve kabuk tool'ları, oturum saklama) bizim yazmamız demek. Bu da hedefin tersi.
+- Koşum ortamı sözleşmesine 5. madde eklendi: koşturmak garanti edilemiyorsa bile
+  **raporlamak zorunlu**. İki runner da bugün karşılıyor.
+
+**Bedeli (açıkça):**
+- Gemini agent'ları için config tekrarlanabilir değil. Aynı config farklı hesapta (BYOK, Hafta 12)
+  farklı model koşturabilir. Ekranda görünür, engellenmez.
+- Gate sonuçları istenen değil çalışan modelle yorumlanmalı. `gate:w7:agent` sonunda her agent
+  için istenen ve çalışan modeli yazdırır.
+- **Ölçülmedi:** pro modeller etkileniyor mu; CLI sürümü sabitken zorlamanın hedefi sunucu
+  tarafında değişebiliyor mu.
+
+**Sonraki haftalara şart:**
+- **Hafta 11 (maliyet, bütçe):** Bütçe ve maliyet config'teki modele göre DEĞİL, çalışan modele
+  (`turn.completed.models`) göre hesaplanır.
+- **Hafta 12 (BYOK):** Kurulum belgesi Gemini'de modelin CLI tarafından değiştirilebileceğini söyler.
+
+**Runner'ı API/SDK ile yazmaya ne zaman geçilir** (yukarıdaki "Çıkış yolu"): şu durumlardan biri
+ölçülürse:
+- bütçe ya da bir kullanıcı model sadakatini gerçekten gerektirirse;
+- zorlama pro modellere de yayılırsa;
+- CLI çalışan modeli raporlamayı bırakırsa (5. madde bozulur).
 
 ### Bekleme süreli 429 turn başına toplam sınıra sayılıyor
 
@@ -1057,6 +1105,27 @@ npm run gate:w7:agent                 # model ister: 5, 8–13, Playwright 17/18
 `gate:w7:agent` ~11 turn koşuyor; Gemini ücretsiz katmanında tek modelin günlük 20 isteğini
 aşar. Bu yüzden iki agent'a **ayrı** modeller veriyor (`GATE_FRONTEND_MODEL`,
 `GATE_BACKEND_MODEL`, kotaları ayrı) ve `.env`'deki `AGENT_MODEL`'i bu koşumda boşaltıyor.
+
+**`gate:w7:agent` ilk tam geçiş (13 Ekim, ücretli anahtar, CLI 0.62.0): 16 geçti / 0 kaldı / 1 uyarı**,
+iki koşumda da. Uyarı bilinen [5] "Permission denied metni yok" (Gemini tool çıktısını vermiyor).
+"1 başarısız turn" [9]'daki kasıtlı `kill -9`. Modeller: frontend istenen `gemini-3.8-flash` → çalışan
+`gemini-3.8-flash`, backend istenen `gemini-3.1-flash-lite` → çalışan `gemini-3.5-flash-lite` (CLI
+zorlaması, bkz. "Gemini'de config'teki model garanti değil"). Kapı sonunda bu satırları kendisi yazıyor.
+
+**Kapının kendi kusuru (13 Ekim'de bulundu ve düzeltildi):** gate, agent'a mesajı
+`curl -d "<json>"` ile gönderiyordu. Git'in `curl`'ü (`/mingw64/bin/curl`) argümanı UTF-8 değil Windows
+kod sayfasıyla (cp1254: `ı`→`FD`, `ş`→`FE`) yolluyor, API geçersiz baytları `�` (U+FFFD) olarak kaydediyor.
+28 Eylül'den beri **her** `gate:w7:agent` koşumunda 11 mesajın 9'u modele bozuk gitti ("dosya yoksa
+olu�tur"). Tarayıcıdan gelen mesajlar sağlam (event log'da kullanıcıya göre sayıldı). Düzeltme:
+gövde stdin'den (`--data-binary @-`); pipe'tan geçen bayt dönüştürülmüyor. İlk 13 Ekim koşumu bozuk
+metinle, ikincisi düzeltilmiş metinle (11/11 mesaj sağlam) geçti.
+- 3 Ekim'deki "[11] odada 4/4 ✗, oda dışında 9/9 ✓" farkının **muhtemel** açıklaması bu: oda dışındaki
+  denemelerde istem sağlamdı. Kanıtlanmadı: bozuk metinle de 1 kez geçti.
+- **Aynı kalıp düzeltilmedi:** `week2-gate`, `week4-agent-gate`, `week5-gate`, `week6-agent-gate`
+  Türkçe metni hâlâ `-d` ile gönderiyor. O kapılar kapandı; metnin bozuk gitmesi sonuçlarını
+  geçersiz kılıyor mu, yeniden koşulmadan bilinmiyor.
+- **Ürün sorusu (Hafta 8):** API geçersiz UTF-8'i sessizce `�`'ye çevirip modele iletiyor. Reddetmek
+  (400) mi, kabul edip işaretlemek mi, karar verilmedi.
 
 ### 23 Eylül: kapı yazılırken bulunan dört hata
 
