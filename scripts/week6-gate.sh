@@ -232,8 +232,9 @@ HEAD_BEFORE=$(cgit rev-parse HEAD)
 STATUS_BEFORE=$(cgit status --porcelain | sort | md5sum)
 INDEX_BEFORE=$(csh "md5sum /room/$WS/.git/index 2>/dev/null | cut -d' ' -f1")
 
-acurl -o /dev/null -X POST "$BASE/rooms/$ROOM/agents/$AGENT/checkpoints" \
-  -H 'content-type: application/json' -d '{"label":"kapı: güvenlik"}'
+# Türkçe gövde stdin'den bayt olarak, curl'süz: scripts/lib/post-json.mjs başındaki not.
+printf '%s' '{"label":"kapı: güvenlik"}' |
+  node scripts/lib/post-json.mjs "$BASE/rooms/$ROOM/agents/$AGENT/checkpoints" --cookie "$A" --max-time 60 >/dev/null
 acurl -o /dev/null "$BASE/rooms/$ROOM/agents/$AGENT/diff?from=$BASELINE"
 
 PWNED=$(csh "ls /tmp/pwned /tmp/pwned2 2>/dev/null | wc -l" | tr -d ' ')
@@ -315,9 +316,8 @@ csh "mv /room/$WS/src/order-service.js /room/$WS/src/order.js" >/dev/null
 
 ###############################################################################
 step "9) viewer yorum bırakamaz — 403  [görev 16'nın yetki kısmı]"
-CODE=$(ccurl -o /dev/null -w '%{http_code}' -X POST "$BASE/rooms/$ROOM/agents/$AGENT/reviews" \
-  -H 'content-type: application/json' \
-  -d '{"comments":[{"path":"src/order.js","side":"new","line":1,"lineText":"x","body":"bunu böl","diffSeq":1}]}')
+CODE=$(printf '%s' '{"comments":[{"path":"src/order.js","side":"new","line":1,"lineText":"x","body":"bunu böl","diffSeq":1}]}' |
+  node scripts/lib/post-json.mjs "$BASE/rooms/$ROOM/agents/$AGENT/reviews" --cookie "$C" --max-time 60 --status)
 if [ "$CODE" = "403" ]; then
   ok "izleyici 403 aldı — yetki sunucuda, düğmenin gizlenmesinde değil"
 else
@@ -336,8 +336,8 @@ fi
 
 ###############################################################################
 step "11) Manuel checkpoint tabanı kaydırıyor, projeksiyonda diff sıfırlanıyor  [görev 18]"
-CP2_ID=$(acurl -X POST "$BASE/rooms/$ROOM/agents/$AGENT/checkpoints" \
-  -H 'content-type: application/json' -d '{"label":"kapı: yeni taban"}' | jget checkpointId)
+CP2_ID=$(printf '%s' '{"label":"kapı: yeni taban"}' |
+  node scripts/lib/post-json.mjs "$BASE/rooms/$ROOM/agents/$AGENT/checkpoints" --cookie "$A" --max-time 60 | jget checkpointId)
 BECOMES=$(psql_q "SELECT payload->>'becomesBase' FROM session_events WHERE session_id='$SID' AND type='checkpoint.created' AND payload->>'checkpointId'='$CP2_ID'")
 sleep 2
 # CANLI görünüm: snapshot + sonraki event'ler (tarayıcının yaptığı).
