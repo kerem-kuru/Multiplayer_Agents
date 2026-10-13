@@ -400,8 +400,9 @@ if room_sh "$ROOM" root 'test -e /room/contracts/PWNED' >/dev/null; then
 else
   ok "[G2] backend commit attı, frontend'in ektiği hook çalışmadı"
 fi
-acurl -o /dev/null -X POST "$BASE/rooms/$ROOM/agents/frontend/checkpoints" \
-  -H 'content-type: application/json' -d '{"label":"kapı G2"}'
+# Türkçe gövde stdin'den bayt olarak, curl'süz: scripts/lib/post-json.mjs başındaki not.
+printf '%s' '{"label":"kapı G2"}' |
+  node scripts/lib/post-json.mjs "$BASE/rooms/$ROOM/agents/frontend/checkpoints" --cookie "$A" >/dev/null
 N_CP=$(count_events "$ROOM" checkpoint.created frontend)
 if room_sh "$ROOM" root 'test -e /room/contracts/PWNED' >/dev/null; then
   no "[G2] sunucunun gitkit checkpoint'i frontend'in hook'unu ÇALIŞTIRDI"
