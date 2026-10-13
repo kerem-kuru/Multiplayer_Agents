@@ -132,11 +132,9 @@ for a in frontend backend; do acurl -o /dev/null -X POST "$BASE/rooms/$ROOM/agen
 for a in frontend backend; do wait_idle "$a" || { echo "$a hazır olmadı"; tail -30 "$TMP/server.log"; exit 1; }; done
 
 send() { # <agent> <metin> → messageId
-  # Gövde stdin'den: Git'in curl'ü (mingw) -d argümanını UTF-8 değil Windows kod
-  # sayfasıyla gönderiyor ("oluştur" → "olu\xfetur"), API "�" kaydediyordu (13 Ekim).
+  # Gövde stdin'den bayt olarak, curl'süz: scripts/lib/post-json.mjs başındaki not.
   node -e 'console.log(JSON.stringify({ text: process.argv[1] }))' "$2" |
-    acurl -X POST "$BASE/rooms/$ROOM/agents/$1/message" -H 'content-type: application/json' \
-      --data-binary @- | jget messageId
+    node scripts/lib/post-json.mjs "$BASE/rooms/$ROOM/agents/$1/message" --cookie "$A" | jget messageId
 }
 ev_count() { # <tür> [ek SQL koşulu]
   psql_q "SELECT count(*) FROM session_events WHERE session_id='$SID' AND type='$1' ${2:-}"
