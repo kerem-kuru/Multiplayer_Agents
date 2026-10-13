@@ -169,9 +169,9 @@ if [ "$ST" != "idle" ]; then
 fi
 
 send() { # <cookie> <metin> → yanıt gövdesi
-  curl -s --max-time 60 -b "rooms_session=$1" -X POST \
-    "$BASE/rooms/$ROOM/agents/$AGENT/message" -H 'content-type: application/json' \
-    -d "{\"text\":$(node -e 'console.log(JSON.stringify(process.argv[1]))' "$2")}"
+  # Gövde stdin'den bayt olarak, curl'süz: scripts/lib/post-json.mjs başındaki not.
+  node -e 'console.log(JSON.stringify({ text: process.argv[1] }))' "$2" |
+    node scripts/lib/post-json.mjs "$BASE/rooms/$ROOM/agents/$AGENT/message" --cookie "$1" --max-time 60
 }
 
 wait_turn() { # <messageId> → 0 bitti / 1 zaman aşımı
@@ -222,8 +222,8 @@ M2=$(echo "$R2" | jget messageId)
 sleep 2
 RT=$(psql_q "SELECT status FROM agent_runtime WHERE room_id='$ROOM' AND agent_name='$AGENT'")
 if [ "$RT" = "running" ] || [ "$RT" = "busy" ]; then
-  CODE=$(acurl -o /dev/null -w '%{http_code}' -X POST "$BASE/rooms/$ROOM/agents/$AGENT/checkpoints" \
-    -H 'content-type: application/json' -d '{"label":"koşarken"}')
+  CODE=$(printf '%s' '{"label":"koşarken"}' |
+    node scripts/lib/post-json.mjs "$BASE/rooms/$ROOM/agents/$AGENT/checkpoints" --cookie "$A" --status)
   if [ "$CODE" = "409" ]; then ok "koşan turn'de checkpoint 409"; else no "beklenen 409, gelen $CODE"; fi
 else
   warn "turn zaten bitmişti (durum=$RT) — 409 kontrolü atlandı"
@@ -342,7 +342,7 @@ BODY=$(node -e '
   console.log(JSON.stringify({ comments: [{ path: "src/order.js", side: "new",
     line: Number(line), lineText: text, body: "bunu böl", diffSeq: Number(seq) }] }));
 ' "$LINE" "$LINETEXT" "$DIFFSEQ")
-REV=$(bcurl -X POST "$BASE/rooms/$ROOM/agents/$AGENT/reviews" -H 'content-type: application/json' -d "$BODY")
+REV=$(printf '%s' "$BODY" | node scripts/lib/post-json.mjs "$BASE/rooms/$ROOM/agents/$AGENT/reviews" --cookie "$B")
 RID=$(echo "$REV" | jget reviewId)
 M4=$(echo "$REV" | jget messageId)
 if [ -n "$RID" ]; then
@@ -458,8 +458,8 @@ step "10) Geçersiz yorum reddediliyor: 400  [görev 16]"
 CID=$(psql_q "SELECT payload->>'commentId' FROM session_events WHERE session_id='$SID' AND type='comment.on_line' ORDER BY seq DESC LIMIT 1")
 BAD_LINE=$(node -e 'console.log(JSON.stringify({comments:[{path:"src/order.js",side:"new",line:99999,lineText:"x",body:"yok",diffSeq:Number(process.argv[1])}]}))' "$DIFFSEQ")
 BAD_TEXT=$(node -e 'console.log(JSON.stringify({comments:[{path:"src/order.js",side:"new",line:Number(process.argv[1]),lineText:"BU SATIR BÖYLE DEĞİL",body:"yok",diffSeq:Number(process.argv[2])}]}))' "$LINE" "$DIFFSEQ")
-C1=$(bcurl -o /dev/null -w '%{http_code}' -X POST "$BASE/rooms/$ROOM/agents/$AGENT/reviews" -H 'content-type: application/json' -d "$BAD_LINE")
-C2=$(bcurl -o /dev/null -w '%{http_code}' -X POST "$BASE/rooms/$ROOM/agents/$AGENT/reviews" -H 'content-type: application/json' -d "$BAD_TEXT")
+C1=$(printf '%s' "$BAD_LINE" | node scripts/lib/post-json.mjs "$BASE/rooms/$ROOM/agents/$AGENT/reviews" --cookie "$B" --status)
+C2=$(printf '%s' "$BAD_TEXT" | node scripts/lib/post-json.mjs "$BASE/rooms/$ROOM/agents/$AGENT/reviews" --cookie "$B" --status)
 if [ "$C1" = "400" ] && [ "$C2" = "400" ]; then
   ok "olmayan satır 400, uyuşmayan lineText 400"
 else
