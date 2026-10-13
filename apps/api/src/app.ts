@@ -42,6 +42,7 @@ import {
   readMarks,} from "@agent-rooms/core";
 import { loadApiConfig, resolveConfigPath, type ApiConfig } from "./config.js";
 import { HttpError } from "./http-error.js";
+import { requireUtf8Body } from "./utf8-body.js";
 import {
   addMember,
   listMembers,
@@ -115,6 +116,9 @@ export function createApp(
   queue?: AgentQueue,
 ) {
   const app = new Hono();
+
+  /** Her şeyden önce: geçersiz UTF-8 gövde 400 (bkz. utf8-body.ts, kimlik sırası istisnası dahil). */
+  app.use("*", requireUtf8Body);
 
   /**
    * Kuyruk yoksa yazma uçları hiç tanımlanmaz: 404 yerine 503 dönmek için
