@@ -9,6 +9,8 @@ altındaki bölümler (13 Ekim ve öncesi) kanıtları, gerekçeleri ve hâlâ g
 - Bütün commit'ler **push edildi** (UTF-8 göçü dahil).
 - **Sıradaki: Hafta 8 (oda defteri).** Görev dokümanı `HAFTA-8-GOREV.md` Kerem'den gelecek (`Downloads/`).
   Hafta 8 girdileri: `docs/week-07.md` "Hafta 8'e devredilenler". Açık borçlar aynı dosyada ve aşağıda.
+- **Bekliyor:** `gate:w3:agent` ve `gate:w5:agent` volume değişikliğinden sonra koşulmadı (model ister).
+  Ücretli anahtarla koşum Kerem'in talimatıyla yapılacak; kendiliğinden koşma.
 
 ## 13 Ekim akşam durumu (Hafta 7 kapanışından önce)
 

@@ -40,7 +40,7 @@ kusuru (aşağıda) yüzünden geç kapandı.
 | Madde | Kanıt |
 | --- | --- |
 | typecheck temiz, birim testler geçiyor | 13 Ekim: typecheck + web tsc temiz, 493/493 |
-| `gate:w7` geçiyor; Hafta 1–6 kapıları volume tabanlı geçiyor | `gate:w7` 93/93 · regresyon: ⏳ |
+| `gate:w7` geçiyor; Hafta 1–6 kapıları volume tabanlı geçiyor | `gate:w7` 93/93 · regresyon: 23 Eylül `GATE_W7_REGRESSION=1` **98/0** (Hafta 1, 3, 4, 5, 6 volume tabanlı); UTF-8 göçünden sonra (13 Ekim) `gate:w5` 25/25 (içinde Hafta 1, 3, 4) ve `gate:w6` 13/13. Volume'dan sonra koşulmadı: `gate:w3:agent`, `gate:w5:agent` (model ister); `gate:w2` hiç koşulmadı |
 | Merkez depo `rooms-integrator`'a ait, sertleştirme, `refs/rooms/base/*` | `gate:w7` G1–G7 |
 | `safe.directory=*` hiçbir yerde yok | gitkit'ten kaldırıldı; tek istisna `/etc/gitconfig`'de tek yol (README "safe.directory") |
 | İmajdaki git CVE durumu | README "İmajdaki git ve açık CVE'ler" |

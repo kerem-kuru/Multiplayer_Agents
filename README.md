@@ -528,6 +528,11 @@ döndü, sol çubuk üçünü de çizdi). Kontrolden sonra geçici YAML silindi.
 | Kapı durumu `/snapshot`'tan değil CANLI görünümden okuyor | O uç saklanan snapshot'ı döndürüyor ve event log'un gerisinde olabilir. Bir kapı koşumunda yorum seq 48'de yazıldı, snapshot seq 34'te kaldı ve kapı "projeksiyonda yorum yok" dedi — ürün doğruydu. `scripts/room-view.mjs` snapshot + sonraki event'leri projeksiyondan geçiriyor: tarayıcının yaptığının aynısı. |
 | Çapa kontrolü sabit beklentiden çıkarıldı | "Yorum `current` kalırsa başarısız" ölçütü, agent'ın satırı kaydırmasını varsayıyor; gerçek modelde bu bir şans işi. Ölçülen şey artık projeksiyonun çapa kuralının patch'in gerçeğiyle aynı sonucu verip vermediği. |
 
+### Hafta 7 ✓ (13 Ekim)
+
+İkinci agent ve worktree izolasyonu. Kararlar ve gerekçeleri "Hafta 7 kararları" bölümünde, kapanış
+özeti `docs/week-07.md`. Sıradaki: Hafta 8, oda defteri.
+
 ## Ölçülecek tek metrik
 
 **Aynı oturuma iki farklı insanın yazdığı oturum sayısı, haftalık.** Kurulum sayısı değil, star sayısı değil.
