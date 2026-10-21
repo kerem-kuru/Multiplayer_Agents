@@ -6,11 +6,37 @@ altındaki bölümler (13 Ekim ve öncesi) kanıtları, gerekçeleri ve hâlâ g
 ## ⚠️ BURADAN BAŞLA — 21 Ekim
 
 - **Hafta 7 KAPANDI** (Kerem onayı, 21 Ekim). Kapanış özeti `docs/week-07.md`, README durum satırı güncel.
-- Bütün commit'ler **push edildi** (UTF-8 göçü dahil).
-- **Sıradaki: Hafta 8 (oda defteri).** Görev dokümanı `HAFTA-8-GOREV.md` Kerem'den gelecek (`Downloads/`).
-  Hafta 8 girdileri: `docs/week-07.md` "Hafta 8'e devredilenler". Açık borçlar aynı dosyada ve aşağıda.
-- **Bekliyor:** `gate:w3:agent` ve `gate:w5:agent` volume değişikliğinden sonra koşulmadı (model ister).
-  Ücretli anahtarla koşum Kerem'in talimatıyla yapılacak; kendiliğinden koşma.
+- **Hafta 8 (oda defteri) BAŞLADI** (21 Ekim). Görev dokümanı `Downloads/HAFTA-8-GOREV.md`, yol haritası
+  kopyası `docs/roadmap.md`. Hafta 8 girdileri: `docs/week-07.md` "Hafta 8'e devredilenler".
+
+### Hafta 8 planı (görev dokümanının sırası)
+| # | Adım | Durum |
+| --- | --- | --- |
+| 1 | Defter şeması `packages/protocol/src/journal.ts` | ✅ 30 birim test; birleştirme kuralları saf (`mergeJournalEntry`) |
+| 2 | Migration — **`008_journal.sql`** (007 Hafta 7'de alındı) | |
+| 3 | Defter çekirdeği `packages/core/src/journal.ts` | |
+| 4 | Runner RPC kanalı (`rpc` / `rpc_result`) | |
+| 5 | MCP tool'ları `read_journal`, `write_summary` — **Gemini için karar gerekiyor** (aşağıda) | |
+| 6 | Oda durumu metni `buildRoomState` | |
+| 7 | Turn başı enjeksiyon + turn sonu özeti → **bitince kritik senaryo bir kez elle** | |
+| 8 | Yeni event'ler (adımlarla birlikte eklenir) | |
+| 9 | API `GET/POST /rooms/:id/journal` (`apps/api`) | |
+| 10 | Projeksiyon + kart satırı defterden | |
+| 11 | UI: oda durumu paneli, defter öğesi | |
+| 12 | Kritik senaryo `gate-scenario-handoff.sh` (5/5) | |
+| 13 | `gate:w8` (22 kontrol) | |
+| 14 | Dogfood | |
+| 15 | README | |
+
+**Kerem'e sorulacak (Adım 5'ten önce):** görev tanımı MCP'yi Claude SDK'nın in-process sunucusuyla
+istiyor; kapılar Gemini CLI ile koşuyor. Öneri: tek bir stdio MCP sunucusu (runner'a soket üzerinden bağlanır),
+iki koşum ortamı da onu kullanır → sağlayıcı bağımsız. Özetleyici (`JOURNAL_MODEL`) de Gemini'de ucuz model.
+
+### Ücretli anahtar koşumu (PLANDA — Kerem'in talimatıyla, kendiliğinden koşma)
+- `gate:w3:agent` ve `gate:w5:agent`: volume değişikliğinden sonra koşulmadı. Hafta 8 önkoşulu "Hafta 1–7
+  kapıları geçiyor" bunlar olmadan tam değil.
+- Hafta 8'in model isteyen kısımları da (kritik senaryo 5 koşum + varyant, `gate:w8` agent kontrolleri)
+  ücretli anahtarla koşulacak; maliyet ve süre her koşumda raporlanacak.
 
 ## 13 Ekim akşam durumu (Hafta 7 kapanışından önce)
 
