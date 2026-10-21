@@ -6,7 +6,15 @@ Agent'lar birbirine mesaj atmaz. Ortak bir **oda defterine** yazar ve oradan oku
 
 > **Tez:** Gerçek birim agent değil, her agent'ın okuyup yazdığı tek paylaşılan bağlam deposudur.
 
-Durum: **Hafta 5 bitti** — ürünün gerçek doğum haftası. İki kişi **aynı agent'a aynı anda**
+Durum: **Hafta 7 bitti (13 Ekim)**, sıradaki Hafta 8: oda defteri. İki agent aynı repoda paralel
+çalışıyor. Biri ötekinin dosyasını değiştiremiyor; bunu prompt değil dosya sistemi sağlıyor (agent başına
+Unix kullanıcısı, named volume, `clone --shared`). Oda görünümünde ham terminal çıktısı yok.
+Kapılar: `gate:w7` 93/93, `gate:w7:agent` 16/0/1. Kapanış özeti: `docs/week-07.md`.
+
+Hafta 6'dan devam: bir satıra "bunu böl" yazılıyor, agent düzeltiyor, ikinci kullanıcı canlı görüyor
+(`gate:w6` 13/13, `gate:w6:agent` 12/12).
+
+Hafta 5'ten devam: İki kişi **aynı agent'a aynı anda**
 yazıyor, mesajlar sıraya giriyor ve iki mesaj asla paralel inference'a girmiyor; agent kime
 cevap verdiğini biliyor; sürücülük iki tıkta devrediliyor ve sürücü koşan turn'ü kesebiliyor.
 

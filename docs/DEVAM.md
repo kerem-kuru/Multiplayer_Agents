@@ -1,9 +1,16 @@
-# Kaldığımız yer — 13 Ekim 2026, akşam
+# Kaldığımız yer — 21 Ekim 2026
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar. Önce bu ilk bölümü oku;
-altındaki bölümler (3 Ekim ve öncesi) kanıtları, gerekçeleri ve hâlâ geçerli komutları taşıyor.
+altındaki bölümler (13 Ekim ve öncesi) kanıtları, gerekçeleri ve hâlâ geçerli komutları taşıyor.
 
-## ⚠️ BURADAN BAŞLA — 13 Ekim akşam
+## ⚠️ BURADAN BAŞLA — 21 Ekim
+
+- **Hafta 7 KAPANDI** (Kerem onayı, 21 Ekim). Kapanış özeti `docs/week-07.md`, README durum satırı güncel.
+- Bütün commit'ler **push edildi** (UTF-8 göçü dahil).
+- **Sıradaki: Hafta 8 (oda defteri).** Görev dokümanı `HAFTA-8-GOREV.md` Kerem'den gelecek (`Downloads/`).
+  Hafta 8 girdileri: `docs/week-07.md` "Hafta 8'e devredilenler". Açık borçlar aynı dosyada ve aşağıda.
+
+## 13 Ekim akşam durumu (Hafta 7 kapanışından önce)
 
 ### UTF-8 göçü (Kerem'in 5 aşamalı planı) — BİTTİ
 Kural README "Kural: HTTP gövdeleri UTF-8 ve bayt olarak": **Gövdeler stdin'den bayt olarak gönderilir; API
