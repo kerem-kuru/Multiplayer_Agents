@@ -6,6 +6,9 @@ altındaki bölümler (13 Ekim ve öncesi) kanıtları, gerekçeleri ve hâlâ g
 ## ⚠️ BURADAN BAŞLA — 21 Ekim
 
 - **Hafta 7 KAPANDI** (Kerem onayı, 21 Ekim). Kapanış özeti `docs/week-07.md`, README durum satırı güncel.
+- **Oturum 21 Ekim'de kapandı.** Adım 1 bitti, her şey push'lu. Postgres/redis **durduruldu** (silinmedi)
+  → ilk iş `npm run db:up`. Sıradaki: **Adım 2** (`008_journal.sql`). Adım 5'ten önce Kerem'in iki kararı
+  gerekiyor (aşağıda "Kerem'e sorulacak"; ayrıca özet modeli flash-lite, senaryo modeli `gemini-3.8-flash` önerildi).
 - **Hafta 8 (oda defteri) BAŞLADI** (21 Ekim). Görev dokümanı `Downloads/HAFTA-8-GOREV.md`, yol haritası
   kopyası `docs/roadmap.md`. Hafta 8 girdileri: `docs/week-07.md` "Hafta 8'e devredilenler".
 
