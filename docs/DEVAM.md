@@ -1,9 +1,59 @@
-# Kaldığımız yer — 21 Ekim 2026
+# Kaldığımız yer — 24 Ekim 2026
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar. Önce bu ilk bölümü oku;
-altındaki bölümler (13 Ekim ve öncesi) kanıtları, gerekçeleri ve hâlâ geçerli komutları taşıyor.
+altındaki bölümler (21 Ekim, 13 Ekim ve öncesi) kanıtları, gerekçeleri ve hâlâ geçerli komutları taşıyor.
 
-## ⚠️ BURADAN BAŞLA — 21 Ekim
+## ⚠️ BURADAN BAŞLA — 24 Ekim
+
+- **Adım 1 düzeltildi, Adım 2 bitti.** Defter iki parçalı modele geçti (anlık kısım + sicil, yuvarlama yok);
+  gerekçe ve kurallar README **"Hafta 8 kararları"**. Kerem'in sebebi: agent'ın bağlamı kayınca eski mesajlar
+  düşüyor; defter tüm yapılanların özetini tutmalı, kendi içinde aynı kaymayı tekrarlamamalı.
+- **Üç karar verildi (24 Ekim, Kerem):** (1) iki parçalı model + `Contract.owner` + `Contract.sourceSha256`;
+  (2) **Adım 5 = tek stdio MCP sunucusu**, iki runtime da ona bağlanır (in-process DEĞİL); (3) kritik senaryo
+  ücretli anahtarda en güçlü modelle, `JOURNAL_MODEL` ucuz modelde. Senaryo modeli adı yoklamayla seçilecek
+  (pro hiç ölçülmedi) ve `turn.completed.models` istenen modeli göstermeli.
+- **Kapı kontrolleri 4 ve 13 yeniden tanımlandı** (README "Hafta 8 kararları" tablosu). `week8-gate.sh` yazılırken
+  görev dokümanındaki değil README'deki hali uygulanır.
+- Postgres/redis **AÇIK**, 008 uygulandı. Sıradaki: **Adım 3** (`packages/core/src/journal.ts`).
+
+### Adım 3 için notlar (karar verilmiş şekil)
+- `writeEntry`: agent başına seri yazım (kilit) → `mergeJournalWrite(state, patch, host)` → aynı transaction'da
+  `journal_entries` satırı (`patch` = delta, `snapshot`), `decision_registry` upsert (PK sahip+what),
+  `contract_registry` upsert/DELETE. Sürüm = agent'ın en büyük sürümü + 1; çakışmayı `journal_entries_version` yakalar.
+- Sahiplik DB'de de korunsun: sözleşme upsert'ü `ON CONFLICT … DO UPDATE … WHERE contract_registry.owner = EXCLUDED.owner`
+  (iki agent aynı yeni adı aynı anda yazarsa biri PK'ye çarpar).
+- `host.fileSha`: `file`'ın sha256'sı — `contracts/` container'da; okuma `contracts-read.ts` ile aynı kısıtla
+  (`nobody:rooms-contracts`, `realpath` sınırı). Root ile okuma YOK (23 Eylül dersi).
+- `touched`: o turn'ün `file.changed`/`diff.updated`/`contract.changed` yolları; boşsa önceki korunur (şemada kural).
+- `journal.compaction_needed`: event şeması Adım 8 ile; ölçüm saf fonksiyonda hazır (`journalCompaction`).
+- Sicil sırası: kararlar sahip içinde `(version, ord)`, sözleşmeler `seq` — `applyJournalWrite` ile aynı (DB'de denendi).
+
+### Hafta 8 planı (görev dokümanının sırası)
+| # | Adım | Durum |
+| --- | --- | --- |
+| 1 | Defter şeması `packages/protocol/src/journal.ts` | ✅ 24 Ekim düzeltildi: iki parçalı model, 48 birim test (`mergeJournalWrite`, `applyJournalWrite`, `relevantDecisions`, `journalCompaction`) |
+| 2 | Migration `008_journal.sql` | ✅ `journal_entries` (delta + snapshot + sürüm), `decision_registry`, `contract_registry`; kısıtlar DB'de denendi (6/6), tam paket 541/541 |
+| 3 | Defter çekirdeği `packages/core/src/journal.ts` | ← sıradaki |
+| 4 | Runner RPC kanalı (`rpc` / `rpc_result`) | |
+| 5 | MCP — **tek stdio sunucusu** (karar verildi) | |
+| 6 | Oda durumu metni `buildRoomState` + ilgi filtresi + "(dosya değişmiş)" | |
+| 7 | Turn başı enjeksiyon + turn sonu özeti → **bitince kritik senaryo bir kez elle** | |
+| 8 | Yeni event'ler (+ `journal.compaction_needed`) | |
+| 9 | API `GET/POST /rooms/:id/journal` (`apps/api`) | |
+| 10 | Projeksiyon + kart satırı defterden | |
+| 11 | UI: oda durumu paneli, defter öğesi | |
+| 12 | Kritik senaryo `gate-scenario-handoff.sh` (5/5) | |
+| 13 | `gate:w8` (22 kontrol; 4 ve 13 README'deki haliyle) | |
+| 14 | Dogfood | |
+| 15 | README | |
+
+### Ücretli anahtar koşumu (PLANDA — Kerem'in talimatıyla, kendiliğinden koşma)
+- `gate:w3:agent` ve `gate:w5:agent`: volume değişikliğinden sonra koşulmadı. Hafta 8 önkoşulu "Hafta 1–7
+  kapıları geçiyor" bunlar olmadan tam değil.
+- Hafta 8'in model isteyen kısımları da (kritik senaryo 5 koşum + varyant, `gate:w8` agent kontrolleri)
+  ücretli anahtarla koşulacak; maliyet ve süre her koşumda raporlanacak.
+
+## 21 Ekim durumu (Adım 1'in ilk hali)
 
 - **Hafta 7 KAPANDI** (Kerem onayı, 21 Ekim). Kapanış özeti `docs/week-07.md`, README durum satırı güncel.
 - **Oturum 21 Ekim'de kapandı.** Adım 1 bitti, her şey push'lu. Postgres/redis **durduruldu** (silinmedi)
@@ -12,34 +62,9 @@ altındaki bölümler (13 Ekim ve öncesi) kanıtları, gerekçeleri ve hâlâ g
 - **Hafta 8 (oda defteri) BAŞLADI** (21 Ekim). Görev dokümanı `Downloads/HAFTA-8-GOREV.md`, yol haritası
   kopyası `docs/roadmap.md`. Hafta 8 girdileri: `docs/week-07.md` "Hafta 8'e devredilenler".
 
-### Hafta 8 planı (görev dokümanının sırası)
-| # | Adım | Durum |
-| --- | --- | --- |
-| 1 | Defter şeması `packages/protocol/src/journal.ts` | ✅ 30 birim test; birleştirme kuralları saf (`mergeJournalEntry`) |
-| 2 | Migration — **`008_journal.sql`** (007 Hafta 7'de alındı) | |
-| 3 | Defter çekirdeği `packages/core/src/journal.ts` | |
-| 4 | Runner RPC kanalı (`rpc` / `rpc_result`) | |
-| 5 | MCP tool'ları `read_journal`, `write_summary` — **Gemini için karar gerekiyor** (aşağıda) | |
-| 6 | Oda durumu metni `buildRoomState` | |
-| 7 | Turn başı enjeksiyon + turn sonu özeti → **bitince kritik senaryo bir kez elle** | |
-| 8 | Yeni event'ler (adımlarla birlikte eklenir) | |
-| 9 | API `GET/POST /rooms/:id/journal` (`apps/api`) | |
-| 10 | Projeksiyon + kart satırı defterden | |
-| 11 | UI: oda durumu paneli, defter öğesi | |
-| 12 | Kritik senaryo `gate-scenario-handoff.sh` (5/5) | |
-| 13 | `gate:w8` (22 kontrol) | |
-| 14 | Dogfood | |
-| 15 | README | |
-
-**Kerem'e sorulacak (Adım 5'ten önce):** görev tanımı MCP'yi Claude SDK'nın in-process sunucusuyla
+**(24 Ekim'de karara bağlandı)** Kerem'e sorulacak (Adım 5'ten önce): görev tanımı MCP'yi Claude SDK'nın in-process sunucusuyla
 istiyor; kapılar Gemini CLI ile koşuyor. Öneri: tek bir stdio MCP sunucusu (runner'a soket üzerinden bağlanır),
 iki koşum ortamı da onu kullanır → sağlayıcı bağımsız. Özetleyici (`JOURNAL_MODEL`) de Gemini'de ucuz model.
-
-### Ücretli anahtar koşumu (PLANDA — Kerem'in talimatıyla, kendiliğinden koşma)
-- `gate:w3:agent` ve `gate:w5:agent`: volume değişikliğinden sonra koşulmadı. Hafta 8 önkoşulu "Hafta 1–7
-  kapıları geçiyor" bunlar olmadan tam değil.
-- Hafta 8'in model isteyen kısımları da (kritik senaryo 5 koşum + varyant, `gate:w8` agent kontrolleri)
-  ücretli anahtarla koşulacak; maliyet ve süre her koşumda raporlanacak.
 
 ## 13 Ekim akşam durumu (Hafta 7 kapanışından önce)
 

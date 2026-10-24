@@ -1197,6 +1197,94 @@ metinle, ikincisi düzeltilmiş metinle (11/11 mesaj sağlam) geçti.
 | Özet sekmesi Adım 14'ü karşılamıyordu | Görev tanımıyla karşılaştırıldı: sekmenin adı "Etkinlik"ti ve turn'ler hep açık render ediliyordu. | Sekme "Özet", `role=tab`; turn'ler kapalı başlıyor (tek satır: ilk satır · kim · N dosya · sonuç/süre), koşan turn açık. |
 | **Okunmamış işareti başka agent koşarken sönmüyordu** | Kontrol 21'in zamanlaması düşünülürken: `seen` her yeni event'te sıfırlanan bir debounce'du. İki agent'lı odada 5 sn sessizlik neredeyse hiç olmuyor. | En fazla 5 sn'de bir giden throttle. |
 
+## Hafta 8 kararları
+
+### Defter iki parçalı: anlık kısım + sicil (24 Ekim)
+
+**Sorun.** Görev tanımı Adım 1'de kayıt başına en fazla 10 karar ve 10 sözleşme var, ikisi de
+birikimli. Birikimli bir listeye kayıt başına tavan koyunca 11. karar 1.'yi atıyor. Defterin
+var olma sebebi tam da bu kaymayı telafi etmek: agent'ın bağlamı uzun bir projede kayar, en eski
+mesajlar düşer ve agent ne karar verildiğini unutur. Aynı kaymayı defterin içinde tekrarlamak
+amacı boşa çıkarıyordu.
+
+| Parça | Alanlar | Yazımda alan yoksa | Sınır |
+| --- | --- | --- | --- |
+| **Anlık** (`JournalSnapshot`, agent başına) | `status`, `headline`, `task`, `blocked_on`, `needs_from`, `touched` | önceki sürümden korunur | alan başına, olduğu gibi |
+| **Sicil** (`DecisionRecord`, `Contract`, oda düzeyinde) | `decisions`, `contracts` | hiçbir şey eklenmez, **hiçbir şey düşmez** | 10 / 10 **tek yazımın** sınırı, odanın toplamı sınırsız |
+
+- **Host alanları:** `agent`, `touched`, `version`, `Contract.owner`, `Contract.sourceSha256`.
+  Payload'da gelirlerse atılır, hata vermez.
+- **`Contract.owner`:** sözleşme adı oda içinde tek. Değiştirmek ve kaldırmak yalnızca sahibine açık.
+  Başkasının sözleşmesine yazan agent, `needs_from` ile istemesini söyleyen bir hata alır.
+- **`Contract.sourceSha256`:** `file`'ın yazım anındaki sha'sı. Dosya değişip sicil güncellenmezse
+  oda durumu metni "(dosya değişmiş)" der (Adım 6).
+- **`touched` boş gelirse önceki korunur:** dosyaya dokunmayan bir yazım "hiçbir şeye dokunmadım"
+  demek değil, "dosya bilgisi taşımıyorum" demek.
+- **Yuvarlama yok.** Sicil büyüyünce ne gösterileceğine `relevantDecisions` karar veriyor:
+  kendi kararları, okuyanı etkileyenler ve genel kararlar (`affects: []`) gösteriliyor. Model çağrısı
+  yok, sonuç deterministik. `journalCompaction` eşiği aşınca (okuyanı ilgilendiren 20 karar ya da
+  10 sözleşme, yani eski tasarımın tavanları) `journal.compaction_needed` yazılacak (Adım 7/8). Olay
+  "eski tasarım burada bilgi atmaya başlardı" anlamına geliyor. Hafta 11'deki sıkıştırma kararı
+  böylece tahmine değil, bu olayların sıklığına ve büyüklüğüne dayanacak. Görev tanımındaki
+  `journal.compaction_suggested` (bağlam %60) ayrı bir olay, o da duruyor.
+- **Tablolar (`008_journal.sql`):** `journal_entries` her yazımın deltasını (`patch`), sonraki anlık
+  kısmı (`snapshot`) ve agent başına sürüm sayacını tutuyor. Satır eskitilmiyor, sürümler yan yana
+  duruyor. Siciller `decision_registry` ve `contract_registry` tablolarında. Her sicil satırı onu
+  yazan defter satırına FK ile bağlı. `superseded_by` ve `journal_entries_current` yok, çünkü
+  "güncel" en büyük sürüm.
+
+### Adım 5: tek stdio MCP sunucusu (24 Ekim, karar)
+
+Görev tanımı `read_journal` / `write_summary`'yi Claude SDK'nın in-process MCP sunucusu olarak
+istiyor. Bunu yapmıyoruz. Bütün kapılar Gemini'de koşuyor, `gate:w2` Claude anahtarı olmadığı
+için hiç koşulmadı. In-process sunucu yalnızca Claude runner'ının içinde yaşar. Gemini agent'ları
+deftere hiç erişemez, yani haftanın tezi ("iki agent defter üzerinden anlaşıyor") ölçebildiğimiz
+tek koşum ortamında ölçülemez.
+
+**Karar:** tek bir stdio MCP sunucusu kuruluyor ve iki runtime da ona bağlanıyor. Claude SDK
+`mcpServers`'tan, Gemini CLI `settings.json`'daki `mcpServers`'tan bağlanıyor. Sunucu veriyi
+runner'ın RPC kanalından (Adım 4) host'a soruyor. Container'a DB kimliği girmiyor (Değişmez Kural 3)
+ve şemalar `packages/protocol`'den geliyor. Bu karar runner soyutlamasıyla ve 5 maddelik koşum
+ortamı sözleşmesiyle tutarlı. Adım 3 ve 4 doğrudan bunun üstüne geliyor.
+
+### Kritik senaryonun modeli: 5/5'in matematiği (24 Ekim, karar)
+
+Kapı senaryonun **5 kez üst üste** geçmesini istiyor. Bu, modelin güvenilmezliğini beşinci
+kuvvetine çıkarıyor:
+
+| Tek koşum başarısı | 5/5 olasılığı |
+| --- | --- |
+| %85 | %44 |
+| %90 | %59 |
+| %95 | %77 |
+| %98 | %90 |
+
+Tek koşumda %90 başarı bile kapıyı iki denemeden birinde düşürüyor, ve düşen her deneme bir günün
+kotası. Bu yüzden:
+
+- **Senaryo (`AGENT_MODEL`)** ücretli anahtarda (`GEMINI_API_KEY_2`) elimizdeki en güçlü modelle
+  koşuyor. Görev tanımındaki `sonnet` için Claude anahtarı yok. Gemini'de pro modeller hiç
+  ölçülmedi (yukarıda "config'teki model garanti değil": zorlama pro'ya yayılıyor mu bilinmiyor).
+  Bu yüzden model adı burada sabitlenmiyor. Senaryodan önce tek bir yoklamayla seçilecek. Koşumun
+  geçerli sayılması için `turn.completed.models` istenen modeli göstermeli: CLI modeli flash'a
+  çevirirse 5/5 yanlış model üzerinde ölçülmüş olur.
+- **Özetleyici (`JOURNAL_MODEL`)** ucuz modelde (flash-lite) kalıyor. Görevi yapılandırılmış alanları
+  doldurmak, muhakeme değil. Ana bütçeden çıkmıyor (Değişmez Kural 6).
+
+### Kapı kontrolleri 4 ve 13, yeni anlamıyla
+
+İki kontrolün eski hali iki parçalı modelde yanlış şeyi ölçüyor.
+
+| # | Görev tanımı | Neden yanlış | Yeni hali |
+| --- | --- | --- | --- |
+| 4 | İkinci kayıt → `version = 2`, birincinin `superseded_by`'ı dolu, `journal_entries_current` tek güncel kayıt tutuyor | Satırlar artık eskitilmiyor. Kontrol, kararın v1'de yazılıp v2'de hâlâ durup durmadığını (asıl risk) hiç sormuyordu | İkinci yazım → `version = 2`; `journal_entries`'te o agent için v1 ve v2 **ikisi de** var; v2'nin göndermediği anlık alanlar v1'den korunmuş; v1'in kararı ve sözleşmesi v2 onları anmadığı halde siciller hâlâ tutuyor; aynı `(room, agent, version)` ile elle ekleme DB tarafından reddediliyor |
+| 13 | 20 karar ve 10 sözleşmelik defterde `truncated: true`, `chars <= 6000`, tüm `contracts` metinde | 20/10 eski tavanlar: kırpmayı değil tavanı sınıyordu. Sicil sınırsız olunca asıl soru "eski tavanın üstünde ne oluyor" | Üç agent'lı yapay oda: sicilde 40 karar (yarısı yalnızca `qa`'yı etkiliyor) ve 15 sözleşme. `frontend` için oda durumu: yalnızca `qa`'yı etkileyen kararlardan **hiçbiri** metinde yok (ilgi filtresi); 15 sözleşmenin **hepsi** metinde; `chars <= 6000`; `truncated` kırpma kuralına göre; aynı durum için `journal.compaction_needed` (15 > 10 sözleşme) yazılmış |
+
+**Açık (Adım 6'da kesinleşecek, öneri):** sözleşmeler hiç düşmüyor, sicil de sınırsız. Bu ikisi,
+sözleşmeler tek başına 6000 karakteri aşınca çatışıyor. Öneri: o durumda sözleşmeler bütçeden önce
+geliyor. Metin bütçeyi aşıyor, `truncated: true` ve `journal.compaction_needed` yazılıyor. Sessiz
+kayıp yok, aşım ölçülüyor.
+
 ## Karar notları
 
 Hafta 1 görev tanımından bilinçli olarak ayrılan noktalar ve gerekçeleri.
