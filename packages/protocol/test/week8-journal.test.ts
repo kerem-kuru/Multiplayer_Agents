@@ -259,6 +259,14 @@ describe("sicil: yazımda yoksa eklenmez, hiçbir şey düşmez", () => {
     expect(s.decisions.map((d) => d.owner)).toEqual(["backend", "frontend"]);
   });
 
+  it("sıra sabit: sahip adı, sonra sürüm — yazımlar araya girse de (DB okumasıyla aynı)", () => {
+    let s = commit(EMPTY_JOURNAL, { ...start, decisions: [{ what: "f-karar-1", why: "test" }] }, { agent: "frontend" });
+    s = commit(s, { ...start, decisions: [{ what: "b-karar-1", why: "test" }, { what: "b-karar-2", why: "test" }] });
+    s = commit(s, { decisions: [{ what: "f-karar-2", why: "test" }] }, { agent: "frontend" });
+    s = commit(s, { decisions: [{ what: "b-karar-3", why: "test" }] });
+    expect(s.decisions.map((d) => d.what)).toEqual(["b-karar-1", "b-karar-2", "b-karar-3", "f-karar-1", "f-karar-2"]);
+  });
+
   it("tek yazımda aynı what iki kez: sonuncusu kazanıyor", () => {
     const r = write(EMPTY_JOURNAL, { ...start, decisions: [decision, { ...decision, why: "ikinci gerekçe" }] });
     expect(r.success && r.data.decisions.map((d) => d.why)).toEqual(["ikinci gerekçe"]);

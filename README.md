@@ -1233,6 +1233,23 @@ amacı boşa çıkarıyordu.
   yazan defter satırına FK ile bağlı. `superseded_by` ve `journal_entries_current` yok, çünkü
   "güncel" en büyük sürüm.
 
+### Adım 3: defter çekirdeği, görev tanımından üç sapma (24 Ekim)
+
+`packages/core/src/journal.ts`: `writeJournalEntry`, `readJournalState`, `readJournalHistory`. Adlar
+görev tanımındaki `writeEntry` / `readJournal` değil, çünkü Hafta 1 iskeleti `room/journal.ts` aynı
+adla dışa açılıyor (Adım 9'da kalkacak).
+
+| Görev tanımı | Burada | Neden |
+| --- | --- | --- |
+| Event (`journal.entry_written`) commit **sonrası** yazılır | Event ve tablolar **aynı transaction'da**. Tablolar event'in redaction'dan geçmiş payload'ından yazılıyor (Hafta 6'daki `appendEventWith` kalıbı) | Commit sonrası yazılırsa log ile tablo ayrışabilir (Değişmez Kural 8). Daha kötüsü, tablolar temizlenmemiş metni tutar: redaction tek geçit `appendEvent`'te. Testte sabit: karardaki secret event'te, `journal_entries`'te ve `decision_registry`'de yok |
+| Agent'ın güncel kaydı `FOR UPDATE` ile kilitlenir (agent başına) | **Oda düzeyinde** kilit (oturum satırı, `appendContractChange` ile aynı) | Sözleşme adı oda içinde tek; sahiplik kontrolü öteki agent'ların sicilini okuyor. Agent başına kilitle iki agent aynı yeni adı aynı anda alabilirdi (testte: biri sahip olur, öteki 400). Yazımlar seyrek, bedeli yok |
+| `Contract.sourceSha256` için dosya okunur | Sha, log'daki son `contract.changed.sha256` | Sha zaten log'da (Hafta 7 izleyicisi). Container'dan dosya okumak, 23 Eylül'deki "root ile okuyan sunucu yolu" deliğini yeniden açardı. `contracts/` dışındaki dosyalar izlenmiyor, onlar için null |
+
+Ek olarak `touched` depo-göreli ve sıralı geliyor: `file.changed` oda-göreli
+(`worktrees/backend/src/a.ts`) olduğu için agent'ın workspace öneki atılıyor. Testte sabitlenen bir
+kural daha var: `readJournalState`, event'lerin `applyJournalWrite` ile katlanmasının **birebir
+aynısını** veriyor. Kararların sırası sahip adı (`COLLATE "C"`), sürüm ve sıra ile sabit.
+
 ### Adım 5: tek stdio MCP sunucusu (24 Ekim, karar)
 
 Görev tanımı `read_journal` / `write_summary`'yi Claude SDK'nın in-process MCP sunucusu olarak

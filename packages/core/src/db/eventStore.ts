@@ -197,6 +197,38 @@ export async function appendContractChange(
   return stored;
 }
 
+/**
+ * Oturum satırını kilitle, durumu oku, event'e karar ver, yaz — tek
+ * transaction'da. `appendContractChange` ile aynı kalıp, genel hali.
+ *
+ * `decide` kilit ALTINDA koşar: okuduğu durum, event yazılana kadar başka bir
+ * yazıcı tarafından değiştirilemez. Event yazmamaya karar verirse `{ skip }`
+ * döner ve hiçbir şey yazılmaz. `work`, `appendEventWith`'teki gibi, event'in
+ * TEMİZLENMİŞ haliyle yan tabloları yazar; hata atarsa event de yazılmaz.
+ */
+export async function appendEventUnderLock<S>(
+  sessionId: string,
+  decide: (client: pg.PoolClient) => Promise<
+    | { event: NewRoomEvent; work: (client: pg.PoolClient, stored: RoomEvent) => Promise<void> }
+    | { skip: S }
+  >,
+  pool: pg.Pool = getPool(),
+): Promise<{ stored: RoomEvent } | { skip: S }> {
+  const out = await withTx(async (client) => {
+    await client.query(`SELECT 1 FROM sessions WHERE id = $1 FOR UPDATE`, [sessionId]);
+    const d = await decide(client);
+    if ("skip" in d) return d;
+    const stored = await appendOne(client, d.event);
+    await d.work(client, stored);
+    return { stored };
+  }, pool);
+  if ("stored" in out) {
+    getEventBus().publish(out.stored.sessionId, out.stored);
+    noteEventForSnapshot(out.stored.sessionId, out.stored.seq);
+  }
+  return out;
+}
+
 /** Birden çok event'i tek transaction'da, verilen sırayla yaz. */
 export async function appendEvents(
   events: NewRoomEvent[],

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CheckpointId, CheckpointKind, CommentSide, FileDiff } from "./diff.js";
 import { Actor, AgentName, ApprovalId, RoomId, SessionId, TaskId } from "./ids.js";
+import { Contract, DecisionRecord, JournalPatch, JournalSnapshot } from "./journal.js";
 
 /**
  * Event kataloğu — v1.
@@ -384,6 +385,34 @@ export const JournalUpdated = ev(
   }),
 );
 
+/**
+ * Defter yazımı — Hafta 8. Tek gerçek kaynak bu event (Değişmez Kural 8):
+ * `journal_entries` ve iki sicil tablosu AYNI transaction'da bu event'in
+ * redaction'dan GEÇMİŞ payload'ından yazılır, yani tablolar event log'dan
+ * ne fazlasını ne temizlenmemiş halini tutar. Event'lerin `applyJournalWrite`
+ * ile katlanması tabloların aynısını verir.
+ *
+ * `patch` agent'ın (ya da özetin) gönderdiği, kabul edilmiş haliyle: turn
+ * sonu özeti bu turn'de hangi alanların agent tarafından doldurulduğunu
+ * buradan okur (Adım 7). Sicil kısmı DELTA: yalnızca bu yazımın ekledikleri.
+ */
+export const JournalEntryWritten = ev(
+  "journal.entry_written",
+  z.object({
+    ...AgentRef,
+    messageId: z.string().uuid().nullable(),
+    version: z.number().int().positive(),
+    source: z.enum(["agent", "auto", "human"]),
+    patch: JournalPatch,
+    snapshot: JournalSnapshot,
+    decisions: z.array(DecisionRecord),
+    contracts: z.array(Contract),
+    removeContracts: z.array(z.string()),
+    /** Turn sonu özetinin maliyeti; agent'ın kendi yazımında 0. */
+    summaryCostUsd: z.number().nonnegative(),
+  }),
+);
+
 // --- Görev panosu ----------------------------------------------------------
 
 export const TaskCreated = ev(
@@ -720,6 +749,7 @@ const EVENT_SCHEMAS = [
   AgentWorkspaceReady,
   DiffUpdated,
   JournalUpdated,
+  JournalEntryWritten,
   TaskCreated,
   TaskUpdated,
   AccessRequested,

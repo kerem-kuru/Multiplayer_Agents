@@ -14,27 +14,27 @@ altındaki bölümler (21 Ekim, 13 Ekim ve öncesi) kanıtları, gerekçeleri ve
   (pro hiç ölçülmedi) ve `turn.completed.models` istenen modeli göstermeli.
 - **Kapı kontrolleri 4 ve 13 yeniden tanımlandı** (README "Hafta 8 kararları" tablosu). `week8-gate.sh` yazılırken
   görev dokümanındaki değil README'deki hali uygulanır.
-- Postgres/redis **AÇIK**, 008 uygulandı. Sıradaki: **Adım 3** (`packages/core/src/journal.ts`).
+- **Adım 3 bitti** (`packages/core/src/journal.ts`, 15 DB testi, 5 kez üst üste geçti; tam paket 557/557).
+  Görev tanımından üç sapma README "Adım 3: defter çekirdeği" tablosunda (event aynı transaction'da,
+  oda düzeyinde kilit, sha log'dan).
+- Postgres/redis **AÇIK**. Sıradaki: **Adım 4** (runner RPC kanalı).
 
-### Adım 3 için notlar (karar verilmiş şekil)
-- `writeEntry`: agent başına seri yazım (kilit) → `mergeJournalWrite(state, patch, host)` → aynı transaction'da
-  `journal_entries` satırı (`patch` = delta, `snapshot`), `decision_registry` upsert (PK sahip+what),
-  `contract_registry` upsert/DELETE. Sürüm = agent'ın en büyük sürümü + 1; çakışmayı `journal_entries_version` yakalar.
-- Sahiplik DB'de de korunsun: sözleşme upsert'ü `ON CONFLICT … DO UPDATE … WHERE contract_registry.owner = EXCLUDED.owner`
-  (iki agent aynı yeni adı aynı anda yazarsa biri PK'ye çarpar).
-- `host.fileSha`: `file`'ın sha256'sı — `contracts/` container'da; okuma `contracts-read.ts` ile aynı kısıtla
-  (`nobody:rooms-contracts`, `realpath` sınırı). Root ile okuma YOK (23 Eylül dersi).
-- `touched`: o turn'ün `file.changed`/`diff.updated`/`contract.changed` yolları; boşsa önceki korunur (şemada kural).
-- `journal.compaction_needed`: event şeması Adım 8 ile; ölçüm saf fonksiyonda hazır (`journalCompaction`).
-- Sicil sırası: kararlar sahip içinde `(version, ord)`, sözleşmeler `seq` — `applyJournalWrite` ile aynı (DB'de denendi).
+### Adım 4 için notlar
+- `runner-protocol.ts`: `rpc` (runner → host) ve `rpc_result` (host → runner). Host tarafı `packages/core/src/rpc.ts`:
+  `journal.read` → `readJournalState`, `journal.write` → `writeJournalEntry` (`source: "agent"`, `messageId` = koşan turn).
+- Kimlik her zaman host'un bildiği `{ roomId, agentName }`; `params`'taki kimlik yok sayılır (kapı kontrolü 5).
+- Zaman aşımı 10 sn, açık RPC en fazla 8; RPC trafiği log'a yazılmaz.
+- Adım 5'te bu kanalın ucunda **tek stdio MCP sunucusu** olacak (karar verildi) — RPC'yi runner sürecinden
+  MCP sürecine taşıyacak yolu (soket/stdin) Adım 4'te sabitle; iki runtime da aynı yolu kullanacak.
+- `journal.rejected` event'i Adım 5'te (tool katmanı): `writeJournalEntry`'nin `{ ok: false, fields, message }` dönüşünden.
 
 ### Hafta 8 planı (görev dokümanının sırası)
 | # | Adım | Durum |
 | --- | --- | --- |
 | 1 | Defter şeması `packages/protocol/src/journal.ts` | ✅ 24 Ekim düzeltildi: iki parçalı model, 48 birim test (`mergeJournalWrite`, `applyJournalWrite`, `relevantDecisions`, `journalCompaction`) |
 | 2 | Migration `008_journal.sql` | ✅ `journal_entries` (delta + snapshot + sürüm), `decision_registry`, `contract_registry`; kısıtlar DB'de denendi (6/6), tam paket 541/541 |
-| 3 | Defter çekirdeği `packages/core/src/journal.ts` | ← sıradaki |
-| 4 | Runner RPC kanalı (`rpc` / `rpc_result`) | |
+| 3 | Defter çekirdeği `packages/core/src/journal.ts` | ✅ `writeJournalEntry` / `readJournalState` / `readJournalHistory`; `journal.entry_written` event'i (Adım 8'den öne alındı); 15 DB testi |
+| 4 | Runner RPC kanalı (`rpc` / `rpc_result`) | ← sıradaki |
 | 5 | MCP — **tek stdio sunucusu** (karar verildi) | |
 | 6 | Oda durumu metni `buildRoomState` + ilgi filtresi + "(dosya değişmiş)" | |
 | 7 | Turn başı enjeksiyon + turn sonu özeti → **bitince kritik senaryo bir kez elle** | |

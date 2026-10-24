@@ -187,7 +187,11 @@ export function journalErrorFields(error: z.ZodError): string[] {
 /** Odanın defter durumu: agent başına anlık kısım + oda sicili. */
 export type JournalState = {
   snapshots: Readonly<Record<string, JournalSnapshot>>;
-  /** Sıra: yazım sırası (sürüm, sonra payload içi sıra). Aynı sahip+`what` tek. */
+  /**
+   * Sıra: sahip adı (kod birimi sırası — SQL'de `COLLATE "C"`), sonra sürüm,
+   * sonra yazım içi sıra. Aynı sahip+`what` tek. Sabit bir sıra; DB okuması
+   * ile event'lerin katlanması aynı diziyi vermeli.
+   */
   decisions: readonly DecisionRecord[];
   /** Ad oda içinde tek. Sıra: ilk yazım sırası; güncelleme yerinde. */
   contracts: readonly Contract[];
@@ -306,10 +310,11 @@ export function mergeJournalWrite(
 export function applyJournalWrite(prev: JournalState, w: JournalWrite): JournalState {
   const agent = w.snapshot.agent;
   const replaced = new Set(w.decisions.map((d) => d.what));
+  // Sahip içinde sona eklemek (sürüm, sıra) düzenini korur; sıralama kararlı.
   const decisions = [
     ...prev.decisions.filter((d) => !(d.owner === agent && replaced.has(d.what))),
     ...w.decisions,
-  ];
+  ].sort((a, b) => (a.owner < b.owner ? -1 : a.owner > b.owner ? 1 : 0));
 
   const contracts = prev.contracts.filter((c) => !w.removeContracts.includes(c.name));
   for (const c of w.contracts) {
