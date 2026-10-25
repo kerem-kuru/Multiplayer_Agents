@@ -15,7 +15,29 @@ altındaki bölümler (21 Ekim, 13 Ekim ve öncesi) kanıtları, gerekçeleri ve
   - Kanıt: `week8-rpc.test.ts` 14 test (5 kez üst üste), tam paket **571/571**; canlı probe
     `node scripts/week8-rpc-probe.mjs` **9/9, iki kez** (gerçek container: izinler, uid ile gidiş-dönüş,
     çapraz agent `EACCES`, log'da yalnızca `journal.entry_written`). Model çağrısı yok.
-- Postgres/redis **AÇIK**. Sıradaki: **Adım 5** (tek stdio MCP sunucusu: `read_journal`, `write_summary`).
+- **Oturum 26 Ekim'de kapandı.** Her şey push'lu (`3a75db5` + bu not). Postgres/redis AÇIK bırakıldı; Docker
+  Desktop kapanırsa ilk iş: Docker Desktop'ı aç (`%LOCALAPPDATA%\Programs\DockerDesktop\Docker Desktop.exe`),
+  sonra `npm run db:up`.
+- Sıradaki: **Adım 5** (tek stdio MCP sunucusu: `read_journal`, `write_summary`).
+- **KARAR (Kerem, 26 Ekim): MCP sunucusu resmî `@modelcontextprotocol/sdk` ile yazılacak** (seçenek a). Elle
+  stdio JSON-RPC (b) reddedildi: el sıkışma ve sürüm uyumunu biz taşırdık. Önce kurulu sürümü ve Claude Agent
+  SDK'nın bağımlı olduğu sürümü kontrol et (`npm ls @modelcontextprotocol/sdk`), mümkünse aynısını kullan.
+
+### Adım 5 — iş sırası (26 Ekim'de Kerem'e anlatılan plan)
+1. MCP sunucusu (`packages/runner-mcp` ya da runner içinde ayrı giriş — karar ver, README'ye yaz): iki tool,
+   şemalar `packages/protocol`'deki Zod'dan; ayrı bundle → `/opt/runner/mcp/` (`scripts/build-runner.mjs` + `rooms/Dockerfile`).
+2. Öğretici hata metni (görev tanımı Adım 5 örneği) + `journal.rejected` event'i (yalnızca neden + alan adları, ham içerik YOK).
+   Kaynak: RPC'nin `data: { accepted: false, status, fields, message }` dönüşü.
+3. Zaman aşımı metni: "sonuç bilinmiyor, `read_journal` ile kontrol et".
+4. İki runtime'a bağla: Claude SDK `mcpServers` (stdio); Gemini CLI `settings.json` `mcpServers`. Tool'lar izin
+   listesine HER ZAMAN eklenir, YAML `toolsAllow` kapatamaz (`resolveSdkTools` / `resolveGeminiTools`).
+5. **ÖLÇ, TAHMİN ETME:** Gemini CLI 0.62'nin MCP tool adlandırması (`mcp__rooms__…` mı başka mı) ve kendi
+   izin listesine nasıl aldığı — kurulu sürümde, imajda dene.
+6. Kanıt, iki aşama: (i) modelsiz — birim testler + container'da MCP sunucusunu agent kullanıcısıyla doğrudan
+   stdio'dan çağıran probe (tool listesi, yazım, bozuk girdi → hata + `journal.rejected`); (ii) modelli kabul
+   ("write_summary ile karar kaydet", serbest metin → düzeltme) **ücretli anahtar → yalnız Kerem söyleyince**, maliyet raporlanır.
+7. İmaj yeniden kurulur: `npm run room:build`'i arka planda, süre sınırı olmadan koş (26 Ekim'de taban imaj
+   değişince apt sıfırdan indi, ~25 dk). Ağır işleri sırayla koş, paralel değil.
 
 ### Adım 5 için notlar
 - MCP süreci `rpcCall(process.env.ROOMS_RPC_SOCKET, …)` ile konuşur; DB kimliği container'a girmez.
