@@ -1,9 +1,29 @@
-# Kaldığımız yer — 24 Ekim 2026
+# Kaldığımız yer — 26 Ekim 2026
 
 Bu dosya oturum devir notudur. Yeni bir oturum **buradan** başlar. Önce bu ilk bölümü oku;
 altındaki bölümler (21 Ekim, 13 Ekim ve öncesi) kanıtları, gerekçeleri ve hâlâ geçerli komutları taşıyor.
 
-## ⚠️ BURADAN BAŞLA — 24 Ekim
+## ⚠️ BURADAN BAŞLA — 26 Ekim
+
+- **Adım 4 BİTTİ (26 Ekim): runner RPC kanalı + soket köprüsü.** Kurallar README "Adım 4: runner RPC kanalı
+  ve soket köprüsü". `PROTOCOL_VERSION` **9**, oda imajı yeniden kuruldu (taban imaj değişmişti, apt sıfırdan
+  indi; yavaş ağda ~25 dk sürdü). Host `packages/core/src/rpc.ts` (`RpcHost`), runner
+  `packages/gitkit/src/rpc-bridge.ts` (`RpcBridge`, `startRpcBridge`, `rpcCall` — Adım 5'in MCP süreci `rpcCall`'u kullanacak).
+  - Soket `/home/agents/<ad>/.rooms/rpc.sock` (0600, dizin 0700); yolu runner `ROOMS_RPC_SOCKET`'e yazıyor,
+    koşum ortamı ve MCP çocuğu ortamı devralır.
+  - Doğrulama reddi `ok: true, data.accepted: false` (taşıma hatası değil) — Adım 5 `journal.rejected`'ı buradan kurar.
+  - Kanıt: `week8-rpc.test.ts` 14 test (5 kez üst üste), tam paket **571/571**; canlı probe
+    `node scripts/week8-rpc-probe.mjs` **9/9, iki kez** (gerçek container: izinler, uid ile gidiş-dönüş,
+    çapraz agent `EACCES`, log'da yalnızca `journal.entry_written`). Model çağrısı yok.
+- Postgres/redis **AÇIK**. Sıradaki: **Adım 5** (tek stdio MCP sunucusu: `read_journal`, `write_summary`).
+
+### Adım 5 için notlar
+- MCP süreci `rpcCall(process.env.ROOMS_RPC_SOCKET, …)` ile konuşur; DB kimliği container'a girmez.
+- Zaman aşımı hatası "sonuç bilinmiyor, `read_journal` ile bak" demeli (host handler'ı durdurmuyor, yazım olmuş olabilir).
+- Claude: SDK `mcpServers` (stdio). Gemini: `settings.json` `mcpServers`. Tool'lar YAML ile kapatılamaz.
+- MCP sunucusu imaja ayrı bir bundle olarak girecek (`scripts/build-runner.mjs` + `rooms/Dockerfile`) → imaj yeniden kurulur.
+
+## 24 Ekim durumu (Adım 3 sonu)
 
 - **Adım 1 düzeltildi, Adım 2 bitti.** Defter iki parçalı modele geçti (anlık kısım + sicil, yuvarlama yok);
   gerekçe ve kurallar README **"Hafta 8 kararları"**. Kerem'in sebebi: agent'ın bağlamı kayınca eski mesajlar
@@ -21,9 +41,9 @@ altındaki bölümler (21 Ekim, 13 Ekim ve öncesi) kanıtları, gerekçeleri ve
 - **Adım 3 bitti** (`packages/core/src/journal.ts`, 15 DB testi, 5 kez üst üste geçti; tam paket 557/557).
   Görev tanımından üç sapma README "Adım 3: defter çekirdeği" tablosunda (event aynı transaction'da,
   oda düzeyinde kilit, sha log'dan).
-- Postgres/redis **AÇIK**. Sıradaki: **Adım 4** (runner RPC kanalı).
+- (24 Ekim) Sıradaki: Adım 4 — 26 Ekim'de bitti, yukarıda.
 
-### Adım 4 için notlar
+### Adım 4 için notlar (24 Ekim; uygulandı)
 - `runner-protocol.ts`: `rpc` (runner → host) ve `rpc_result` (host → runner). Host tarafı `packages/core/src/rpc.ts`:
   `journal.read` → `readJournalState`, `journal.write` → `writeJournalEntry` (`source: "agent"`, `messageId` = koşan turn).
 - Kimlik her zaman host'un bildiği `{ roomId, agentName }`; `params`'taki kimlik yok sayılır (kapı kontrolü 5).
@@ -38,8 +58,8 @@ altındaki bölümler (21 Ekim, 13 Ekim ve öncesi) kanıtları, gerekçeleri ve
 | 1 | Defter şeması `packages/protocol/src/journal.ts` | ✅ 24 Ekim düzeltildi: iki parçalı model, 48 birim test (`mergeJournalWrite`, `applyJournalWrite`, `relevantDecisions`, `journalCompaction`) |
 | 2 | Migration `008_journal.sql` | ✅ `journal_entries` (delta + snapshot + sürüm), `decision_registry`, `contract_registry`; kısıtlar DB'de denendi (6/6), tam paket 541/541 |
 | 3 | Defter çekirdeği `packages/core/src/journal.ts` | ✅ `writeJournalEntry` / `readJournalState` / `readJournalHistory`; `journal.entry_written` event'i (Adım 8'den öne alındı); 15 DB testi |
-| 4 | Runner RPC kanalı (`rpc` / `rpc_result`) | ← sıradaki |
-| 5 | MCP — **tek stdio sunucusu** (karar verildi) | |
+| 4 | Runner RPC kanalı (`rpc` / `rpc_result`) | ✅ 26 Ekim: + Unix soket köprüsü; 14 test, canlı probe 9/9; protokol 9 |
+| 5 | MCP — **tek stdio sunucusu** (karar verildi) | ← sıradaki |
 | 6 | Oda durumu metni `buildRoomState` + ilgi filtresi + "(dosya değişmiş)" | |
 | 7 | Turn başı enjeksiyon + turn sonu özeti → **bitince kritik senaryo bir kez elle** | |
 | 8 | Yeni event'ler (+ `journal.compaction_needed`) | |

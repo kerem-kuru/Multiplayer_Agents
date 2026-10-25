@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import readline from "node:readline";
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import { ContractsWatcher, DiffPublisher } from "@agent-rooms/gitkit";
+import { ContractsWatcher, DiffPublisher, startRpcBridge } from "@agent-rooms/gitkit";
 import type { NewRoomEvent } from "@agent-rooms/protocol";
 import {
   AgentConfig,
@@ -368,11 +368,21 @@ async function runTurn(messageId: string, text: string, ac: AbortController): Pr
   }
 }
 
+/**
+ * RPC köprüsü (Hafta 8, Adım 4): defter tool'larının MCP süreci host'a bu
+ * soketten sorar. `ready`'den ÖNCE açılır — ilk turn'de tool hazır olsun.
+ */
+const rpc = await startRpcBridge({
+  send: (o) => out(o),
+  log: (level, msg) => out({ kind: "log", level, msg }),
+});
+
 out({ kind: "ready", pid: process.pid, protocolVersion: PROTOCOL_VERSION });
 setInterval(() => out({ kind: "heartbeat", busy }), 5_000);
 
 const shutdown = (): void => {
   abort?.abort();
+  void rpc?.close();
   setTimeout(() => process.exit(0), 3_000);
 };
 
@@ -384,6 +394,13 @@ rl.on("line", (line: string) => {
     cmd = RunnerCommand.parse(JSON.parse(line));
   } catch (err) {
     out({ kind: "log", level: "error", msg: `komut ayrıştırılamadı: ${String(err)}` });
+    return;
+  }
+
+  // Turn'den bağımsız: meşgul kontrolünün ÖNÜNDE, yoksa turn ortasındaki
+  // cevap "meşgul, reddedildi" diye düşerdi.
+  if (cmd.kind === "rpc_result") {
+    rpc?.onResult(cmd);
     return;
   }
 

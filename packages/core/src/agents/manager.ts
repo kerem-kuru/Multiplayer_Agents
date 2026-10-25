@@ -27,6 +27,7 @@ import { execCapture, killStrayRunners, startRunnerExec, type RunnerExec } from 
 import { detectConflicts, diffConflicts } from "../conflicts.js";
 import { currentView } from "../snapshot.js";
 import { agentUser, wtrGroup } from "../room-fs.js";
+import { RpcHost } from "../rpc.js";
 import {
   ensureRuntimeRows,
   forceStopped,
@@ -106,6 +107,8 @@ interface AgentHandle {
   interruptedMessageId: string | null;
   /** Sert kesme sayacı: 30 sn'de kapanmayan turn için. */
   hardKillTimer: NodeJS.Timeout | null;
+  /** Bu agent'ın RPC'leri (Hafta 8, Adım 4); kimlik bu handle'dan. */
+  rpc: RpcHost;
 }
 
 /**
@@ -516,6 +519,17 @@ export class AgentManager {
       readyReject: null,
       interruptedMessageId: null,
       hardKillTimer: null,
+      rpc: new RpcHost({
+        roomId,
+        agentName,
+        currentMessageId: async () => {
+          const rt = await getRuntime(roomId, agentName, this.pool);
+          return rt?.status === "busy" ? rt.currentMessageId : null;
+        },
+        send: (r) => exec.send({ kind: "rpc_result", ...r }),
+        pool: this.pool,
+        log: (level, msg) => this.opts.log(level, `[${agentName}] ${msg}`),
+      }),
     };
     // Önceki çökme sayacını taşı.
     handle.restartTimes = this.previousRestarts.get(this.key(roomId, agentName)) ?? [];
@@ -755,6 +769,18 @@ export class AgentManager {
       }
       case "log":
         this.opts.log(output.level, `[${handle.agent.name}] ${output.msg}`);
+        return;
+
+      /*
+       * RPC (Hafta 8, Adım 4) — BEKLENMEZ.
+       *
+       * Zincirde BAŞLAR: kendinden önce gelen satırlar yazılmış olur, yani
+       * `journal.write`'ın `touched`'ı bu turn'ün az önceki `file.changed`'ini
+       * görür. Ama zinciri TUTMAZ: 10 sn'ye kadar sürebilen bir DB yazımı
+       * arkadaki event'leri bekletmesin. Sınır ve zaman aşımı `RpcHost`'ta.
+       */
+      case "rpc":
+        void handle.rpc.handle(output);
         return;
 
       /*

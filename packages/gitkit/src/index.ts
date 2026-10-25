@@ -4,3 +4,4 @@ export * from "./checkpoint.js";
 export * from "./diff.js";
 export * from "./publisher.js";
 export * from "./contracts.js";
+export * from "./rpc-bridge.js";

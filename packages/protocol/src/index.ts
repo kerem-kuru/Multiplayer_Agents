@@ -34,4 +34,8 @@ export * from "./journal.js";
  * modeller (3 Ekim). Gemini CLI `-m` ile istenen flash modelini sessizce kendi
  * varsayilanina ceviriyordu; `turn.started.model` istenen modeli yaziyordu.
  */
-export const PROTOCOL_VERSION = 8;
+/**
+ * 9: runner RPC kanalı — `rpc` çıktısı ve `rpc_result` komutu (Hafta 8, Adım 4,
+ * 26 Ekim). Bayat imaj `rpc_result`'ı ayrıştıramaz ve defter tool'ları asılı kalırdı.
+ */
+export const PROTOCOL_VERSION = 9;

@@ -1250,6 +1250,30 @@ Ek olarak `touched` depo-göreli ve sıralı geliyor: `file.changed` oda-göreli
 kural daha var: `readJournalState`, event'lerin `applyJournalWrite` ile katlanmasının **birebir
 aynısını** veriyor. Kararların sırası sahip adı (`COLLATE "C"`), sürüm ve sıra ile sabit.
 
+### Adım 4: runner RPC kanalı ve soket köprüsü (26 Ekim)
+
+Runner `rpc { id, method, params }` yazar, host `rpc_result { id, ok, data?, error? }` döner
+(`PROTOCOL_VERSION` 9). Host tarafı `packages/core/src/rpc.ts` (`RpcHost`, agent başına bir tane),
+runner tarafı `packages/gitkit/src/rpc-bridge.ts` (`RpcBridge`, iki runtime ortak; `gitkit` zaten
+runner'ların ortak kütüphanesi: `DiffPublisher`, `ContractsWatcher`).
+
+**Soket köprüsü (Kerem onayı, 26 Ekim).** Adım 5'teki MCP süreci runner'ın değil koşum ortamının
+(Gemini CLI / Claude SDK) çocuğu, runner'ın stdin/stdout'una erişemez. Runner `ready`'den önce agent'ın
+HOME'unda bir Unix soketi açar (`/home/agents/<ad>/.rooms/rpc.sock`, soket 0600, dizin 0700, sahibi agent)
+ve yolunu `ROOMS_RPC_SOCKET`'e yazar; çocuk süreçler ortamı devralır. Soketten gelen istek host'a yeni bir
+id ile gider (aynı anda bağlanan iki istemci aynı id'yi kullanabilir), cevap istemcinin id'siyle döner.
+
+| Kural | Nasıl |
+| --- | --- |
+| Kimlik host'un | `RpcHost` kimliği runner'ın hattından alır, `params`'tan hiç okumaz. `params.agent` host alanı olarak atılır; `agentName`/`roomId` gibi şemada olmayan anahtarlar `.strict()` yüzünden reddedilir (testte ikisi de) |
+| `ok: false` = taşıma hatası | Bilinmeyen method (prototip adları dahil), zaman aşımı, sınır, handler istisnası. Defterin doğrulama reddi bir **sonuç**: `ok: true, data: { accepted: false, status, fields, message }` — Adım 5 `journal.rejected`'ı ve öğretici metni bundan kurar |
+| Zaman aşımı 10 sn | Cevap hemen gider, handler durdurulmaz (transaction yarıda kesilemez) ve bitene kadar sınırdan düşmez. Bedeli: zaman aşımından sonra yazım olmuş olabilir; Adım 5'in hata metni "sonuç bilinmiyor, `read_journal` ile bak" demeli. Runner'ın kendi zaman aşımı 11 sn: host'un cevabı yetişsin, runner yalnızca host hiç dönmezse keser |
+| En fazla 8 açık RPC | Agent başına; 9. istek beklemez, hemen hata alır |
+| Zincirde başlar, zinciri tutmaz | `rpc` satırı kendinden önceki satırlar yazıldıktan sonra işlenir (`touched` az önceki `file.changed`'i görür) ama arkadaki event'leri bekletmez |
+| `messageId` | Runtime `busy` ise koşan turn'ün mesajı, değilse null |
+| Log'a yazılmaz | `journal.read` iz bırakmaz; yazım yalnızca `journal.entry_written` |
+| Soket açılamazsa | Runner yine kalkar, `error` log'u: "defter tool'ları çalışmayacak" |
+
 ### Adım 5: tek stdio MCP sunucusu (24 Ekim, karar)
 
 Görev tanımı `read_journal` / `write_summary`'yi Claude SDK'nın in-process MCP sunucusu olarak

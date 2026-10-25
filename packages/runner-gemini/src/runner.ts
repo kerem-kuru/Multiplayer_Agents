@@ -3,7 +3,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
-import { ContractsWatcher, DiffPublisher } from "@agent-rooms/gitkit";
+import { ContractsWatcher, DiffPublisher, startRpcBridge } from "@agent-rooms/gitkit";
 import type { NewRoomEvent } from "@agent-rooms/protocol";
 import {
   AgentConfig,
@@ -582,11 +582,18 @@ const writeContextFile = (): void => {
 
 writeContextFile();
 
+/** RPC köprüsü (Hafta 8, Adım 4) — gerekçe packages/runner/src/runner.ts ile aynı. */
+const rpc = await startRpcBridge({
+  send: (o) => out(o),
+  log: (level, msg) => out({ kind: "log", level, msg }),
+});
+
 out({ kind: "ready", pid: process.pid, protocolVersion: PROTOCOL_VERSION });
 setInterval(() => out({ kind: "heartbeat", busy }), 5_000);
 
 const shutdown = (): void => {
   if (child) killTree(child, "SIGTERM");
+  void rpc?.close();
   setTimeout(() => process.exit(0), 3_000);
 };
 
@@ -598,6 +605,12 @@ rl.on("line", (line: string) => {
     cmd = RunnerCommand.parse(JSON.parse(line));
   } catch (err) {
     out({ kind: "log", level: "error", msg: `komut ayrıştırılamadı: ${String(err)}` });
+    return;
+  }
+
+  // Turn'den bağımsız: meşgul kontrolünün ÖNÜNDE.
+  if (cmd.kind === "rpc_result") {
+    rpc?.onResult(cmd);
     return;
   }
 

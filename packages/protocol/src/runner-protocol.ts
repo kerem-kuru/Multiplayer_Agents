@@ -48,6 +48,14 @@ export const RunnerCommand = z.discriminatedUnion("kind", [
     treeSha: z.string().min(1),
   }),
   z.object({ kind: z.literal("shutdown") }),
+  /** Runner'ın `rpc` isteğinin cevabı (Hafta 8, Adım 4). Bkz. `RpcResponse`. */
+  z.object({
+    kind: z.literal("rpc_result"),
+    id: z.string().min(1).max(64),
+    ok: z.boolean(),
+    data: z.unknown().optional(),
+    error: z.string().optional(),
+  }),
 ]);
 export type RunnerCommand = z.infer<typeof RunnerCommand>;
 
@@ -97,9 +105,22 @@ export const RunnerOutput = z.discriminatedUnion("kind", [
     /** "<sahip>:<grup> <mod>" — ornegin "agent-frontend:wtr-frontend 777". */
     actual: z.string().min(1),
   }),
+  /**
+   * Host'a soru (Hafta 8, Adım 4). Cevap `rpc_result` komutuyla, aynı `id` ile.
+   *
+   * Kimlik TAŞIMAZ: host isteğin hangi runner'ın hattından geldiğini bilir.
+   * `params` içinde bir agent adı olsa da yok sayılır.
+   */
+  z.object({
+    kind: z.literal("rpc"),
+    id: z.string().min(1).max(64),
+    method: z.string().min(1).max(64),
+    params: z.unknown(),
+  }),
 ]);
 export type RunnerOutput =
   | { kind: "ready"; pid: number; protocolVersion?: number }
+  | { kind: "rpc"; id: string; method: string; params: unknown }
   | { kind: "heartbeat"; busy: boolean }
   | { kind: "event"; event: NewRoomEvent }
   | { kind: "isolation_drift"; path: string; actual: string }
@@ -143,3 +164,57 @@ export const RunnerEnv = z.object({
   DIFF_BASE_TREE: z.string().optional(),
 });
 export type RunnerEnv = z.infer<typeof RunnerEnv>;
+
+/**
+ * RPC kanalı — Hafta 8, Adım 4.
+ *
+ * Agent'ın defter tool'ları (Adım 5) container içinde ayrı bir stdio MCP
+ * sürecinde koşar; onu runner değil koşum ortamı (Gemini CLI / Claude SDK)
+ * başlatır, yani runner'ın stdin/stdout'una erişemez. Yol:
+ *
+ *   MCP süreci ──Unix soketi──▶ runner ──`rpc`──▶ host ──▶ core
+ *              ◀──────────────        ◀─`rpc_result`─
+ *
+ * Soket agent'ın HOME'unda (`/home/agents/<ad>`, 0700) ve kendisi 0600:
+ * yalnızca o agent'ın kullanıcısı bağlanabilir. Kimlik soketten de
+ * GELMEZ — host runner'ın hattından bilir.
+ *
+ * Soket üzerindeki biçim de NDJSON: istemci `RpcRequest` yazar, runner aynı
+ * `id` ile `RpcResponse` döner. `ok: false` yalnızca TAŞIMA hatası (bilinmeyen
+ * method, zaman aşımı, sınır, host hatası); defterin doğrulama reddi bir
+ * sonuçtur ve `data` içinde gelir.
+ */
+export const ROOMS_RPC_SOCKET_ENV = "ROOMS_RPC_SOCKET";
+/** Agent HOME'una göre soket yolu. */
+export const ROOMS_RPC_SOCKET_DIR = ".rooms";
+export const ROOMS_RPC_SOCKET_NAME = "rpc.sock";
+
+export const RPC_LIMITS = {
+  /** Host tarafı: aşılırsa `ok: false`. */
+  timeoutMs: 10_000,
+  /** Agent başına aynı anda açık RPC. Fazlası beklemez, hemen hata alır. */
+  maxOpen: 8,
+  /**
+   * Runner tarafı zaman aşımı host'unkinden biraz uzun: host'un kendi
+   * "zaman aşımı" cevabı yetişsin, runner ancak host hiç dönmezse keser.
+   */
+  runnerTimeoutMs: 11_000,
+} as const;
+
+export const RPC_METHODS = ["journal.read", "journal.write"] as const;
+export type RpcMethod = (typeof RPC_METHODS)[number];
+
+export const RpcRequest = z.object({
+  id: z.string().min(1).max(64),
+  method: z.string().min(1).max(64),
+  params: z.unknown(),
+});
+export type RpcRequest = z.infer<typeof RpcRequest>;
+
+export const RpcResponse = z.object({
+  id: z.string().min(1).max(64),
+  ok: z.boolean(),
+  data: z.unknown().optional(),
+  error: z.string().optional(),
+});
+export type RpcResponse = z.infer<typeof RpcResponse>;

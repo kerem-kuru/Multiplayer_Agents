@@ -24,6 +24,7 @@ export * from "./reviews.js";
 export * from "./docker/container.js";
 export * from "./room/journal.js";
 export * from "./journal.js";
+export * from "./rpc.js";
 export * from "./room/layout.js";
 export * from "./room/openRoom.js";
 export * from "./room/rooms.js";
