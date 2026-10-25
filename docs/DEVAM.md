@@ -12,6 +12,10 @@ altındaki bölümler (21 Ekim, 13 Ekim ve öncesi) kanıtları, gerekçeleri ve
   (2) **Adım 5 = tek stdio MCP sunucusu**, iki runtime da ona bağlanır (in-process DEĞİL); (3) kritik senaryo
   ücretli anahtarda en güçlü modelle, `JOURNAL_MODEL` ucuz modelde. Senaryo modeli adı yoklamayla seçilecek
   (pro hiç ölçülmedi) ve `turn.completed.models` istenen modeli göstermeli.
+- **26 Ekim karar (Kerem): `Downloads/HAFTA-8-GOREV (1).md` UYGULANMAYACAK.** O dosya 26 Ekim'de inen
+  revize sürüm (yuvarlama + `room_digests`, sürüm geçmişli `room_contracts`, `contract_changes`,
+  `supersedes_decisions`, sahiplik çakışmasında ret yerine `contract_ownership`, kapı 7a–7i). Bağlayıcı olan
+  21 Ekim sürümü (`HAFTA-8-GOREV.md`) + README "Hafta 8 kararları"; Adım 1–3 olduğu gibi kalıyor.
 - **Kapı kontrolleri 4 ve 13 yeniden tanımlandı** (README "Hafta 8 kararları" tablosu). `week8-gate.sh` yazılırken
   görev dokümanındaki değil README'deki hali uygulanır.
 - **Adım 3 bitti** (`packages/core/src/journal.ts`, 15 DB testi, 5 kez üst üste geçti; tam paket 557/557).
